@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Aiken build cache (artifacts — NOT plutus.json!)
+onchain/build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Debug
+npm-debug.log*
+
+
+scripts/stop-oracle-implemented.ts

@@ -1,0 +1,16 @@
+{
+  "name": "@membership-nft/offchain",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@meshsdk/core": "^1.9.0-beta.101",
+    "@meshsdk/core-cst": "^1.9.0-beta.101"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

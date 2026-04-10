@@ -1,0 +1,19 @@
+{
+  "name": "secret-number",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "offchain",
+    "frontend",
+    "scripts"
+  ],
+  "scripts": {
+    "dev": "npm -w frontend run dev",
+    "build": "npm -w frontend run build",
+    "deploy": "cd scripts && npm run deploy"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

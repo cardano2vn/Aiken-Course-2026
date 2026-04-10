@@ -1,0 +1,16 @@
+{
+  "name": "@secret-number/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "tsx deploy.ts"
+  },
+  "dependencies": {
+    "@secret-number/offchain": "file:../offchain",
+    "@meshsdk/core": "^1.9.0-beta.101",
+    "@meshsdk/wallet": "^1.9.0-beta.101",
+    "dotenv": "^17.2.2",
+    "tsx": "^4.20.5"
+  }
+}
+

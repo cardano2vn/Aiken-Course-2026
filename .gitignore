@@ -2,7 +2,6 @@
 # -----------------------------------------------------------------------------
 **/artifacts/
 **/build/
-**/docs/
 # we generally want to keep plutus.json as it's the build artifact for users
 
 # Node.js

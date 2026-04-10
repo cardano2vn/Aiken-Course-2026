@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #00FF00;
+  --color-brand-hover: #33FF33;
+  --color-brand-light: #66FF66;
+  --color-brand-subtle: rgba(0, 255, 0, 0.15);
+
+  --color-neutral-bg1: #18181B;
+  --color-neutral-bg2: hsl(240, 5%, 12%);
+  --color-neutral-bg3: hsl(240, 5%, 14%);
+  --color-neutral-bg4: hsl(240, 4%, 18%);
+  --color-neutral-bg5: hsl(240, 4%, 22%);
+  --color-neutral-bg6: hsl(240, 4%, 26%);
+
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #A1A1AA;
+  --color-text-muted: #71717A;
+
+  --color-border-subtle: hsla(0, 0%, 100%, 0.08);
+  --color-border-default: hsla(0, 0%, 100%, 0.12);
+  --color-border-strong: hsla(0, 0%, 100%, 0.20);
+  
+  --color-status-success: #10B981;
+  --color-status-warning: #F59E0B;
+  --color-status-error: #EF4444;
+  --color-status-info: #3B82F6;
+
+  --shadow-glow: 0 0 20px rgba(0, 255, 0, 0.3);
+  --shadow-glow-lg: 0 0 40px rgba(0, 255, 0, 0.4);
+
+  --animate-fade-in: fadeIn 0.3s ease-out;
+  --animate-slide-up: slideUp 0.3s ease-out;
+  --animate-slide-down: slideDown 0.3s ease-out;
+
+  @keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  @keyframes slideUp {
+    0% { opacity: 0; transform: translateY(10px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slideDown {
+    0% { opacity: 0; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* Base styles */
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-neutral-bg1 text-text-primary font-sans antialiased;
+  min-height: 100vh;
+}
+
+/* Focus styles */
+*:focus-visible {
+  @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-neutral-bg1;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-neutral-bg2;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-neutral-bg5 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-neutral-bg6;
+}
+
+/* Glass utility classes */
+@layer components {
+  .glass {
+    @apply backdrop-blur-md bg-white/5 border border-white/10;
+  }
+
+  .glass-card {
+    @apply backdrop-blur-md bg-white/5 border border-white/10 rounded-xl;
+  }
+
+  .glass-panel {
+    @apply backdrop-blur-lg bg-black/40 border border-white/5;
+  }
+
+  .glass-overlay {
+    @apply backdrop-blur-sm bg-black/60;
+  }
+
+  .glass-input {
+    @apply backdrop-blur-sm bg-white/5 border border-white/10 focus:border-brand focus:bg-white/10 text-white rounded-lg px-4 py-2 w-full outline-none;
+  }
+}

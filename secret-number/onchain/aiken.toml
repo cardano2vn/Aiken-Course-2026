@@ -1,0 +1,16 @@
+name = "tamhv/secret_number"
+version = "1.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Secret Number dApp: A game for guess exact a number"
+
+[repository]
+user = "tamhv"
+project = "secret-number"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2.0.0"
+source = "github"

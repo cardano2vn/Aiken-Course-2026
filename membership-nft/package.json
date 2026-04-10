@@ -1,0 +1,6 @@
+{
+  "name": "membership-nft",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["offchain", "frontend", "scripts"]
+}

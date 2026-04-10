@@ -1,0 +1,19 @@
+{
+  "name": "@membership-nft/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "setup": "npx tsx setup-oracle.ts",
+    "stop": "npx tsx stop-oracle.ts"
+  },
+  "dependencies": {
+    "@membership-nft/offchain": "file:../offchain",
+    "@meshsdk/core": "^1.9.0-beta.101",
+    "@meshsdk/core-cst": "^1.9.0-beta.101",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

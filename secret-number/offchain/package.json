@@ -1,0 +1,27 @@
+{
+  "name": "@secret-number/offchain",
+  "version": "1.0.0",
+  "description": "Offchain library for Secret Number dApp",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@meshsdk/core": "^1.9.0-beta.101",
+    "@meshsdk/core-cst": "^1.9.0-beta.101"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

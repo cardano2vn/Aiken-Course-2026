@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+offchain/node_modules/
+frontend/node_modules/
+
+# Environment
+.env
+frontend/.env
+scripts/.env
+
+# Build artifacts
+onchain/build/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+.agent
+
+# OS
+.DS_Store
+Thumbs.db
+
+offchain/src/decode_implemented.ts

@@ -1,0 +1,9 @@
+{
+  "name": "cardano-bet-dapp",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "offchain",
+    "frontend"
+  ]
+}
