@@ -85,9 +85,8 @@ Dưới đây là một số hướng nâng cấp để bạn tự thực hành 
 Giải pháp triệt để nhất là thay thế hoàn toàn bằng **Oracle** — một nguồn dữ liệu on-chain độc lập, không phụ thuộc vào bên thứ ba. Bạn hãy tìm hiểu về Oracle và thử áp dụng vào dự án này.
 Tuy nhiên, nếu vẫn giữ mô hình trọng tài con người, dưới đây là một hướng cải thiện đáng cân nhắc:
 
-- Hệ thống đảm nhận thêm vai trò là đơn vị giám sát và cấp **chứng chỉ trọng tài** - dưới dạng NFT. Chỉ những địa chỉ sở hữu NFT chứng chỉ này mới được công nhận là trọng tài hợp lệ và đủ tin cậy (hợp đồng `membership-nft` có thể ứng dụng để triển khai loại NFT này).
-- Khi tạo bet, thay vì đính kèm địa chỉ ví của trọng tài, hãy đính kèm `policy_id` và `token_name` của vị trọng tài mà bạn muốn chọn.
-- Trong giao dịch công bố kết quả, validator kiểm tra người ký có đang sở hữu NFT chứng chỉ hợp lệ hay không — thay vì kiểm tra địa chỉ ví cố định. 
+- Hệ thống đảm nhận thêm vai trò cấp **chứng chỉ trọng tài** - dưới dạng NFT. Chỉ những địa chỉ sở hữu NFT chứng chỉ này mới được công nhận là trọng tài hợp lệ và đủ tin cậy (hợp đồng `membership-nft` có thể ứng dụng để triển khai loại NFT này). Khi tạo bet, thay vì đính kèm địa chỉ ví của trọng tài, hãy đính kèm `policy_id` và `token_name` của vị trọng tài mà bạn muốn chọn. Trong giao dịch công bố kết quả, validator kiểm tra người ký có đang sở hữu NFT chứng chỉ hợp lệ hay không — thay vì kiểm tra địa chỉ ví cố định. 
+- Thêm cơ chế FORCE_REFUND cho phép người chơi lấy lại tiền cược sau khi bet hết hạn 1 khoảng thời gian nhất định (ví dụ: 2 ngày) mà trọng tài không công bố kết quả. Người chơi nào cũng có quyền tạo yêu cầu này, giao dịch trả về cho mỗi người chơi số tiền đặt cược ban đầu ( = 50% tổng quỹ cược).
 
 **3. Mở rộng cơ chế phí**
 
