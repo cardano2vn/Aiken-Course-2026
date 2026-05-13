@@ -1,0 +1,20 @@
+{
+  "name": "@cardano-stablecoin/offchain",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "exports": "./src/index.ts",
+  "private": true,
+  "dependencies": {
+    "@meshsdk/core": "^1.9.0-beta.102",
+    "@meshsdk/core-csl": "^1.9.0-beta.102",
+    "@meshsdk/core-cst": "^1.9.0-beta.102"
+  },
+  "devDependencies": {
+    "fast-check": "^4.7.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.5.0"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build outputs
+/dist/
+/.next/
+/out/
+/build/
+
+# Environment variables
+.env
+
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Aiken
+onchain/build/
+
+# Temporary files
+/tmp/
+*.log
