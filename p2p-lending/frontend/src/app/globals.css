@@ -1,0 +1,191 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+/* ============================================================
+   Brand Variables — Premium Neural Dark Mode
+   Ref: .agents/skills/brand-guidelines/SKILL_BrandGuidelines.md
+   ============================================================ */
+:root {
+  --color-bg: #080f0a;
+  --color-accent: #11d442;
+  --color-accent-dim: rgba(17, 212, 66, 0.2);
+  --color-accent-faint: rgba(17, 212, 66, 0.03);
+  --color-accent-border: rgba(17, 212, 66, 0.1);
+  --color-accent-neon: rgba(17, 212, 66, 0.4);
+  --color-heading: #f1f5f9;
+  --color-body: #94a3b8;
+  --font-main: "Space Grotesk", sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-body);
+  --font-sans: var(--font-main);
+}
+
+/* Global */
+* {
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-bg);
+  }
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-body);
+  font-family: var(--font-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Glass card component */
+.glass-card {
+  background: var(--color-accent-faint);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-accent-border);
+  border-radius: 16px;
+}
+
+.glass-card-neon {
+  background: var(--color-accent-faint);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-accent-neon);
+  box-shadow: 0 0 20px rgba(17, 212, 66, 0.15);
+  border-radius: 16px;
+}
+
+/* Primary button */
+.btn-primary {
+  background-color: var(--color-accent);
+  color: var(--color-bg);
+  font-weight: 700;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  box-shadow: 0 10px 15px -3px rgba(17, 212, 66, 0.2);
+  cursor: pointer;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Glass button */
+.btn-glass {
+  background: var(--color-accent-faint);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(17, 212, 66, 0.2);
+  color: var(--color-heading);
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-glass:hover:not(:disabled) {
+  border-color: var(--color-accent-neon);
+  box-shadow: 0 0 12px rgba(17, 212, 66, 0.2);
+}
+
+.btn-glass:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Gradient heading */
+.heading-gradient {
+  background: linear-gradient(to bottom, #f1f5f9 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Neon glow effect */
+.glow-orb {
+  background: var(--color-accent-dim);
+  filter: blur(120px);
+  border-radius: 50%;
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Input field */
+.input-field {
+  background: rgba(17, 212, 66, 0.03);
+  border: 1px solid var(--color-accent-border);
+  border-radius: 8px;
+  color: var(--color-heading);
+  font-family: var(--font-main);
+  transition: border-color 0.2s;
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  outline: none;
+}
+
+.input-field:focus {
+  border-color: var(--color-accent-neon);
+  box-shadow: 0 0 0 2px rgba(17, 212, 66, 0.1);
+}
+
+.input-field::placeholder {
+  color: var(--color-body);
+  opacity: 0.6;
+}
+
+/* Label */
+.field-label {
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 6px;
+}
+
+/* Status badge */
+.badge-pending {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 10px;
+}
+
+.badge-active {
+  background: rgba(17, 212, 66, 0.1);
+  color: var(--color-accent);
+  border: 1px solid rgba(17, 212, 66, 0.3);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-accent-border);
+  border-radius: 2px;
+}
