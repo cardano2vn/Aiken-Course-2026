@@ -12,14 +12,14 @@ Dưới đây là danh sách 12 dự án mục tiêu của khóa học. Các d�
 2. [x] **[Swap](./Swap)** - Hợp đồng hoán đổi tài sản (Atomic Swap) giữa hai bên.
 3. [x] **[Vesting](./vesting-v2)** - Hợp đồng khóa tài sản theo thời gian (Time-lock) dành cho các quỹ hoặc nhân viên.
 4. [ ] **Membership NFT Minting** - Đúc NFT thành viên với các quyền hạn đặc biệt.
-5. [ ] **Multisig Treasury** - Quản lý quỹ chung với chữ ký đa phương.
+5. [x] **Multisig Treasury** - Quản lý quỹ chung với chữ ký đa phương.
 6. [x] **[Marketplace](./marketplace)** - Sàn giao dịch NFT/Native Assets hỗ trợ phí sàn (fee percentage).
 7. [ ] **Bet** - Hợp đồng cá cược phi tập trung dựa trên Oracle.
-8. [ ] **Peer-to-peer Lending** - Nền tảng vay và cho vay ngang hàng.
+8. [x] **Peer-to-peer Lending** - Nền tảng vay và cho vay ngang hàng.
 9. [ ] **Stable Coin** - Xây dựng cơ chế ổn định giá trị tài sản.
-10. [ ] **Crowdfund** - Gọi vốn cộng đồng phi tập trung.
+10. [x] **Crowdfund** - Gọi vốn cộng đồng phi tập trung.
 11. [ ] **Auction** - Sàn đấu giá On-chain công khai.
-12. [ ] **CIP68 Minting** - Đúc token theo tiêu chuẩn Metadata mới (Reference Assets).
+12. [x] **CIP68 Minting** - Đúc token theo tiêu chuẩn Metadata mới (Reference Assets).
 
 ---
 
