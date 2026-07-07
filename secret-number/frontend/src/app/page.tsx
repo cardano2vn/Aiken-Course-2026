@@ -16,7 +16,7 @@ import {
   REWARD_AMOUNT_ADA,
   MIN_SECRET,
   MAX_SECRET,
-  getGameContractUtxo,
+  getGameUtxo,
   buildGuessTransaction,
   decodeDatum,
 } from "@secret-number/offchain";
@@ -46,7 +46,7 @@ export default function Home() {
   const [txHash, setTxHash] = useState<string>("");
   const [txError, setTxError] = useState<string>("");
 
-  // Tự tạo Provider tĩnh từ biến môi trường
+  // Khởi tạo Blockfrost Provider từ API key
   const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
   const provider = useMemo(() => {
     return apiKey ? new BlockfrostProvider(apiKey) : null;
@@ -61,7 +61,7 @@ export default function Home() {
     }
     setIsLoadingGame(true);
     try {
-      const utxo = await getGameContractUtxo(provider, SCRIPT_ADDRESS);
+      const utxo = await getGameUtxo(provider, SCRIPT_ADDRESS);
       if (utxo) {
         setGameUtxo(utxo);
         // Tính số dư ADA hiện tại
@@ -167,9 +167,9 @@ export default function Home() {
       // Bước 4: Chờ xác nhận (Confirming)
       setTxStatus("confirming");
 
-      // Polling để kiểm tra xác nhận (mỗi 5 giây, tối đa 600 giây)
+      // Polling để kiểm tra xác nhận (mỗi 5 giây, tối đa 150 giây)
       let confirmed = false;
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         try {
           const txInfo = await provider.fetchTxInfo(hash);
@@ -227,7 +227,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-neutral-bg1 flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background glow effect */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-150 h-150 bg-brand/5 rounded-full blur-3xl pointer-events-none" />
 
       <motion.div
         className="w-full max-w-lg z-10 space-y-6"

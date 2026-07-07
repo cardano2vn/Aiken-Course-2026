@@ -21,11 +21,11 @@ export async function buildGuessTransaction(
     guess: number,
     newSecret: number
 ) {
-    // 1. Dữ liệu Redeemer — theo cấu trúc Aiken: type Redeemer { guess: Int }
-    const redeemerData = mConStr0([BigInt(guess)]);
+    // 1. Dữ liệu Redeemer — theo cấu trúc Aiken: type MyRedeemer { guess: Int }
+    const redeemerData = mConStr0([guess]);
 
-    // 2. Dữ liệu New Datum — theo cấu trúc Aiken: type Datum { secret: Int }
-    const newDatumData = mConStr0([BigInt(newSecret)]);
+    // 2. Dữ liệu New Datum — theo cấu trúc Aiken: type MyDatum { secret: Int }
+    const newDatumData = mConStr0([newSecret]);
 
     // Tính toán số lượng ADA trả lại về Smart Contract (Output Value)
     const lovelaceAsset = scriptUtxo.output.amount.find((a: Asset) => a.unit === "lovelace");

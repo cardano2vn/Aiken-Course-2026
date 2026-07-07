@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { BrowserWallet } from '@meshsdk/wallet';
+import { BrowserWallet } from '@meshsdk/core';
 
 interface WalletConnectProps {
   wallet: BrowserWallet | null;
@@ -93,7 +93,7 @@ export default function WalletConnect({
       <p className="text-xs text-text-muted uppercase tracking-wider mb-3">Connect Your Wallet</p>
       {installedWallets.length === 0 ? (
         <p className="text-sm text-text-secondary">
-          No wallet extensions found. Install Nami, Eternl, or Lace.
+          No wallet extensions found. Install Eternl, or Lace ...
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">

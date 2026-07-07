@@ -10,7 +10,8 @@ scripts/.env
 
 # Build artifacts
 onchain/build/
-frontend/dist/
+offchain/dist/
+frontend/.next/
 
 # IDE
 .vscode/
@@ -22,3 +23,4 @@ frontend/dist/
 Thumbs.db
 
 offchain/src/decode_implemented.ts
+docs/video_resources/

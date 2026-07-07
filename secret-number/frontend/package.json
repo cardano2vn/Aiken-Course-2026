@@ -9,8 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@meshsdk/core": "^1.9.0-beta.101",
-    "@meshsdk/wallet": "^1.9.0-beta.101",
+    "@meshsdk/core": "^1.9.1",
     "@secret-number/offchain": "file:../offchain",
     "framer-motion": "^12.36.0",
     "next": "16.1.6",
