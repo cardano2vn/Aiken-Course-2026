@@ -32,8 +32,6 @@ export default function Page() {
         enabled: !!address,
     });
 
-    console.log(data)
-
     if (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load tippers");
         return (
@@ -44,7 +42,7 @@ export default function Page() {
                 transition={{ duration: 0.5, ease: "easeOut" }}
             >
                 <motion.div
-                    className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
+                    className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-linear-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
                     animate={{ rotate: [0, 10, -10, 0] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                 >
@@ -92,7 +90,7 @@ export default function Page() {
 
     return (
         <motion.main
-            className="relative pt-20 min-h-screen bg-slate-950"
+            className="relative min-h-screen bg-transparent pt-20"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5 }}
@@ -144,7 +142,7 @@ export default function Page() {
                             transition={{ duration: 0.5, ease: "easeOut" }}
                         >
                             <motion.div
-                                className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
+                                className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-linear-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
                                 animate={{ rotate: [0, 10, -10, 0] }}
                                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                             >
@@ -202,7 +200,7 @@ export default function Page() {
                             {data.data.map((result, index: number) => (
                                 <motion.div
                                     key={index}
-                                    className="rounded-xl border border-blue-100 bg-white shadow-lg dark:border-blue-900/30 dark:bg-slate-900/80"
+                                    className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 shadow-[0_18px_60px_-25px_rgba(15,23,42,0.35)] dark:border-slate-800 dark:bg-slate-900/80"
                                     variants={{
                                         hidden: { opacity: 0, y: 20 },
                                         visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
