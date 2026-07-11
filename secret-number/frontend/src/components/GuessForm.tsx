@@ -15,43 +15,39 @@ export default function GuessForm({ onSubmit, disabled, isTreasuryLow }: GuessFo
   const [guessError, setGuessError] = useState('');
   const [secretError, setSecretError] = useState('');
 
-  // Hàm kiểm tra ô nhập có phải là số nguyên hay không (Validation)
-  const validateInteger = (value: string): { valid: boolean; num: number } => {
-    if (value.trim() === '') return { valid: false, num: 0 };
-    const num = Number(value);
-    if (!Number.isInteger(num)) return { valid: false, num: 0 };
-    return { valid: true, num };
+  const validateInput = (value: string, setError: (msg: string) => void): number | null => {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      setError('Phải là số nguyên hợp lệ');
+      return null;
+    }
+
+    const num = Number(trimmed);
+    if (!Number.isInteger(num)) {
+      setError('Phải là số nguyên hợp lệ');
+      return null;
+    }
+
+    if (!(num >= MIN_SECRET && num <= MAX_SECRET)) {
+      setError(`Phải nằm trong khoảng ${MIN_SECRET.toLocaleString('en-US')} đến ${MAX_SECRET.toLocaleString('en-US')}`);
+      return null;
+    }
+
+    setError('');
+    return num;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate "Your Guess" — phải là số nguyên dương trong [MIN_SECRET, MAX_SECRET]
-    const guessResult = validateInteger(guessInput);
-    if (!guessResult.valid) {
-      setGuessError('Phải là số nguyên hợp lệ');
-      return;
-    }
-    if (!(guessResult.num >= MIN_SECRET && guessResult.num <= MAX_SECRET)) {
-      setGuessError(`Phải nằm trong khoảng ${MIN_SECRET.toLocaleString('en-US')} đến ${MAX_SECRET.toLocaleString('en-US')}`);
-      return;
-    }
-    setGuessError('');
+    const guessValue = validateInput(guessInput, setGuessError);
+    const secretValue = validateInput(newSecretInput, setSecretError);
 
-    // Validate "New Secret Number"
-    const secretResult = validateInteger(newSecretInput);
-    if (!secretResult.valid) {
-      setSecretError('Phải là số nguyên hợp lệ');
+    if (guessValue === null || secretValue === null) {
       return;
     }
-    if (!(secretResult.num >= MIN_SECRET && secretResult.num <= MAX_SECRET)) {
-      setSecretError(`Phải nằm trong khoảng ${MIN_SECRET.toLocaleString('en-US')} đến ${MAX_SECRET.toLocaleString('en-US')}`);
-      return;
-    }
-    setSecretError('');
 
-    // Gửi giao dịch
-    onSubmit(guessResult.num, secretResult.num);
+    onSubmit(guessValue, secretValue);
   };
 
   return (

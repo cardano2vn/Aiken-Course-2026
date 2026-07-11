@@ -9,7 +9,7 @@ Dự án này là một monorepo bao gồm 4 thành phần chính:
 - `onchain/`: Chứa mã nguồn Smart Contract được viết bằng ngôn ngữ **[Aiken](https://aiken-lang.org/)**. Script sẽ kiểm tra xem người chơi có đoán đúng số hay không, và giới hạn số tiền rút ra.
 - `offchain/`: Thư viện xử lý giao dịch TypeScript sử dụng **[MeshJS](https://meshjs.dev/)**. Đảm nhiệm việc tạo giao dịch và truy vấn dữ liệu trên mạng lưới Cardano.
 - `frontend/`: Giao diện người dùng Web3 hiện đại được xây dựng bằng **Next.js**, **Tailwind CSS**, và **Framer Motion**.
-- `scripts/`: Chứa script triển khai (`deploy.ts`) để khởi tạo UTxO Treasury ban đầu trên mạng.
+- `scripts/`: Chứa script triển khai (`deploy.ts`) để khởi tạo Game UTxO ban đầu trên mạng.
 
 ## 🚀 Hướng dẫn Cài đặt & Chạy dApp
 
@@ -75,6 +75,6 @@ Dự án này được thiết kế như một công cụ học tập. Trong mã
 - Mở file `offchain/src/decode.ts` và implement hàm `decodeDatum()` để chuyển đổi Raw CBOR Hex từ UTxO thành số nguyên Secret Number.
 
 ---
-*Dự án này được xây dựng như một bản demo phục vụ cho khóa học lập trình Cardano. Vui lòng cân nhắc kỹ trước khi sử dụng trong môi trường production.*
+*Dự án này được xây dựng như một bản demo phục vụ cho khóa học lập trình Cardano. Vui lòng cân nhắc kỹ trước khi sử dụng trên môi trường production.*
 
 *Happy Coding! 🚀*

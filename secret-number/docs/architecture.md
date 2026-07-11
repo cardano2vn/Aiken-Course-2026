@@ -10,7 +10,7 @@ graph TD
     classDef offchain fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000;
     classDef onchain fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000;
 
-    subgraph User["Người dùng"]
+    subgraph User["Ví người dùng"]
         Browser["Ví CIP-30 (Eternl, Lace)"]
     end
 
@@ -27,7 +27,7 @@ graph TD
 
     subgraph Onchain["Lớp Hợp đồng Thông minh"]
         Validator["Secret Number Validator"]:::onchain
-        Treasury["Treasury UTxO (Quỹ thưởng)"]:::onchain
+        Treasury["Game UTxO (Quỹ thưởng)"]:::onchain
     end
 
     Browser <--> WalletConn
