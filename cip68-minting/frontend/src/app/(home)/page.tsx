@@ -8,10 +8,10 @@ import { images } from "@/public/images";
 
 export default function Page() {
     return (
-        <main>
+        <main className="relative overflow-hidden">
             <motion.section
                 id="Landing"
-                className="relative flex min-h-screen items-center overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950"
+                className="relative flex min-h-[calc(100vh-6rem)] items-center overflow-hidden bg-transparent px-2 py-16 sm:px-0 sm:py-20"
                 initial="hidden"
                 animate="visible"
                 variants={{
@@ -48,12 +48,14 @@ export default function Page() {
                                 }}
                                 className="relative"
                             >
-                                <h1 className="mb-10 text-5xl font-bold lg:text-8xl">
-                                    <span className="block tracking-tight text-gray-900 dark:text-white">Dynamic NFT</span>
-                                    <span className="block bg-gradient-to-r from-blue-600 to-cyan-500 dark:from-blue-400 dark:to-cyan-300 bg-clip-text tracking-tight text-gray-900 dark:text-transparent drop-shadow-lg">
-                                        CIP-68
-                                    </span>
-                                    <span className="mt-4 block text-2xl font-normal text-gray-600 dark:text-gray-300 lg:text-4xl">
+                                <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 text-sm font-medium text-slate-600 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                                    CIP-68 metadata, reimagined for modern creators
+                                </div>
+                                <h1 className="mb-10 text-5xl font-semibold tracking-tight text-slate-900 dark:text-white lg:text-8xl">
+                                    <span className="block">Dynamic NFT</span>
+                                    <span className="block bg-linear-to-r from-blue-600 to-violet-500 bg-clip-text text-transparent">CIP-68</span>
+                                    <span className="mt-4 block text-2xl font-normal text-slate-600 dark:text-slate-300 lg:text-4xl">
                                         Built on Cardano Blockchain
                                     </span>
                                 </h1>
@@ -104,17 +106,17 @@ export default function Page() {
                                             },
                                         },
                                     }}
-                                    className="flex flex-col gap-6 sm:flex-row"
+                                    className="flex flex-col gap-4 sm:flex-row"
                                 >
                                     <Link
-                                        href={routers.home}
-                                        className="inline-flex items-center justify-center whitespace-nowrap rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:text-success text-xl bg-blue-600 dark:bg-white px-8 py-4 font-semibold text-white dark:text-blue-900 shadow-xl hover:bg-blue-700 dark:hover:bg-gray-100"
+                                        href={routers.dashboard}
+                                        className="inline-flex items-center justify-center rounded-full bg-slate-900 px-7 py-3.5 text-base font-semibold text-white shadow-lg shadow-slate-900/15 transition hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
                                     >
                                         Open Metadata Dashboard
                                     </Link>
                                     <Link
                                         href={routers.documentation}
-                                        className="inline-flex items-center justify-center whitespace-nowrap rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-white/50 px-8 py-4 text-lg font-semibold text-gray-900 dark:text-white shadow-lg hover:bg-gray-200 dark:hover:bg-gray-700"
+                                        className="inline-flex items-center justify-center rounded-full border border-slate-200/80 bg-white/80 px-7 py-3.5 text-base font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-800"
                                     >
                                         How CIP-68 Works
                                     </Link>
@@ -146,9 +148,9 @@ export default function Page() {
                                                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                                                 style={{ backgroundImage: `url(${images.home1.src})` }}
                                             ></div>
-                                            <div className="absolute inset-0 bg-gradient-to-t from-blue-900/80 via-blue-800/40 to-transparent"></div>
+                                            <div className="absolute inset-0 bg-linear-to-t from-blue-900/80 via-blue-800/40 to-transparent"></div>
                                             <div className="relative flex h-full flex-col justify-end p-4">
-                                                <div className="mb-3 h-8 w-full bg-gradient-to-r from-blue-500/20 to-transparent"></div>
+                                                <div className="mb-3 h-8 w-full bg-linear-to-r from-blue-500/20 to-transparent"></div>
                                                 <div className="space-y-1">
                                                     <div className="h-1.5 w-2/3 bg-gray-300 dark:bg-white/20"></div>
                                                     <div className="h-1.5 w-1/2 bg-gray-200 dark:bg-white/10"></div>
@@ -165,9 +167,9 @@ export default function Page() {
                                                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                                                 style={{ backgroundImage: `url(${images.home2.src})` }}
                                             ></div>
-                                            <div className="absolute inset-0 bg-gradient-to-t from-cyan-900/80 via-cyan-800/40 to-transparent"></div>
+                                            <div className="absolute inset-0 bg-linear-to-t from-cyan-900/80 via-cyan-800/40 to-transparent"></div>
                                             <div className="relative flex h-full flex-col justify-end p-4">
-                                                <div className="mb-3 h-12 w-full bg-gradient-to-r from-cyan-500/20 to-transparent"></div>
+                                                <div className="mb-3 h-12 w-full bg-linear-to-r from-cyan-500/20 to-transparent"></div>
                                                 <div className="space-y-2">
                                                     <div className="h-1.5 w-2/3 bg-gray-300 dark:bg-white/20"></div>
                                                     <div className="h-1.5 w-3/4 bg-gray-200 dark:bg-white/10"></div>
@@ -184,9 +186,9 @@ export default function Page() {
                                                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                                                 style={{ backgroundImage: `url(${images.home3.src})` }}
                                             ></div>
-                                            <div className="absolute inset-0 bg-gradient-to-t from-purple-900/80 via-purple-800/40 to-transparent"></div>
+                                            <div className="absolute inset-0 bg-linear-to-t from-purple-900/80 via-purple-800/40 to-transparent"></div>
                                             <div className="relative flex h-full flex-col justify-end p-4">
-                                                <div className="mb-3 h-12 w-full bg-gradient-to-r from-purple-500/20 to-transparent"></div>
+                                                <div className="mb-3 h-12 w-full bg-linear-to-r from-purple-500/20 to-transparent"></div>
                                                 <div className="space-y-2">
                                                     <div className="h-1.5 w-1/2 bg-gray-300 dark:bg-white/20"></div>
                                                     <div className="h-1.5 w-2/3 bg-gray-200 dark:bg-white/10"></div>
@@ -203,9 +205,9 @@ export default function Page() {
                                                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                                                 style={{ backgroundImage: `url(${images.home4.src})` }}
                                             ></div>
-                                            <div className="absolute inset-0 bg-gradient-to-t from-green-900/80 via-green-800/40 to-transparent"></div>
+                                            <div className="absolute inset-0 bg-linear-to-t from-green-900/80 via-green-800/40 to-transparent"></div>
                                             <div className="relative flex h-full flex-col justify-end p-4">
-                                                <div className="mb-3 h-10 w-full bg-gradient-to-r from-green-500/20 to-transparent"></div>
+                                                <div className="mb-3 h-10 w-full bg-linear-to-r from-green-500/20 to-transparent"></div>
                                                 <div className="space-y-1">
                                                     <div className="h-1.5 w-3/5 bg-gray-300 dark:bg-white/20"></div>
                                                     <div className="h-1.5 w-4/5 bg-gray-200 dark:bg-white/10"></div>
@@ -253,7 +255,7 @@ export default function Page() {
                             className="mb-8"
                         >
                             <div className="mb-4 flex items-center gap-4">
-                                <div className="h-1 w-12 bg-gradient-to-r from-purple-500 to-transparent"></div>
+                                <div className="h-1 w-12 bg-linear-to-r from-purple-500 to-transparent"></div>
                                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white lg:text-4xl">Core Principles of CIP-68 Metadata</h2>
                             </div>
                             <p className="max-w-3xl text-lg text-gray-600 dark:text-gray-300">
@@ -263,7 +265,7 @@ export default function Page() {
                         </motion.header>
 
                         <div className="relative">
-                            <div className="absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 transform bg-gradient-to-b from-purple-500 via-blue-500 to-green-500"></div>
+                            <div className="absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2 transform bg-linear-to-b from-purple-500 via-blue-500 to-green-500"></div>
                             <div className="space-y-8 lg:space-y-12">
                                 <motion.div
                                     variants={{
@@ -282,10 +284,10 @@ export default function Page() {
                                     <div className="flex flex-col items-center justify-between lg:flex-row">
                                         <div className="w-full pr-0 lg:w-5/12 lg:pr-8">
                                             <div className="group relative">
-                                                <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-purple-400/20 dark:from-purple-500/30 to-purple-500/20 dark:to-purple-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
+                                                <div className="absolute -inset-1 rounded-2xl bg-linear-to-r from-purple-400/20 dark:from-purple-500/30 to-purple-500/20 dark:to-purple-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
                                                 <div className="relative rounded-2xl border border-gray-200 dark:border-white/20 bg-white dark:bg-gray-800/60 p-6 shadow-2xl backdrop-blur-sm">
                                                     <div className="mb-4 flex items-center gap-4">
-                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-gradient-to-br from-purple-400 dark:from-purple-500 to-purple-500 dark:to-purple-600 text-2xl font-bold text-white shadow-xl shadow-purple-400/25 dark:shadow-purple-500/25">
+                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-linear-to-br from-purple-400 dark:from-purple-500 to-purple-500 dark:to-purple-600 text-2xl font-bold text-white shadow-xl shadow-purple-400/25 dark:shadow-purple-500/25">
                                                             <svg
                                                                 xmlns="http://www.w3.org/2000/svg"
                                                                 width="24"
@@ -356,10 +358,10 @@ export default function Page() {
                                         </div>
                                         <div className="w-full pl-0 lg:w-5/12 lg:pl-8">
                                             <div className="group relative">
-                                                <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-blue-400/20 dark:from-blue-500/30 to-blue-500/20 dark:to-blue-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
+                                                <div className="absolute -inset-1 rounded-2xl bg-linear-to-r from-blue-400/20 dark:from-blue-500/30 to-blue-500/20 dark:to-blue-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
                                                 <div className="relative rounded-2xl border border-gray-200 dark:border-white/20 bg-white dark:bg-gray-800/60 p-6 shadow-2xl backdrop-blur-sm">
                                                     <div className="mb-4 flex items-center gap-4">
-                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-gradient-to-br from-blue-400 dark:from-blue-500 to-blue-500 dark:to-blue-600 text-2xl font-bold text-white shadow-xl shadow-blue-400/25 dark:shadow-blue-500/25">
+                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-linear-to-br from-blue-400 dark:from-blue-500 to-blue-500 dark:to-blue-600 text-2xl font-bold text-white shadow-xl shadow-blue-400/25 dark:shadow-blue-500/25">
                                                             <svg
                                                                 xmlns="http://www.w3.org/2000/svg"
                                                                 width="24"
@@ -410,10 +412,10 @@ export default function Page() {
                                     <div className="flex flex-col items-center justify-between lg:flex-row">
                                         <div className="w-full pr-0 lg:w-5/12 lg:pr-8">
                                             <div className="group relative">
-                                                <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-green-400/20 dark:from-green-500/30 to-green-500/20 dark:to-green-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
+                                                <div className="absolute -inset-1 rounded-2xl bg-linear-to-r from-green-400/20 dark:from-green-500/30 to-green-500/20 dark:to-green-600/30 opacity-50 blur-xl transition duration-500 group-hover:opacity-75"></div>
                                                 <div className="relative rounded-2xl border border-gray-200 dark:border-white/20 bg-white dark:bg-gray-800/60 p-6 shadow-2xl backdrop-blur-sm">
                                                     <div className="mb-4 flex items-center gap-4">
-                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-gradient-to-br from-green-400 dark:from-green-500 to-green-500 dark:to-green-600 text-2xl font-bold text-white shadow-xl shadow-green-400/25 dark:shadow-green-500/25">
+                                                        <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-linear-to-br from-green-400 dark:from-green-500 to-green-500 dark:to-green-600 text-2xl font-bold text-white shadow-xl shadow-green-400/25 dark:shadow-green-500/25">
                                                             <svg
                                                                 xmlns="http://www.w3.org/2000/svg"
                                                                 width="24"

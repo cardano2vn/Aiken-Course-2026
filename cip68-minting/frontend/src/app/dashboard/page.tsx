@@ -32,26 +32,24 @@ export default function Page() {
         enabled: !!address,
     });
 
-    console.log(data)
-
     if (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load tippers");
         return (
             <motion.div
-                className="flex flex-col items-center justify-center py-16 text-center"
+                className="flex flex-col items-center justify-center rounded-[2rem] border border-slate-200/80 bg-white/80 px-8 py-16 text-center shadow-[0_20px_80px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80"
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.5, ease: "easeOut" }}
             >
                 <motion.div
-                    className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
+                    className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-linear-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
                     animate={{ rotate: [0, 10, -10, 0] }}
                     transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                 >
-                    <Image src={images.logo} alt="Tipjar Logo" />
+                    <Image src={images.logo} alt="CIP68 logo" />
                 </motion.div>
                 <motion.h3
-                    className="mb-2 text-2xl font-semibold text-white dark:text-white"
+                    className="mb-2 text-2xl font-semibold text-slate-900 dark:text-white"
                     variants={{
                         hidden: { opacity: 0, y: 20 },
                         visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
@@ -61,7 +59,7 @@ export default function Page() {
                     No Assets Available
                 </motion.h3>
                 <motion.p
-                    className="mb-6 max-w-md text-lg text-slate-300 dark:text-slate-300"
+                    className="mb-6 max-w-md text-lg text-slate-600 dark:text-slate-300"
                     variants={{
                         hidden: { opacity: 0, y: 20 },
                         visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
@@ -81,7 +79,7 @@ export default function Page() {
                 >
                     <Link
                         href={routers.mint}
-                        className="inline-flex items-center justify-center rounded-sm bg-blue-600 px-8 py-2 text-lg font-semibold text-white shadow-xl hover:bg-blue-700 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700"
+                        className="inline-flex items-center justify-center rounded-full bg-blue-600 px-8 py-3 text-lg font-semibold text-white shadow-xl shadow-blue-600/20 transition hover:bg-blue-700"
                     >
                         Mint Asset
                     </Link>
@@ -92,7 +90,7 @@ export default function Page() {
 
     return (
         <motion.main
-            className="relative pt-20 min-h-screen bg-slate-950"
+            className="relative min-h-screen bg-transparent pt-20"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5 }}
@@ -138,20 +136,20 @@ export default function Page() {
                         </motion.section>
                     ) : !data?.data.length ? (
                         <motion.div
-                            className="flex flex-col items-center justify-center py-16 text-center"
+                            className="flex flex-col items-center justify-center rounded-[2rem] border border-slate-200/80 bg-white/80 px-8 py-16 text-center shadow-[0_20px_80px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80"
                             initial={{ opacity: 0, scale: 0.8 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ duration: 0.5, ease: "easeOut" }}
                         >
                             <motion.div
-                                className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
+                                className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-linear-to-br from-slate-800 to-slate-700 dark:from-slate-800 dark:to-slate-700"
                                 animate={{ rotate: [0, 10, -10, 0] }}
                                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                             >
-                                <Image src={images.logo} alt="Tipjar Logo" />
+                                <Image src={images.logo} alt="CIP68 logo" />
                             </motion.div>
                             <motion.h3
-                                className="mb-2 text-2xl font-semibold text-white dark:text-white"
+                                className="mb-2 text-2xl font-semibold text-slate-900 dark:text-white"
                                 variants={{
                                     hidden: { opacity: 0, y: 20 },
                                     visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
@@ -161,7 +159,7 @@ export default function Page() {
                                 No Assets Available
                             </motion.h3>
                             <motion.p
-                                className="mb-6 max-w-md text-lg text-gray-600 dark:text-gray-300"
+                                className="mb-6 max-w-md text-lg text-slate-600 dark:text-slate-300"
                                 variants={{
                                     hidden: { opacity: 0, y: 20 },
                                     visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
@@ -181,7 +179,7 @@ export default function Page() {
                             >
                                 <Link
                                     href={routers.mint}
-                                    className="inline-flex items-center justify-center rounded-sm bg-blue-600 px-8 py-2 text-lg font-semibold text-white shadow-xl hover:bg-blue-700 dark:bg-white dark:text-blue-900 dark:hover:bg-gray-100"
+                                    className="inline-flex items-center justify-center rounded-full bg-blue-600 px-8 py-3 text-lg font-semibold text-white shadow-xl shadow-blue-600/20 transition hover:bg-blue-700"
                                 >
                                     Mint Asset
                                 </Link>
@@ -202,7 +200,7 @@ export default function Page() {
                             {data.data.map((result, index: number) => (
                                 <motion.div
                                     key={index}
-                                    className="rounded-xl border border-blue-100 bg-white shadow-lg dark:border-blue-900/30 dark:bg-slate-900/80"
+                                    className="rounded-[1.5rem] border border-slate-200/80 bg-white/90 shadow-[0_18px_60px_-25px_rgba(15,23,42,0.35)] dark:border-slate-800 dark:bg-slate-900/80"
                                     variants={{
                                         hidden: { opacity: 0, y: 20 },
                                         visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
