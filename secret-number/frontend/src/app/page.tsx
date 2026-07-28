@@ -53,11 +53,11 @@ export default function Home() {
   }, [apiKey]);
 
   // === FETCH DỮ LIỆU TỪ BLOCKCHAIN ===
-  const fetchGameData = useCallback(async () => {
+  const fetchGameData = useCallback(async (): Promise<UTxO | null> => {
     if (!provider) {
       console.warn("No Blockfrost provider found. Please check API KEY.");
       setIsLoadingGame(false);
-      return;
+      return null;
     }
     setIsLoadingGame(true);
     try {
@@ -72,19 +72,22 @@ export default function Home() {
         setTreasuryBalance(adaBalance);
         // Lấy raw datum (CBOR hex) để hiển thị
         setRawDatum(utxo.output.plutusData || "");
+        return utxo;
       } else {
         setTreasuryBalance("0");
         setRawDatum("");
         setGameUtxo(null);
+        return null;
       }
     } catch (err) {
       console.error("Error fetching game data:", err);
+      return null;
     } finally {
       setIsLoadingGame(false);
     }
-  }, []);
+  }, [provider]);
 
-  // Tải dữ liệu khi khởi chạy và khi ví kết nối
+  // Tải dữ liệu khi khởi chạy và khi ví kết nối hoặc ngắt kết nối
   useEffect(() => {
     fetchGameData();
   }, [fetchGameData, walletAddress]);
@@ -106,13 +109,13 @@ export default function Home() {
   const handleWalletDisconnect = () => {
     setWallet(null);
     setWalletAddress("");
-    setHasCollateral(true);
+    setHasCollateral(false);
   };
 
   // === GỬI GIAO DỊCH ===
   const handleSubmitGuess = async (guess: number, newSecret: number) => {
-    if (!wallet || !provider || !gameUtxo) {
-      setTxError("Wallet or game data not ready");
+    if (!wallet || !provider || !gameUtxo || !hasCollateral) {
+      setTxError("Ví hoặc dữ liệu game chưa sẵn sàng, hoặc ví chưa thiết lập Collateral");
       setTxStatus("failed");
       return;
     }
@@ -123,37 +126,28 @@ export default function Home() {
       setTxError("");
       setTxHash("");
 
-      const collateralUtxos = await wallet.getCollateral();
+      // Lấy UTxO mới nhất từ blockchain và làm tươi UI
+      const latestGameUtxo = await fetchGameData();
+      if (!latestGameUtxo) {
+        setTxError("Không tìm thấy dữ liệu game (UTxO) hợp lệ.");
+        setTxStatus("failed");
+        return;
+      }
 
+      // Khởi tạo Tx Builder
       const txBuilder = new MeshTxBuilder({
         fetcher: provider,
-        submitter: provider,
       });
 
-      // Gọi hàm từ thư viện offchain
-      await buildGuessTransaction(
+      // Build giao dịch
+      const unsignedTx = await buildGuessTransaction(
         txBuilder,
-        gameUtxo,
+        latestGameUtxo,
+        wallet,
         walletAddress,
         guess,
         newSecret
       );
-
-      // Cung cấp UTxO làm collateral cho script transaction
-      if (collateralUtxos && collateralUtxos.length > 0) {
-        const col = collateralUtxos[0];
-        txBuilder.txInCollateral(
-          col.input.txHash,
-          col.input.outputIndex,
-          col.output.amount,
-          col.output.address
-        );
-      } else {
-        console.warn("No Collateral found! Transaction might fail.");
-      }
-
-      // Hoàn tất giao dịch (Balance + Fee)
-      const unsignedTx = await txBuilder.complete();
 
       // Bước 2: Ký giao dịch (Signing)
       setTxStatus("signing");
@@ -310,7 +304,7 @@ export default function Home() {
         {/* Guess Form */}
         <GuessForm
           onSubmit={handleSubmitGuess}
-          disabled={!wallet || !gameUtxo || txStatus !== "idle" || isTreasuryLow}
+          disabled={!wallet || !gameUtxo || txStatus !== "idle" || isTreasuryLow || !hasCollateral}
           isTreasuryLow={isTreasuryLow}
         />
 

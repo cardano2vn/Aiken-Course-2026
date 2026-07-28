@@ -1,25 +1,25 @@
 import { BlockfrostProvider } from '@meshsdk/core';
-import type { UTxO, ConStr0, Integer } from '@meshsdk/core';
-import { parseDatumCbor } from '@meshsdk/core-cst';
+import type { UTxO } from '@meshsdk/core';
+import { deserializeDatum } from "@meshsdk/core";
 import { MIN_SECRET, MAX_SECRET } from './config';
 
-export type MyDatum = ConStr0<[Integer]>;
-
-function isValidGameDatum(plutusData: unknown): boolean {
-    if (typeof plutusData !== 'string' || plutusData.trim() === '') return false;
-
+/**
+ * Kiểm tra xem datum có hợp lệ không.
+ * Datum hợp lệ có cấu trúc { constructor: 0, fields: [ { int: secret_number } ] }
+ * trong đó secret_number kiểu number hoặc bigint và nằm trong khoảng từ MIN_SECRET đến MAX_SECRET
+ */
+export function isValidGameDatum(rawDatumHex: unknown): boolean {
+    if (typeof rawDatumHex !== 'string' || rawDatumHex.trim() === '') return false;
     try {
-        const parsed = parseDatumCbor<MyDatum>(plutusData);
+        const parsed = deserializeDatum(rawDatumHex);
 
-        // MyDatum = ConStr0<[Integer]>, fields[0] có dạng { int: bigint/number }
-        if (parsed.fields && parsed.fields.length === 1) {
+        // Đối tượng trả về phải có: constructor là 0 và fields chứa 1 phần tử duy nhất { int: bigint/number }
+        if (Number(parsed.constructor) === 0 && parsed.fields?.length === 1) {
             const f0 = parsed.fields[0];
             if (f0 && (typeof f0.int === 'number' || typeof f0.int === 'bigint')) {
                 return Number(f0.int) >= MIN_SECRET && Number(f0.int) <= MAX_SECRET;
             }
-            return false;
         }
-
         return false;
     } catch {
         return false;

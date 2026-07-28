@@ -50,7 +50,7 @@ export default function DatumDecoder({ rawDatum, decodeDatum }: DatumDecoderProp
 
       {/* Hiển thị Raw Datum Hex */}
       <div>
-        <label className="text-sm font-medium text-text-secondary block mb-1.5">Raw Datum (Hex)</label>
+        <label className="text-sm font-medium text-text-secondary block mb-1.5">Raw Datum (CBOR Hex)</label>
         <div className="glass-input bg-white/3 font-mono text-xs text-text-secondary break-all min-h-[40px] flex items-center">
           {rawDatum ? rawDatum : <span className="text-text-muted italic">No datum available</span>}
         </div>

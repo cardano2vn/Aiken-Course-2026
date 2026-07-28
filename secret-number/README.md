@@ -14,7 +14,7 @@ Dự án này là một monorepo bao gồm 4 thành phần chính:
 ## 🚀 Hướng dẫn Cài đặt & Chạy dApp
 
 ### 1. Yêu cầu hệ thống
-- **Node.js**: Phiên bản 18.x trở lên
+- **Node.js**: Phiên bản khuyên dùng `node >= 24.16.0` (hoặc các phiên bản LTS mới nhất của Node 20 / 22) để tránh các lỗi biên dịch thư viện native binary (như `lightningcss`).
 - **Aiken**: [Cài đặt Aiken](https://aiken-lang.org/installation-instructions) (để biên dịch Smart Contract)
 - Một ví Cardano Preprod có sẵn đồng tADA.
 

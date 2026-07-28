@@ -1,5 +1,5 @@
 "use client";
-import { useState } from 'react';
+import { useState, SubmitEvent } from 'react';
 import { motion } from 'framer-motion';
 import { REWARD_AMOUNT_ADA, MIN_SECRET, MAX_SECRET } from '@secret-number/offchain';
 
@@ -37,17 +37,19 @@ export default function GuessForm({ onSubmit, disabled, isTreasuryLow }: GuessFo
     return num;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: SubmitEvent) => {
     e.preventDefault();
 
-    const guessValue = validateInput(guessInput, setGuessError);
-    const secretValue = validateInput(newSecretInput, setSecretError);
+    const guessNumber = validateInput(guessInput, setGuessError);
+    const secretNumber = validateInput(newSecretInput, setSecretError);
 
-    if (guessValue === null || secretValue === null) {
+    // Xác nhận kiểm tra đã hợp lệ
+    if (guessNumber === null || secretNumber === null) {
       return;
     }
 
-    onSubmit(guessValue, secretValue);
+    // Callback lên component cha để xử lý tiếp
+    onSubmit(guessNumber, secretNumber);
   };
 
   return (
