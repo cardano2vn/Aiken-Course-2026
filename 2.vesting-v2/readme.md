@@ -37,8 +37,18 @@ aiken check
 ### 2. 🎨 Giao diện người dùng (Frontend)
 Thư mục `frontend_app` chứa mã nguồn giao diện web sử dụng **MeshSDK** và **Next.js**.
 
+**Cấu hình API Key:**
+Trước khi chạy ứng dụng, bạn cần cung cấp API Key của Blockfrost để kết nối mạng lưới:
+1. Sao chép file `.env.example` thành `.env`:
+   ```bash
+   cd frontend_app
+   cp .env.example .env
+   ```
+2. Mở file `.env` và điền Blockfrost Project ID của bạn vào:
+   `NEXT_PUBLIC_BLOCKFROST_KEY=your_key_here`
+
+**Chạy ứng dụng:**
 ```bash
-cd frontend_app
 npm install
 npm run dev
 ```

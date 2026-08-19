@@ -25,7 +25,7 @@ export default function Home() {
   const [lockDate, setLockDate] = useState<string>("");
 
   // Blockfrost Key (Hardcoded)
-  const BLOCKFROST_KEY = "preprod2EkL4jB7Awsl1ugTeMg1oOID9gHLi6pd";
+  const BLOCKFROST_KEY = process.env.NEXT_PUBLIC_BLOCKFROST_KEY || "";
 
   useEffect(() => {
     if (connected) {
