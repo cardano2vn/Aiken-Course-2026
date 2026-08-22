@@ -1,0 +1,123 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục tiêu bài học</h4>
+  <p>Hiểu cách game hoạt động, kiến trúc tổng thể của dApp, và sự khác biệt giữa Wallet Address và Script Address.</p>
+</blockquote>
+
+<hr />
+
+<h2>1. Mô tả game</h2>
+<p>Một kho tiền thưởng chứa <strong>5.000 ADA</strong> đang chờ người chơi đến thử vận may. Trong kho có một <strong>con số bí mật</strong>. Ai đoán đúng sẽ nhận về <strong>10 ADA</strong> ngay lập tức. Sau mỗi lần có người thắng, trò chơi tiếp tục với quỹ thưởng là số tiền còn lại và con số bí mật mới do chính người vừa chiến thắng đặt ra, trở thành thử thách cho người chơi kế tiếp. <strong>Luật chơi cụ thể:</strong></p>
+<ul>
+  <li>Số bí mật là số nguyên, bắt đầu từ 1 và nhỏ hơn 1 triệu.</li>
+  <li>Nếu đoán đúng, bạn nhận 10 ADA từ quỹ thưởng.</li>
+  <li>Nếu đoán sai, giao dịch của bạn đơn giản là bị mạng lưới từ chối.</li>
+  <li>Song song với việc đoán số, bạn phải chỉ định một con số bí mật mới để làm thử thách cho người chơi tiếp theo.</li>
+  <li>Game kết thúc khi quỹ thưởng cạn kiệt.</li>
+</ul>
+
+<hr />
+
+<h2>2. Luồng hoạt động một ván chơi</h2>
+<pre><code>[TRƯỚC VÁN CHƠI]
+  Kho bạc: 5000 ADA
+  Con số bí mật: 100
+
+Người chơi gửi giao dịch:
+  guess      = 100     ← phải đoán đúng
+  new_secret = 888     ← người chơi tự đặt ra cho ván tiếp theo
+
+[SAU VÁN CHƠI]
+  Kho bạc mới: 4990 ADA         ← giảm 10 ADA
+  Con số bí mật mới: 888        ← thử thách kế tiếp
+  Ví người chơi: +10 ADA        ← phần thưởng</code></pre>
+<p>Toàn bộ logic kiểm tra — <em>đoán đúng chưa, tiền trả đủ chưa, số mới hợp lệ chưa</em> — đều chạy on-chain trong một Aiken validator. Không có backend, không có admin kiểm duyệt. Và trong toàn bộ quy trình hoạt động này <strong>không hề</strong> có bất kỳ một máy chủ backend hay cơ sở dữ liệu tập trung nào cả! Không có ai có thể can thiệp vào quỹ thưởng hay gian lận kết quả.</p>
+
+<hr />
+
+<h2>3. Kiến trúc 3 lớp</h2>
+<p>DApp Secret Number được tổ chức thành <strong>3 lớp</strong> phân tách rõ ràng:</p>
+<ul>
+  <li><strong>FRONT-END</strong> (Next.js, React) — Giao diện tương tác người chơi và kết nối ví (CIP-30).</li>
+  <li><strong>OFF-CHAIN</strong> (TypeScript, MeshJS) — Truy vấn trạng thái trò chơi hiện tại và xây dựng giao dịch tương tác với blockchain.</li>
+  <li><strong>ON-CHAIN</strong> (Aiken) — Hợp đồng thông minh (Smart Contract) quản lý an toàn quỹ thưởng và số bí mật.</li>
+</ul>
+<img class="wp-image-2503 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/1-300x266.png" alt="m1_architecture" width="547" height="485" />
+<p>Nơi xử lý logic cốt lõi và lưu trữ trạng thái của dApp là lớp <strong>On-chain</strong> — chính là mạng lưới Cardano và hợp đồng thông minh, thay thế cho vai trò của back-end và cơ sở dữ liệu trong ứng dụng truyền thống. Các hợp đồng được viết bằng ngôn ngữ Aiken.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý quan trọng:</strong> Nhiệm vụ của lớp On-chain không phải là xử lý tính toán trò chơi, mà nó đóng vai trò là một <em>"người phê duyệt"</em>, có nhiệm vụ <strong>kiểm tra (validate)</strong> xem giao dịch mà người chơi gửi lên có tuân thủ đúng luật chơi hay không.</p>
+</blockquote>
+<p>Các giao dịch này được tạo bởi lớp <strong>Off-chain</strong>. Đây là lớp trung gian giữa giao diện và on-chain. Nó đóng vai trò truy vấn dữ liệu blockchain, xây dựng và gửi giao dịch — được xây dựng bằng TypeScript và thư viện MeshJS.</p>
+
+<h4>Blockchain Provider</h4>
+<p>Lớp Off-chain giao tiếp với blockchain thông qua một hạ tầng trung gian. Chúng ta hoàn toàn có thể tự vận hành hạ tầng này bằng cách chạy một node mạng Cardano để truy vấn và gửi giao dịch trực tiếp. Hoặc sử dụng dịch vụ của bên thứ 3 — được gọi là các <strong>Blockchain Provider</strong> — cho phép truy xuất và đồng bộ dữ liệu blockchain thời gian thực.</p>
+<p>Với dApp này, chúng ta sử dụng dịch vụ của <strong>Blockfrost</strong> thông qua các API mà nó cung cấp. Hãy truy cập <a href="https://blockfrost.io/" target="_blank" rel="noopener">https://blockfrost.io/</a> để tạo API key miễn phí cho mạng Preprod.</p>
+
+<hr />
+
+<h2>4. Cấu trúc dự án &amp; Cài đặt</h2>
+<p>Dự án được tổ chức dạng <strong>monorepo</strong>, với 4 module chính:</p>
+<pre><code>1.secret-number/
+├── frontend/       ← Giao diện Next.js
+├── offchain/       ← Thư viện off-chain (TypeScript, MeshJS)
+├── onchain/        ← Smart contract (Aiken)
+├── scripts/        ← Script deploy (khởi tạo game)
+└── docs/           ← Tài liệu dự án</code></pre>
+<p>Trong đó, <code>offchain</code> đóng vai trò như một thư viện dùng chung để <code>frontend</code> hoặc <code>scripts</code> gọi đến khi cần tương tác với blockchain.</p>
+
+<h4>Hướng dẫn cài đặt</h4>
+<ol>
+  <li>Chạy <code>npm install</code> để cài đặt tất cả thư viện phụ thuộc.</li>
+  <li>Biên dịch Aiken để thu được file <code>plutus.json</code> (file này cũng đã được biên dịch sẵn trong repo).</li>
+  <li>(Dành cho admin) Chạy <code>npm run deploy</code> để khởi tạo game — tạo quỹ thưởng và con số bí mật ban đầu.</li>
+  <li>Điền Blockfrost API key vào file <code>.env</code> trong thư mục <code>frontend</code>.</li>
+  <li>Chạy <code>npm run dev</code> để khởi động dApp.</li>
+</ol>
+
+<hr />
+
+<h2>5. Wallet Address và Script Address</h2>
+<p><strong>Câu hỏi đặt ra:</strong> Số tiền 5.000 ADA khi trò chơi khởi tạo đã được gửi vào đâu? <strong>Câu trả lời:</strong> Nó đang được lưu trữ ở một nơi gọi là <strong>Script Address</strong> (Địa chỉ hợp đồng). Trên blockchain Cardano, nếu xét theo góc độ <em>ai có quyền chi tiêu tiền</em>, chúng ta có hai loại địa chỉ: <strong>Wallet Address</strong> và <strong>Script Address</strong>.</p>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th></th>
+      <th>Wallet Address</th>
+      <th>Script Address</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Tạo từ</strong></td>
+      <td>Public key</td>
+      <td>Hash của hợp đồng</td>
+    </tr>
+    <tr>
+      <td><strong>Bảo vệ bởi</strong></td>
+      <td>Private key</td>
+      <td>Logic của hợp đồng</td>
+    </tr>
+    <tr>
+      <td><strong>Ai tiêu được</strong></td>
+      <td>Chỉ chủ sở hữu private key</td>
+      <td>Bất kỳ ai gửi giao dịch đáp ứng điều kiện hợp đồng</td>
+    </tr>
+    <tr>
+      <td><strong>Ai gửi vào được</strong></td>
+      <td>Bất kỳ ai</td>
+      <td>Bất kỳ ai</td>
+    </tr>
+    <tr>
+      <td><strong>Trong dApp Secret Number</strong></td>
+      <td>Địa chỉ ví của người chơi</td>
+      <td>Địa chỉ chứa quỹ thưởng và số bí mật</td>
+    </tr>
+  </tbody>
+</table>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Tính tất định (Deterministic):</strong> Cùng một script luôn cho ra cùng một địa chỉ, trên bất kỳ máy nào. Thay đổi dù một dòng code Aiken → địa chỉ hoàn toàn khác.</p>
+</blockquote>
+<p>Như vậy, các địa chỉ luôn được <strong>bảo vệ nghiêm ngặt khi chi tiêu</strong>, nhưng lại luôn <strong>mở rộng cửa khi nhận tiền</strong>. Bất kỳ ai cũng có thể tự do gửi tiền (UTxO) vào cả hai loại địa chỉ này mà không có sự ngăn cản nào. Đối với địa chỉ hợp đồng, điều này mở ra một vấn đề: Hợp đồng có thể nhận về hàng loạt UTxO rác hoặc UTxO giả mạo từ kẻ xấu. Vậy làm thế nào để dApp lọc ra và nhận diện đúng UTxO chứa trạng thái thực sự của hợp đồng? Chúng ta sẽ quay trở lại với vấn đề này trong Bài 3 khi xem xét off-chain code.</p>
+
+<hr />
+
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ bắt tay vào xây dựng mã on-chain bằng Aiken. Hẹn gặp lại các bạn!</p>

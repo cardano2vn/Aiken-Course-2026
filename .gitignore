@@ -45,3 +45,8 @@ Thumbs.db
 !**/.yarn/plugins
 !**/.yarn/releases
 !**/.yarn/versions
+
+# AI & Agent Skills / Configurations
+# -----------------------------------------------------------------------------
+.agents/
+.gemini/
