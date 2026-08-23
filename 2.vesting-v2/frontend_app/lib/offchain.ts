@@ -38,6 +38,7 @@ export class VestingContract extends TxInitiator {
     lockUntilTimeStampMs: number,
     beneficiary: string,
   ): Promise<string> => {
+    this.mesh.reset();
     const { utxos, walletAddress } = await this.getWalletInfoForTx();
 
     const { pubKeyHash: ownerPubKeyHash } = deserializeAddress(walletAddress);
@@ -64,8 +65,9 @@ export class VestingContract extends TxInitiator {
    * Redeemer: Cancel (Index 0)
    */
   cancelVesting = async (vestingUtxo: UTxO): Promise<string> => {
+    this.mesh.reset();
     const { utxos, walletAddress, collateral } =
-      await this.getWalletInfoForTx();
+      await this.getWalletInfoForTx(true);
     const { input: collateralInput, output: collateralOutput } = collateral;
     const { pubKeyHash } = deserializeAddress(walletAddress);
 
@@ -88,10 +90,9 @@ export class VestingContract extends TxInitiator {
         targetUtxo.output.amount,
         this.scriptAddress,
       )
+      .txInScript(this.scriptCbor)
       .spendingReferenceTxInInlineDatumPresent()
       .spendingReferenceTxInRedeemerValue(mConStr0([])) // Cancel is Index 0
-      .txInScript(this.scriptCbor)
-      .txOut(walletAddress, [])
       .txInCollateral(
         collateralInput.txHash,
         collateralInput.outputIndex,
@@ -110,8 +111,9 @@ export class VestingContract extends TxInitiator {
    * Redeemer: Claim (Index 1)
    */
   claimVesting = async (vestingUtxo: UTxO): Promise<string> => {
+    this.mesh.reset();
     const { utxos, walletAddress, collateral } =
-      await this.getWalletInfoForTx();
+      await this.getWalletInfoForTx(true);
     const { input: collateralInput, output: collateralOutput } = collateral;
     const { pubKeyHash } = deserializeAddress(walletAddress);
 
@@ -154,10 +156,9 @@ export class VestingContract extends TxInitiator {
         targetUtxo.output.amount,
         this.scriptAddress,
       )
+      .txInScript(this.scriptCbor)
       .spendingReferenceTxInInlineDatumPresent()
       .spendingReferenceTxInRedeemerValue(mConStr1([])) // Claim is Index 1
-      .txInScript(this.scriptCbor)
-      .txOut(walletAddress, [])
       .txInCollateral(
         collateralInput.txHash,
         collateralInput.outputIndex,

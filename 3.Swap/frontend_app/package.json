@@ -9,8 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@meshsdk/core": "^1.9.0-beta.98",
-    "@meshsdk/react": "^1.9.0-beta.98",
+    "@meshsdk/core": "^1.9.1",
+    "@meshsdk/react": "^1.9.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"

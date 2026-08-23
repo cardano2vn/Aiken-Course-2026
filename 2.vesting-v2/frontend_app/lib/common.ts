@@ -52,11 +52,11 @@ export class TxInitiator {
 
         this.version = version;
         switch (this.version) {
-            case 1:
-                this.languageVersion = "V2";
+            case 2:
+                this.languageVersion = "V3";
                 break;
             default:
-                this.languageVersion = "V3";
+                this.languageVersion = "V2";
         }
 
         if (stakeCredential) {
@@ -176,14 +176,14 @@ export class TxInitiator {
         });
     };
 
-    protected getWalletInfoForTx = async () => {
+    protected getWalletInfoForTx = async (requireCollateral = false) => {
         const utxos = await this.wallet?.getUtxos();
-        const collateral = await this.getWalletCollateral();
+        const collateral = requireCollateral ? await this.getWalletCollateral() : undefined;
         const walletAddress = await this.getWalletDappAddress();
         if (!utxos || utxos?.length === 0) {
             throw new Error("No utxos found");
         }
-        if (!collateral) {
+        if (requireCollateral && !collateral) {
             throw new Error("No collateral found");
         }
         if (!walletAddress) {
