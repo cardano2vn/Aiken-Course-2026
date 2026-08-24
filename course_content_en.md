@@ -54,10 +54,9 @@ The validator separates spending actions using 2 Redeemers:
 
 ### 3. Foundational Knowledge
 
-- POSIX Time
-- Transaction Validity Interval
-- Slot to Time conversion
-- Reference scripts
+- Introduction to Vesting
+- Transaction Validity Range
+- POSIX Time and Slot
 
 ---
 

@@ -34,7 +34,7 @@ The course consists of 12 modules — corresponding to 12 practical dApps:
 | No. | Project (Module) | Directory | Domain | Knowledge & Technologies |
 | :---: | :--- | :---: | :---: | :--- |
 | `01` | **Secret Number** | [`1.secret-number`](./1.secret-number) | Gaming | On-chain vs Off-chain, Spending Validator, Plutus Data & CBOR |
-| `02` | **Vesting** | [`2.vesting-v2`](./2.vesting-v2) | DeFi | POSIX Time, Transaction Validity Interval, Reference scripts |
+| `02` | **Vesting** | [`2.vesting-v2`](./2.vesting-v2) | DeFi | Vesting concepts, Transaction Validity Range |
 | `03` | **Swap** | [`3.Swap`](./3.Swap) | DeFi | Multi-Asset UTxO, Plutus Blueprint, Collateral, Double Satisfaction |
 | `04` | **Membership NFT** | [`4.membership-nft`](./4.membership-nft) | NFT / Identity | Parameterized Scripts, One-Shot Minting Policy, State Thread Token |
 | `05` | **Multisig Treasury** | [`5.multisig-treasury`](./5.multisig-treasury) | DAO | M-of-N Multisig Treasury, Aiken Unit Testing with Vodka |
@@ -50,7 +50,7 @@ The course consists of 12 modules — corresponding to 12 practical dApps:
 
 ## 💡 Overview of Course DApps
 
-Detailed documentation is available at [./dapps_detail_en.md](./dapps_detail_en.md).
+Detailed documentation is available at [course_content_en.md](./course_content_en.md).
 
 - **Module 01: Secret Number** — *On-chain Secret Number Guessing Game*: A reward vault (ADA) holds a secret number. Players who guess correctly receive a payout and must set a new secret number for the next player.
 - **Module 02: Vesting** — *Time-Locked Vesting*: Allows locking ADA or Native Tokens for a beneficiary to claim after a designated deadline, while granting the owner the right to cancel and reclaim assets anytime.

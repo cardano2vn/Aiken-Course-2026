@@ -34,7 +34,7 @@ Khóa học gồm 12 module - tương ứng với 12 dApp:
 | STT | Dự Án (Module) | Thư Mục | Lĩnh Vực | Kiến thức & Công Nghệ |
 | :---: | :--- | :---: | :---: | :--- |
 | `01` | **Secret Number** | [`1.secret-number`](./1.secret-number) | Game | On-chain vs Off-chain, Spending Validator, Plutus Data & CBOR |
-| `02` | **Vesting** | [`2.vesting-v2`](./2.vesting-v2) | Defi | POSIX Time, Transaction Validity Interval, Reference scripts |
+| `02` | **Vesting** | [`2.vesting-v2`](./2.vesting-v2) | Defi | Vesting concepts, Transaction Validity Range |
 | `03` | **Swap** | [`3.Swap`](./3.Swap) | Defi | Multi-Asset UTxO, Plutus Blueprint, Collateral, Double Satisfaction |
 | `04` | **Membership NFT** | [`4.membership-nft`](./4.membership-nft) | NFT / Định danh | Parameterized Scripts, One-Shot Minting Policy, State Thread Token |
 | `05` | **Multisig Treasury** | [`5.multisig-treasury`](./5.multisig-treasury) | DAO | Quỹ đa chữ ký M-of-N, Aiken Unit Testing với thư viện Vodka |
@@ -50,7 +50,7 @@ Khóa học gồm 12 module - tương ứng với 12 dApp:
 
 ## 💡 Giới Thiệu Các Dự Án DApp
 
-Nội dung chi tiết tại ./dapps_detail.md.
+Nội dung chi tiết tại [course_content.md](./course_content.md).
 
 - **Module 01: Secret Number** — *Game giải đố đoán số bí mật on-chain*: Kho tiền thưởng (ADA) chứa một con số bí mật. Người chơi đoán đúng con số sẽ nhận thưởng từ kho tiền thưởng; đồng thời người này có nghĩa vụ chỉ định một số bí mật mới để trò chơi tiếp diễn.
 - **Module 02: Vesting** — *Khóa tài sản theo thời gian*: Cho phép người gửi khóa ADA hoặc Native Token cho người thụ hưởng rút sau một mốc thời gian quy định, đồng thời hỗ trợ người gửi quyền hủy và rút lại tài sản bất kỳ lúc nào.

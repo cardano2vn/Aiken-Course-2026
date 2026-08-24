@@ -54,10 +54,9 @@ Validator phân tách các hành động chi tiêu thông qua 2 Redeemer:
 
 ### 3. Kiến Thức Nền Tảng
 
-- POSIX Time
-- Transaction Validity Interval
-- Slot to Time conversion
-- Reference scripts
+- Giới thiệu bài toán Vesting
+- Transaction Validity Range
+- POSIX Time và Slot
 
 ---
 
