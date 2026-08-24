@@ -68,7 +68,7 @@ export class VestingContract extends TxInitiator {
     this.mesh.reset();
     const { utxos, walletAddress, collateral } =
       await this.getWalletInfoForTx(true);
-    const { input: collateralInput, output: collateralOutput } = collateral;
+    const { input: collateralInput, output: collateralOutput } = collateral!;
     const { pubKeyHash } = deserializeAddress(walletAddress);
 
     // Refresh UTxO if possible to ensure validity
@@ -91,8 +91,8 @@ export class VestingContract extends TxInitiator {
         this.scriptAddress,
       )
       .txInScript(this.scriptCbor)
-      .spendingReferenceTxInInlineDatumPresent()
-      .spendingReferenceTxInRedeemerValue(mConStr0([])) // Cancel is Index 0
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(mConStr0([])) // Cancel is Index 0
       .txInCollateral(
         collateralInput.txHash,
         collateralInput.outputIndex,
@@ -114,7 +114,7 @@ export class VestingContract extends TxInitiator {
     this.mesh.reset();
     const { utxos, walletAddress, collateral } =
       await this.getWalletInfoForTx(true);
-    const { input: collateralInput, output: collateralOutput } = collateral;
+    const { input: collateralInput, output: collateralOutput } = collateral!;
     const { pubKeyHash } = deserializeAddress(walletAddress);
 
     // Refresh UTxO if possible to ensure validity
@@ -157,8 +157,8 @@ export class VestingContract extends TxInitiator {
         this.scriptAddress,
       )
       .txInScript(this.scriptCbor)
-      .spendingReferenceTxInInlineDatumPresent()
-      .spendingReferenceTxInRedeemerValue(mConStr1([])) // Claim is Index 1
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(mConStr1([])) // Claim is Index 1
       .txInCollateral(
         collateralInput.txHash,
         collateralInput.outputIndex,

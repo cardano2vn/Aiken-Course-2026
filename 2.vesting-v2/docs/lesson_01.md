@@ -1,6 +1,6 @@
 # Bài giảng 1: Giới thiệu Bài toán Vesting & Lý thuyết Thời gian trên Cardano (EUTxO)
 
-> **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
+> **Khóa học:** Building with Aiken  
 > **Module 2:** Vesting Smart Contract (Khóa tài sản)  
 
 ---
@@ -58,7 +58,7 @@ Smart Contract của chúng ta sẽ hỗ trợ 2 hành động chính:
 | Hành động | Người thực hiện | Điều kiện bắt buộc |
 | :--- | :--- | :--- |
 | **Claim (Rút tiền)** | `Beneficiary` | 1. Có chữ ký của `Beneficiary`<br>2. Thời gian thực hiện giao dịch phải **SAU** mốc thời gian khóa (`lock_until`). |
-| **Cancel (Hủy bỏ)** | `Owner` | 1. Có chữ ký của `Owner`<br>2. *(Mở rộng)* Phải thực hiện **TRƯỚC** thời điểm `lock_until`. |
+| **Cancel (Hủy bỏ)** | `Owner` | 1. Có chữ ký của `Owner` |
 
 ---
 
@@ -67,7 +67,7 @@ Smart Contract của chúng ta sẽ hỗ trợ 2 hành động chính:
 Thời gian là yếu tố cốt lõi của hợp đồng Vesting. Tuy nhiên, cách Cardano xử lý thời gian trong Smart Contract hoàn toàn khác biệt so với các blockchain tài khoản (Account-based) như Ethereum.
 
 ### Cardano Smart Contracts là Hàm Thuần Túy (Pure Functions)
-Trên Cardano, một Validator Script là một **Pure Function** (hàm thuần túy) mang tính **Deterministic** (quyết định tuyệt đối).
+Trên Cardano, một Validator Script là một **Pure Function** (hàm thuần túy) mang tính **Deterministic** (tất định tuyệt đối).
 - Validator chỉ nhận đầu vào: `Datum`, `Redeemer`, và `ScriptContext` (thông tin giao dịch).
 - Với cùng một đầu vào, Validator **luôn luôn trả về cùng một kết quả** (`True` hoặc `False`), dù chạy ở bất kỳ máy tính nào hay ở bất kỳ thời điểm nào.
 
@@ -98,7 +98,7 @@ Một `Validity Range` gồm 2 cận:
 | Tiêu chí | Ethereum (Solidity) | Cardano (Aiken / Plutus) |
 | :--- | :--- | :--- |
 | **Cơ chế thời gian** | `block.timestamp` (Lấy mốc thời gian của block đang được đúc). | `Transaction Validity Range` (Khai báo khoảng thời gian giao dịch hợp lệ). |
-| **Tính chất** | Không quyết định (Non-deterministic) vì timestamp phụ thuộc thợ đào/validator. | Thuần túy & Quyết định (Deterministic). Kết quả xác thực được tính trước off-chain. |
+| **Tính chất** | Không tất định (Non-deterministic) vì timestamp phụ thuộc thợ đào/validator. | Thuần túy & Tất định (Deterministic). Kết quả xác thực được tính trước off-chain. |
 | **Rủi ro Miner Manipulation** | Thợ đào có thể lệch timestamp vài giây để trục lợi. | Hoàn toàn không thể trục lợi vì Node kiểm tra tính hợp lệ trước khi Validator chạy. |
 | **Phí thất bại (Failed Tx)** | Nếu mốc thời gian chưa đến, giao dịch vẫn bị đưa lên chain và **mất phí gas**. | Nếu mốc thời gian chưa đến, Cardano Node loại giao dịch từ vòng ngoài, **không tốn 1 xu phí nào**. |
 
@@ -136,4 +136,4 @@ Khi lập trình dApp Cardano, bạn sẽ gặp 2 khái niệm thời gian song 
 3. **Giả sử mốc khóa `lock_until` là `1700000000000`. Để giao dịch Claim hợp lệ, cận `valid_from` của giao dịch phải thỏa mãn điều kiện gì?**
 
 ---
-👉 **Tiếp theo:** Chuyển sang **[Bài giảng 2: Lập trình Smart Contract Vesting với Aiken & Bài tập Mở rộng](./bai_giang_2.md)** để trực tiếp viết mã nguồn On-chain và thực hành bài tập bảo mật mở rộng!
+👉 **Tiếp theo:** Chuyển sang **[Bài giảng 2: Lập trình Smart Contract Vesting với Aiken & Bài tập Mở rộng](./lesson_02.md)** để trực tiếp viết mã nguồn On-chain và thực hành bài tập bảo mật mở rộng!

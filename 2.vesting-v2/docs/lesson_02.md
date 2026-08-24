@@ -1,6 +1,6 @@
 # Bài giảng 2: Lập trình Smart Contract Vesting với Aiken, Bảo mật & Bài tập Mở rộng
 
-> **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
+> **Khóa học:** Building with Aiken  
 > **Module 2:** Vesting Smart Contract (Khóa tài sản)  
 > **Tài liệu tham khảo:** [Dr. Lars Lesson 3 - PPP Cohort 3](https://docs.cardano2vn.io/docs/dr-lars-lession/K_03/Lecture_03) & Kịch bản Module 2  
 
@@ -22,19 +22,23 @@
 
 Mã nguồn On-chain của hợp đồng Vesting được đặt trong thư mục `validators/vesting.ak`.
 
-Cấu trúc file `vesting.ak`:
 ```
 validators/
 └── vesting.ak       # Chứa logic xác thực Datum, Redeemer và các Unit Test
 ```
 
 ### Khai báo các Module phụ thuộc:
+
 ```rust
-use aiken/collection/list
-use aiken/crypto.{VerificationKeyHash}
 use cardano/transaction.{OutputReference, Transaction}
-use cardano/transaction/value
+use mocktail.{complete, invalid_before, mocktail_tx, required_signer_hash}
+use mocktail/virgin_key_hash.{mock_pub_key_hash}
+use mocktail/virgin_output_reference.{mock_utxo_ref}
+use vodka_extra_signatories.{key_signed}
+use vodka_validity_range.{valid_after}
 ```
+
+> 💡 `key_signed` và `valid_after` là các hàm helper được cung cấp sẵn bởi thư viện **vodka**, giúp code ngắn gọn và đã được kiểm thử kỹ lưỡng.
 
 ---
 
@@ -49,9 +53,9 @@ pub type VestingDatum {
   /// Thời điểm kết thúc khóa (POSIX time - miligiây)
   lock_until: Int,
   /// Mã băm khóa công khai (PubKeyHash) của Người chủ / Người gửi tiền
-  owner: VerificationKeyHash,
+  owner: ByteArray,
   /// PubKeyHash của Người thụ hưởng / Người nhận tiền
-  beneficiary: VerificationKeyHash,
+  beneficiary: ByteArray,
 }
 ```
 
@@ -73,33 +77,37 @@ Validator chính sử dụng mục đích `spend` (tiêu dùng UTxO tại địa
 ```rust
 validator vesting {
   spend(
-    datum: Option<VestingDatum>,
+    datum_opt: Option<VestingDatum>,
     redeemer: VestingRedeemer,
-    _utxo: OutputReference,
-    self: Transaction,
+    _input: OutputReference,
+    tx: Transaction,
   ) {
     // 1. Giải mã Datum
-    expect Some(datum) = datum
+    expect Some(datum) = datum_opt
 
     // 2. Phân nhánh xử lý dựa vào Redeemer
     when redeemer is {
       // Luồng Cancel: Kiểm tra giao dịch có chữ ký của Owner hay không
-      Cancel -> key_signed(self.extra_signatories, datum.owner)
+      Cancel -> key_signed(tx.extra_signatories, datum.owner)
 
       // Luồng Claim: Yêu cầu cả 2 điều kiện đều phải thỏa mãn (and)
       Claim ->
         and {
           // Điều kiện 1: Phải có chữ ký của người thụ hưởng
-          key_signed(self.extra_signatories, datum.beneficiary),
+          key_signed(tx.extra_signatories, datum.beneficiary),
           // Điều kiện 2: Khoảng thời gian giao dịch phải nằm SAU lock_until
-          valid_after(self.validity_range, datum.lock_until),
+          valid_after(tx.validity_range, datum.lock_until),
         }
     }
+  }
+
+  else(_) {
+    fail
   }
 }
 ```
 
-### Các hàm Helper bổ trợ:
+### Các hàm Helper bổ trợ (thư viện `vodka`):
 
 #### 1. Kiểm tra chữ ký người dùng (`key_signed`):
 ```rust
@@ -158,58 +166,9 @@ fn valid_after(range: ValidityRange, lock_until: Int) -> Bool {
   }
 }
 ```
-
 ---
 
-## 5. Viết Unit Test với Thư viện Mocktail
-
-Aiken tích hợp sẵn khung kiểm thử mạnh mẽ. Dưới đây là cách viết Unit Test với thư viện `mocktail` để giả lập giao dịch:
-
-```rust
-test success_claim() {
-  let lock_until = 1000
-  let owner = #"010101"
-  let beneficiary = #"020202"
-
-  let datum = VestingDatum { lock_until, owner, beneficiary }
-
-  // Giả lập giao dịch hợp lệ: Được ký bởi beneficiary và thời gian valid_from = 1001 (> 1000)
-  let tx =
-    mocktail_tx()
-      |> required_signer(beneficiary)
-      |> invalid_before(1001)
-      |> complete()
-
-  vesting.spend(Some(datum), Claim, mock_utxo_ref(), tx)
-}
-
-test fail_claim_too_early() {
-  let lock_until = 1000
-  let owner = #"010101"
-  let beneficiary = #"020202"
-
-  let datum = VestingDatum { lock_until, owner, beneficiary }
-
-  // Giả lập giao dịch quá sớm: valid_from = 999 (< 1000)
-  let tx =
-    mocktail_tx()
-      |> required_signer(beneficiary)
-      |> invalid_before(999)
-      |> complete()
-
-  // Phải phủ định (!) để đảm bảo giao dịch BỊ TỪ CHỐI
-  !vesting.spend(Some(datum), Claim, mock_utxo_ref(), tx)
-}
-```
-
-Lệnh chạy kiểm thử trên Terminal:
-```bash
-aiken check
-```
-
----
-
-## 6. BÀI TẬP VỀ NHÀ MỞ RỘNG (HOMEWORK)
+## 5. BÀI TẬP VỀ NHÀ MỞ RỘNG (HOMEWORK)
 
 > 💡 **Mục tiêu:** Nâng cấp hợp đồng Vesting cơ bản thành một hợp đồng thông minh thực tế, tuân thủ các quy tắc bảo vệ quyền lợi hai chiều giữa Owner và Beneficiary.
 
@@ -225,37 +184,6 @@ Tuy nhiên trong thực tế kinh doanh, điều này tạo ra rủi ro *Rug-Pul
 - `Owner` **CHỈ ĐƯỢC PHÉP CANCEL TRƯỚC THỜI ĐIỂM `lock_until`** (tức là khi khoản tiền chưa bước vào giai đoạn cho phép Claim).
 - Ngay khi thời gian vượt qua `lock_until`, `Owner` **HOÀN TOÀN MẤT QUYỀN CANCEL**. Quyền sở hữu tài sản lúc này thuộc về `Beneficiary`.
 
-#### 🛠️ Hướng dẫn & Gợi ý thuật toán:
-1. **Phân tích logic:**
-   - Để `Owner` chỉ cancel được **TRƯỚC** `lock_until`, toàn bộ khoảng thời gian hợp lệ (`validity_range`) của giao dịch Cancel phải kết thúc **TRƯỚC HOẶC BẰNG** `lock_until`.
-   - Do đó, ta kiểm tra **Cận Trên (`upper_bound` / `valid_to`)** của giao dịch: `valid_to <= lock_until`.
-
-2. **Xây dựng hàm Helper `valid_before`:**
-   ```rust
-   fn valid_before(range: ValidityRange, lock_until: Int) -> Bool {
-     when range.upper_bound.bound_type is {
-       Finite(tx_valid_to) -> tx_valid_to <= lock_until
-       _ -> false
-     }
-   }
-   ```
-
-3. **Cập nhật luồng `Cancel` trong Validator:**
-   ```rust
-   when redeemer is {
-     Cancel ->
-       and {
-         key_signed(self.extra_signatories, datum.owner),
-         valid_before(self.validity_range, datum.lock_until),
-       }
-
-     Claim ->
-       and {
-         key_signed(self.extra_signatories, datum.beneficiary),
-         valid_after(self.validity_range, datum.lock_until),
-       }
-   }
-   ```
 
 ---
 
@@ -272,142 +200,4 @@ Trong hợp đồng Vesting thương mại thực tế, người nạp tiền (`
 
 ---
 
-#### 🛠️ Hướng dẫn & Mã nguồn Aiken Mẫu cho Bài tập 2:
-
-##### Step 1: Cập nhật `VestingDatum`
-Bổ sung trường `deadline` vào `VestingDatum`:
-```rust
-pub type VestingDatum {
-  lock_until: Int,
-  deadline: Int,
-  owner: VerificationKeyHash,
-  beneficiary: VerificationKeyHash,
-}
-```
-
-##### Step 2: Xây dựng hàm Helper `valid_between`
-Hàm kiểm tra khoảng thời gian giao dịch phải nằm **hoàn toàn trong cửa sổ `[from, to]`**:
-```rust
-fn valid_between(range: ValidityRange, from: Int, to: Int) -> Bool {
-  when (range.lower_bound.bound_type, range.upper_bound.bound_type) is {
-    (Finite(tx_valid_from), Finite(tx_valid_to)) ->
-      tx_valid_from >= from && tx_valid_to <= to
-    _ -> false
-  }
-}
-```
-
-##### Step 3: Xây dựng Validator `vesting_window`
-```rust
-validator vesting_window {
-  spend(
-    datum: Option<VestingDatum>,
-    redeemer: VestingRedeemer,
-    _utxo: OutputReference,
-    self: Transaction,
-  ) {
-    expect Some(datum) = datum
-
-    when redeemer is {
-      // 1. Beneficiary chỉ được Claim TRONG KHOẢNG [lock_until, deadline]
-      Claim ->
-        and {
-          key_signed(self.extra_signatories, datum.beneficiary),
-          valid_between(self.validity_range, datum.lock_until, datum.deadline),
-        }
-
-      // 2. Owner chỉ được rút lại tiền SAU KHI quá hạn deadline (Beneficiary bỏ lỡ cơ hội)
-      Cancel ->
-        and {
-          key_signed(self.extra_signatories, datum.owner),
-          valid_after(self.validity_range, datum.deadline),
-        }
-    }
-  }
-}
-```
-
----
-
-#### 🧪 Bộ Unit Test Mẫu cho Bài tập 2:
-
-Hãy thêm các test cases sau vào file `vesting.ak` để kiểm thử logic cửa sổ thời gian:
-
-```rust
-// Test 1: Beneficiary claim thành công trong cửa sổ thời gian [1000, 2000]
-test beneficiary_claim_within_window_success() {
-  let datum = VestingDatum {
-    lock_until: 1000,
-    deadline: 2000,
-    owner: #"010101",
-    beneficiary: #"020202",
-  }
-
-  let tx =
-    mocktail_tx()
-      |> required_signer(#"020202")
-      |> invalid_before(1200)   // valid_from = 1200 >= 1000
-      |> invalid_hereafter(1800) // valid_to = 1800 <= 2000
-      |> complete()
-
-  vesting_window.spend(Some(datum), Claim, mock_utxo_ref(), tx)
-}
-
-// Test 2: Beneficiary claim thất bại khi đã quá hạn deadline (> 2000)
-test beneficiary_claim_after_deadline_fail() {
-  let datum = VestingDatum {
-    lock_until: 1000,
-    deadline: 2000,
-    owner: #"010101",
-    beneficiary: #"020202",
-  }
-
-  let tx =
-    mocktail_tx()
-      |> required_signer(#"020202")
-      |> invalid_before(2001)   // Quá hạn deadline!
-      |> invalid_hereafter(2500)
-      |> complete()
-
-  !vesting_window.spend(Some(datum), Claim, mock_utxo_ref(), tx)
-}
-
-// Test 3: Owner rút lại tiền thành công khi đã quá hạn deadline (> 2000)
-test owner_reclaim_after_deadline_success() {
-  let datum = VestingDatum {
-    lock_until: 1000,
-    deadline: 2000,
-    owner: #"010101",
-    beneficiary: #"020202",
-  }
-
-  let tx =
-    mocktail_tx()
-      |> required_signer(#"010101")
-      |> invalid_before(2001) // valid_from = 2001 >= 2000
-      |> complete()
-
-  vesting_window.spend(Some(datum), Cancel, mock_utxo_ref(), tx)
-}
-
-// Test 4: Owner rút lại tiền thất bại khi chưa đến mốc deadline (vẫn trong thời hạn claim của beneficiary)
-test owner_reclaim_before_deadline_fail() {
-  let datum = VestingDatum {
-    lock_until: 1000,
-    deadline: 2000,
-    owner: #"010101",
-    beneficiary: #"020202",
-  }
-
-  let tx =
-    mocktail_tx()
-      |> required_signer(#"010101")
-      |> invalid_before(1500) // valid_from = 1500 < 2000 (Vi phạm!)
-      |> complete()
-
-  !vesting_window.spend(Some(datum), Cancel, mock_utxo_ref(), tx)
-}
-```
-
----
-👉 **Tiếp theo:** Chuyển sang **[Bài giảng 3: Xây dựng Off-chain & Frontend cho Vesting dApp với MeshJS](./bai_giang_3.md)** để kết nối hợp đồng Aiken vừa viết với ứng dụng Web!
+👉 **Tiếp theo:** Chuyển sang **[Bài giảng 3: Xây dựng Off-chain & Frontend cho Vesting dApp với MeshJS](./lesson_03.md)** để kết nối hợp đồng Aiken vừa viết với ứng dụng Web!
