@@ -53,7 +53,13 @@ export class MeshTxInitiator {
         this.version = version;
         switch (this.version) {
             case 1:
+                this.languageVersion = "V1";
+                break;
+            case 2:
                 this.languageVersion = "V2";
+                break;
+            case 3:
+                this.languageVersion = "V3";
                 break;
             default:
                 this.languageVersion = "V3";
