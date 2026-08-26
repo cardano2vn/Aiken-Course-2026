@@ -5,38 +5,44 @@ Tài liệu này cung cấp cái nhìn toàn cảnh về cấu trúc và các lu
 ## 1. Sơ đồ Kiến trúc Mức cao (High-Level Architecture)
 
 ```mermaid
-graph TD
-    classDef frontend fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px,color:#000;
-    classDef offchain fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000;
-    classDef onchain fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000;
+flowchart TD
+    classDef userWallet fill:#15202e,stroke:#38bdf8,stroke-width:1.5px,color:#fff;
+    classDef feBox fill:#0f172a,stroke:#0284c7,stroke-width:1.5px,color:#fff;
+    classDef offBox fill:#1a0f1a,stroke:#e11d48,stroke-width:1.5px,color:#fff;
+    classDef infraBox fill:#16162c,stroke:#8b5cf6,stroke-width:2px,color:#fff;
+    classDef onBox fill:#052e24,stroke:#10b981,stroke-width:1.5px,color:#fff;
 
-    subgraph User["Ví người dùng"]
-        Browser["Ví CIP-30 (Eternl, Lace)"]
+    Wallet["<b>VÍ NGƯỜI CHƠI</b><br>CIP-30"]:::userWallet
+
+    subgraph Frontend["<b>LỚP FRONT-END</b>"]
+        direction LR
+        FE_React["<b>React Components</b><br><small>GameBoard, GuessForm, ...</small>"]:::feBox
+        FE_Wallet["<b>Kết nối Ví</b><br><small>BrowserWallet (MeshJS)</small>"]:::feBox
+        FE_React ~~~ FE_Wallet
     end
 
-    subgraph Frontend["Lớp Giao diện (Next.js)"]
-        UI["React Flow & UI Components"]:::frontend
-        WalletConn["Kết nối Ví"]:::frontend
+    subgraph Offchain["<b>LỚP OFF-CHAIN</b>"]
+        direction LR
+        Off_Query["<b>Truy vấn dữ liệu blockchain</b><br><small>Tìm nạp trạng thái game</small>"]:::offBox
+        Off_Tx["<b>Xây dựng Giao dịch</b><br><small>MeshTxBuilder</small>"]:::offBox
+        Off_Query ~~~ Off_Tx
     end
 
-    subgraph Offchain["Lớp Tích hợp (MeshJS SDK)"]
-        Query["Truy vấn Blockchain"]:::offchain
-        TxBuilder["Xây dựng Giao dịch"]:::offchain
-        Provider["Blockfrost Provider"]:::offchain
+    Infra["<b>HẠ TẦNG</b><br>Blockfrost API"]:::infraBox
+
+    subgraph Onchain["<b>LỚP ON-CHAIN</b>"]
+        direction LR
+        On_Game["Quỹ thưởng + Số bí mật"]:::onBox
     end
 
-    subgraph Onchain["Lớp Hợp đồng Thông minh"]
-        Validator["Secret Number Validator"]:::onchain
-        Treasury["Game UTxO (Quỹ thưởng)"]:::onchain
-    end
+    Wallet --> FE_Wallet
+    FE_React --> Off_Query
+    Off_Query --> Infra
+    Infra --> On_Game
 
-    Browser <--> WalletConn
-    UI --> Query
-    UI --> TxBuilder
-    Query --> Provider
-    TxBuilder --> Provider
-    Provider <--> Treasury
-    TxBuilder --> Validator
+    style Frontend fill:#081b33,stroke:#0284c7,stroke-width:2px,color:#38bdf8;
+    style Offchain fill:#220917,stroke:#e11d48,stroke-width:2px,color:#fb7185;
+    style Onchain fill:#03211a,stroke:#059669,stroke-width:2px,color:#34d399;
 ```
 
 Hệ thống được thiết kế theo mô hình 3 lớp phân tách rõ ràng:

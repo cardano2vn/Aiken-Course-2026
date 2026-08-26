@@ -1,4 +1,4 @@
-# 📖 Detailed Description of Course DApps
+# 📖 Detailed Description of Course Modules
 
 This document provides detailed explanations of how each dApp operates, its on-chain verification logic (*Aiken Validator*), and the relevant foundational knowledge and security practices across the course modules.
 
@@ -81,6 +81,7 @@ The validator verifies 2 primary scenarios via Redeemers:
 - Multi-asset UTxOs
 - Collateral in Cardano transactions
 - Plutus Blueprint
+- Reference Scripts
 - Double Satisfaction attacks
 
 ---
@@ -159,7 +160,6 @@ The validator manages actions via Redeemers:
 
 - CIP-25 NFTs
 - Royalty Fees
-- Pattern Matching
 - Pipe operator (`|>`)
 
 ---
