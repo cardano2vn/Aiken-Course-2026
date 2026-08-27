@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bài giảng 1: Sàn Giao Dịch Phi Tập Trung (Marketplace dApp) &amp; Kiến Trúc Bảo Mật EUTxO</title>
+  <title>Bài giảng 1: Tổng Quan dApp Marketplace &amp; Lý Thuyết Cardano NFT Nền Tảng</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
@@ -43,22 +43,26 @@
     th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
     tr:hover { background: #1e293b80; }
     .mermaid { background: #111827; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.5rem; display: flex; justify-content: center; }
+    .info-box { background: rgba(56, 189, 248, 0.1); border-left: 4px solid #38bdf8; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Bài giảng 1: Sàn Giao Dịch Phi Tập Trung (Marketplace dApp) &amp; Kiến Trúc Bảo Mật EUTxO</h1>
-    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Chuyên gia đồng hành:</strong> <code>content-creator</code> x <code>frontend-design</code></blockquote>
+    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Mục tiêu:</strong> Nắm vững mô hình P2P Trustless Trading, chuẩn CIP-25 NFT, cú pháp Pipe Operator (|>), kiến trúc Redeemer 3 nhánh và kỹ thuật bảo mật Output Validation.</blockquote>
     <hr>
+    
     <h2>🧭 Lộ Trình Khám Phá Bài Học</h2>
     <div class="mermaid">
     graph LR
         A["1. Két Sắt Phi Tập Trung"] --> B["2. 4 Đối Tượng & 3 Redeemer"]
-        B --> C["3. Cấu Trúc Datum & MValue"]
-        C --> D["4. Toán Học Chia Phí Basis Points"]
-        D --> E["5. Lỗ Hổng Manipulate & Output Validation"]
+        B --> C["3. CIP-25 NFT & Policy ID"]
+        C --> D["4. Cấu Trúc Datum & MValue"]
+        D --> E["5. Toán Học Phí & Pipe Operator (|>)"]
+        E --> F["6. Output Validation"]
     </div>
     <hr>
+    
     <h2>1. Đặt Vấn Đề: Bài Toán Trưng Bày &amp; Giao Dịch P2P Không Niềm Tin</h2>
     <p>Hãy tưởng tượng kịch bản thực tế trong thế giới Web3:</p>
     <ul>
@@ -67,25 +71,28 @@
       <li><strong>Creator (Tác giả):</strong> Người sáng tạo bộ sưu tập, muốn nhận <strong>5% Phí Bản Quyền (Royalty Fee)</strong> cho mọi giao dịch thứ cấp.</li>
       <li><strong>Admin Owner (Sàn):</strong> Thu <strong>2% Phí Vận Hành (Platform Fee)</strong> để duy trì dApp.</li>
     </ul>
+
     <h3>🔐 Mô Hình "Két Sắt Kính Cường Lực" Cardano EUTxO</h3>
-    <pre><code class="language-plaintext">[Alice] ---&gt; (Niêm yết NFT + Datum: 100 ADA) ---&gt; [KÉT SẮT SMART CONTRACT]
+    <pre><code class="language-plaintext">[Alice] ---> (Niêm yết NFT + Datum: 100 ADA) ---> [KÉT SẮT SMART CONTRACT]
                                                            |
-[Bob]   ---&gt; (Nạp 100 ADA &amp; Kích hoạt Buy) --------------+
+[Bob]   ---> (Nạp 100 ADA & Kích hoạt Buy) --------------+
                                                            |
            +-----------------------------------------------+
            |
-           +---&gt; [Ví Alice]   : 93 ADA (Giá Net)
-           +---&gt; [Ví Creator] :  5 ADA (5% Royalty)
-           +---&gt; [Ví Admin]   :  2 ADA (2% Platform Fee)
-           +---&gt; [Ví Bob]     :  Bức tranh NFT</code></pre>
+           +---> [Ví Alice]   : 93 ADA (Giá Net)
+           +---> [Ví Creator] :  5 ADA (5% Royalty)
+           +---> [Ví Admin]   :  2 ADA (2% Platform Fee)
+           +---> [Ví Bob]     :  Bức tranh NFT</code></pre>
     <hr>
+
     <h2>2. Thiết Kế Kiến Trúc: 4 Đối Tượng &amp; 3 Nhánh Redeemer</h2>
     <p>Để hiện thực hóa mô hình Két Sắt On-chain, Validator Marketplace phân tách logic thẩm định thành <strong>3 Redeemer</strong>:</p>
-    <pre><code class="language-aiken">pub type MarketplaceRedeemer {
+    <pre><code class="language-rust">pub type MarketplaceRedeemer {
   Buy
   Update { new_price: Int }
   Cancel
 }</code></pre>
+    
     <div class="table-container">
       <table>
         <thead>
@@ -99,45 +106,72 @@
       </table>
     </div>
     <hr>
-    <h2>3. Mổ Xẻ Cấu Trúc Datum Nâng Cao (MarketplaceDatum &amp; MValue)</h2>
-    <pre><code class="language-aiken">pub type MValue =
-  Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;
+
+    <h2>3. Chuẩn CIP-25 NFT &amp; Định Danh Tài Sản Trên Cardano</h2>
+    <div class="info-box">
+      <h3>🎨 Tiêu Chuẩn CIP-25 Cardano NFT Metadata Standard</h3>
+      <p>Trên Cardano, một NFT không chỉ được biểu diễn bằng một ID số nguyên đơn thuần như Web2, mà được định danh tuyệt đối bằng cặp thông số:</p>
+      <ul>
+        <li><code>PolicyId</code>: Mã Hash đại diện cho hợp đồng đúc Token (Minting Policy).</li>
+        <li><code>AssetName</code>: Tên định danh của NFT trong bộ sưu tập (dưới dạng chuỗi Byte Hex).</li>
+      </ul>
+      <p>Cặp <code>(PolicyId, AssetName)</code> đóng vai trò như <strong>Dấu vân tay kỹ thuật số độc bản (Asset Fingerprint)</strong>. Hợp đồng Marketplace của chúng ta sử dụng cấu trúc này trong kiểu <code>MValue</code> để đảm bảo giao dịch đúng tài sản gốc của tác giả.</p>
+    </div>
+    <hr>
+
+    <h2>4. Mổ Xẻ Cấu Trúc Datum Nâng Cao (MarketplaceDatum &amp; MValue)</h2>
+    <pre><code class="language-rust">pub type MValue =
+  Pairs<PolicyId, Pairs<AssetName, Int>>
 
 pub type MarketplaceDatum {
   MarketplaceDatum {
     seller: Address,
     price: Int,
     nft: MValue,
-    royalty_recipient: Option&lt;Address&gt;,
+    royalty_recipient: Option<Address>,
     royalty_rate: Int,
   }
 }</code></pre>
-    <blockquote>💡 <strong>Tại sao lại dùng <code>MValue</code> dạng <code>Pairs</code>?</strong><br>Trong Cardano Plutus Core, tài sản Token/NFT được định danh bởi cặp <code>(PolicyId, AssetName)</code> đi kèm số lượng <code>Int</code>. Sử dụng <code>Pairs</code> giúp hợp đồng xử lý cực kỳ linh hoạt: Nó không chỉ rao bán 1 NFT đơn lẻ mà có thể <strong>niêm yết một gói nhiều tài sản (Multi-asset bundle)</strong> trong cùng một UTxO!</blockquote>
+    <blockquote>💡 <strong>Tại sao lại dùng <code>MValue</code> dạng <code>Pairs</code>?</strong><br>Sử dụng <code>Pairs</code> giúp hợp đồng xử lý cực kỳ linh hoạt: Nó không chỉ rao bán 1 NFT đơn lẻ mà có thể <strong>niêm yết một gói nhiều tài sản (Multi-asset bundle)</strong> trong cùng một UTxO!</blockquote>
     <hr>
-    <h2>4. Cơ Chế Toán Học Phí Sàn &amp; Phí Bản Quyền (Basis Points)</h2>
+
+    <h2>5. Cơ Chế Phí &amp; Cú Pháp Toán Tử Pipe Operator (|>) Trong Aiken</h2>
     <p>Giao dịch <code>Buy</code> thực hiện phân chia dòng tiền theo chuẩn <strong>Basis Points (1/10.000)</strong>:</p>
-    <p>royalty_amount = (datum.price * datum.royalty_rate) / 10000</p>
-    <p>platform_fee_amount = (datum.price * platform_fee_rate) / 10000</p>
-    <p>seller_amount = datum.price - royalty_amount - platform_fee_amount</p>
+    <ul>
+      <li><code>royalty_amount = (datum.price * datum.royalty_rate) / 10000</code></li>
+      <li><code>platform_fee_amount = (datum.price * platform_fee_rate) / 10000</code></li>
+      <li><code>seller_amount = datum.price - royalty_amount - platform_fee_amount</code></li>
+    </ul>
+
+    <div class="info-box">
+      <h3>🔗 Cú Pháp Toán Tử Pipe Operator (<code>|></code>)</h3>
+      <p>Toán tử Pipe <code>|></code> (kế thừa từ Elixir/F#/OCaml) truyền kết quả từ biểu thức vế trái làm đối số đầu tiên cho hàm ở vế phải. Điều này giúp tránh việc viết các hàm lồng nhau phức tạp <code>f(g(x))</code>, chuyển thành luồng dữ liệu (Pipeline) trong sáng:</p>
+      <pre><code class="language-rust">// Cách dùng Pipe Operator (|>) cực kỳ ngắn gọn và dễ đọc:
+get_all_value_to(tx.outputs, datum.seller)
+  |> value_geq(from_lovelace(seller_amount))</code></pre>
+    </div>
     <hr>
-    <h2>5. Phân Tích Sâu Lỗ Hổng Price &amp; Address Manipulation &amp; Kỹ Thuật Output Validation</h2>
+
+    <h2>6. Phân Tích Sâu Lỗ Hổng Price &amp; Address Manipulation &amp; Kỹ Thuật Output Validation</h2>
     <p>Trong mô hình Cardano UTxO, khi người bán thực hiện hành động <strong><code>Update</code></strong> để điều chỉnh giá niêm yết, bản chất giao dịch Off-chain sẽ <strong>chi tiêu UTxO cũ tại Script và tạo một UTxO mới đính kèm Inline Datum mới tại Script Address</strong>.</p>
+    
     <h3>⚠️ Kịch Bản Tấn Công Tráo Ví (Address Manipulation Attack)</h3>
     <pre><code class="language-plaintext">[UTxO Cũ tại Script: Seller = Alice, Price = 100 ADA, Asset = NFT_A]
        |
        |  (Kẻ tấn công can thiệp tạo Datum mới khi Update)
        v
-[UTxO Mới tại Script: Seller = Hacker_Addr, Price = 80 ADA, Asset = NFT_A]  &lt;-- LỖ HỔNG CHẾT NGƯỜI!
+[UTxO Mới tại Script: Seller = Hacker_Addr, Price = 80 ADA, Asset = NFT_A]  <-- LỖ HỔNG CHẾT NGƯỜI!
        |
        |  (Nạn nhân bấm Buy thanh toán 80 ADA)
        v
-Validator đọc Datum mới -&gt; Chuyển 80 ADA về ví Hacker_Addr! Alice mất trắng NFT!</code></pre>
+Validator đọc Datum mới -> Chuyển 80 ADA về ví Hacker_Addr! Alice mất trắng NFT!</code></pre>
+
     <h3>🛡️ Giải Pháp Output Validation Triệt Hạ Lỗ Hổng</h3>
-    <pre><code class="language-aiken">let is_datum_secure =
-  output_datum.seller == datum.seller &amp;&amp;
-  output_datum.nft == datum.nft &amp;&amp;
-  output_datum.royalty_recipient == datum.royalty_recipient &amp;&amp;
-  output_datum.royalty_rate == datum.royalty_rate &amp;&amp;
+    <pre><code class="language-rust">let is_datum_secure =
+  output_datum.seller == datum.seller &&
+  output_datum.nft == datum.nft &&
+  output_datum.royalty_recipient == datum.royalty_recipient &&
+  output_datum.royalty_rate == datum.royalty_rate &&
   output_datum.price == new_price</code></pre>
   </div>
   <script>hljs.highlightAll();</script>

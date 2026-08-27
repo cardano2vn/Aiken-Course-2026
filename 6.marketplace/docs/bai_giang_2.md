@@ -6,6 +6,7 @@
 | **Parameterized Validator** | Validator nhận các tham số toàn cục khi khởi tạo (vd: ví admin, tỷ lệ phí). | Bài 6.2 |
 | **`inputs_at`** | Hàm kiểm tra đếm số lượng UTxO từ một địa chỉ cụ thể bị chi tiêu trong giao dịch. | Bài 6.2 |
 | **`value_geq`** | Toán tử kiểm tra giá trị (value) xem có lớn hơn hoặc bằng mức yêu cầu không. | Bài 6.2 |
+| **Pipe Operator (`\|>`)** | Cú pháp truyền kết quả vế trái làm đối số đầu tiên cho hàm ở vế phải, tạo luồng dữ liệu Pipeline trong sáng. | Bài 6.2 |
 | **Double Satisfaction** | Lỗ hổng khi kẻ tấn công gom nhiều UTxO vào cùng một transaction để gian lận thanh toán. | Bài 6.2 |
 | **Output Validation** | Kỹ thuật thẩm định tính toàn vẹn của Datum và Output mới sinh ra tại Script Address. | Bài 6.2 |
 
@@ -13,7 +14,7 @@
 
 ### Bài 6.2: Phân Tích Chi Tiết Mã Nguồn Aiken `marketplace.ak` & Demo UI
 
-**Mục tiêu bài học**: Giúp học viên nắm vững từng dòng code Aiken On-chain trong file `validators/marketplace.ak`, hiểu sâu cách thẩm định dữ liệu trên Cardano EUTxO, giải mã kỹ thuật bảo mật Output Validation, tóm tắt 7 bài Unit Tests và trải nghiệm các nút bấm tương tác trên giao diện Web3.
+**Mục tiêu bài học**: Giúp học viên nắm vững từng dòng code Aiken On-chain trong file `validators/marketplace.ak`, hiểu sâu cách thẩm định dữ liệu trên Cardano EUTxO, làm chủ cú pháp Pipe Operator (`|>`), giải mã kỹ thuật bảo mật Output Validation, tóm tắt 7 bài Unit Tests và trải nghiệm các nút bấm tương tác trên giao diện Web3.
 **Thời lượng dự kiến**: 22 - 25 phút
 **Tài liệu & Công cụ**: Source code `marketplace.ak`, Giao diện dApp Next.js.
 
@@ -121,6 +122,12 @@ validator marketplace(owner: Address, platform_fee_rate: Int) {
    - `is_seller_paid`: Sử dụng `get_all_value_to(tx.outputs, datum.seller)` cộng dồn tất cả ADA gửi về địa chỉ `datum.seller` và dùng `value_geq(from_lovelace(seller_amount))` đảm bảo người bán nhận đủ tiền net.
    - `is_platform_paid`: Thẩm định nếu `platform_fee_amount > 0` thì địa chỉ `owner` (Admin Sàn) phải nhận đủ phí sàn.
    - `is_royalty_paid`: Kiểm tra nếu `datum.royalty_recipient` mang giá trị `Some(creator)` và `royalty_amount > 0`, transaction bắt buộc phải chuyển đủ phí bản quyền về ví `creator`.
+
+#### 🔗 Phân Tích Sâu Cú Pháp Toán Tử Pipe Operator (`|>`) Trong Aiken:
+- Biểu thức `get_all_value_to(tx.outputs, datum.seller) |> value_geq(from_lovelace(seller_amount))` tự động truyền kết quả `Value` ở vế trái làm **đối số đầu tiên** cho hàm `value_geq` vế phải.
+- Cách viết này tương đương 100% với:
+  `value_geq(get_all_value_to(tx.outputs, datum.seller), from_lovelace(seller_amount))`.
+- **Lợi ích**: Tạo luồng dữ liệu (Pipeline) chảy mượt mà từ trái sang phải, triệt tiêu bẫy hàm lồng nhau (Nested Functions Hell), giúp mã On-chain cực kỳ trong sáng và dễ kiểm thử.
 
 ---
 

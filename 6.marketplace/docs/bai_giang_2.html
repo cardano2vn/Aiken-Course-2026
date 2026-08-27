@@ -45,12 +45,13 @@
     tr:hover { background: #1e293b80; }
     .mermaid { background: #111827; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.5rem; display: flex; justify-content: center; }
     .analysis-box { background: rgba(13, 148, 136, 0.1); border-left: 4px solid #2dd4bf; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
+    .info-box { background: rgba(56, 189, 248, 0.1); border-left: 4px solid #38bdf8; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Bài giảng 2: Phân Tích Chi Tiết Mã Nguồn Aiken marketplace.ak &amp; Demo UI</h1>
-    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Mục tiêu:</strong> Nắm vững từng dòng code Aiken On-chain, hiểu sâu logic thẩm định 3 hành động Buy, Update, Cancel và kỹ thuật bảo mật Output Validation.</blockquote>
+    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Mục tiêu:</strong> Nắm vững từng dòng code Aiken On-chain, hiểu sâu logic thẩm định 3 hành động Buy, Update, Cancel, cú pháp Pipe Operator (|>) và kỹ thuật bảo mật Output Validation.</blockquote>
     <hr>
     
     <h2>1. Khai Báo Cấu Trúc Dữ Liệu (MarketplaceDatum &amp; MarketplaceRedeemer)</h2>
@@ -161,6 +162,23 @@ pub type MarketplaceRedeemer {
       </ol>
     </div>
 
+    <div class="info-box">
+      <h3>🔗 Phân Tích Sâu Cú Pháp Toán Tử Pipe Operator (<code>|></code>) Trong Aiken</h3>
+      <p>Trong nhánh <code>Buy</code> trên, toán tử Pipe <code>|></code> xuất hiện liên tục trong việc thẩm định các khoản thanh toán. Hãy cùng giải mã chi tiết cơ chế của toán tử này:</p>
+      <ul>
+        <li><strong>Cơ chế hoạt động cú pháp:</strong> Khi viết <code>expression |> function(arg2)</code>, Aiken tự động lấy kết quả của <code>expression</code> ở vế trái để truyền làm <strong>đối số đầu tiên</strong> cho <code>function</code> ở vế phải.</li>
+        <li><strong>Ví dụ cụ thể:</strong>
+          <pre><code class="language-rust">// Cú pháp dùng Pipe Operator (|>):
+get_all_value_to(tx.outputs, datum.seller)
+  |> value_geq(from_lovelace(seller_amount))
+
+// Hoàn toàn tương đương với cách viết lồng hàm truyền thống:
+value_geq(get_all_value_to(tx.outputs, datum.seller), from_lovelace(seller_amount))</code></pre>
+        </li>
+        <li><strong>Ưu điểm vượt trội:</strong> Giúp luồng xử lý dữ liệu chảy tự nhiên từ trái sang phải theo dạng đường ống (Pipeline), tránh bẫy hàm lồng nhau (Nested Functions Hell) khi xử lý qua nhiều bước biến đổi dữ liệu phức tạp.</li>
+      </ul>
+    </div>
+
     <h3>🟡 2. Hành Động <code>Update</code> (Cập Nhật Giá Niêm Yết &amp; Output Validation)</h3>
     <h4>📝 Code Snippet Nhánh <code>Update</code>:</h4>
     <pre><code class="language-rust">      Update { new_price } -> {
@@ -208,7 +226,7 @@ pub type MarketplaceRedeemer {
                 <li><code>output_datum.seller == datum.seller</code>: Ví người bán PHẢI giữ nguyên 100%.</li>
                 <li><code>output_datum.nft == datum.nft</code>: Danh sách NFT PHẢI giữ nguyên, không bị rút bớt tài sản.</li>
                 <li><code>output_datum.royalty_recipient</code> &amp; <code>royalty_rate</code>: Thông tin tác giả PHẢI giữ nguyên.</li>
-                <li><code>output_datum.price == new_price</code>: Thông số duy nhất ĐƯỢC PHÉP THAY ĐỔI chính là mức giá bán mới khớp với <code>new_price</code> truyền trong Redeemer.</li>
+                <li><code>output_datum.price == new_price</code>: Thông số duy nhất ĐƯỢC PHẾP THAY ĐỔI chính là mức giá bán mới khớp với <code>new_price</code> truyền trong Redeemer.</li>
               </ul>
             </li>
             <li><em>Ý nghĩa bảo mật:</em> Ngăn chặn hoàn toàn kịch bản Hacker can thiệp tráo địa chỉ <code>seller</code> thành ví của Hacker khi người bán thao tác Edit Price.</li>
