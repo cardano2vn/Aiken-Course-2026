@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 3: Phân Tích Code Off-Chain MeshJS &amp; Tích Hợp UI Next.js dApp Marketplace</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --primary-hover: #0f766e;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.7; padding: 2rem 1rem; }
+    .container { max-width: 900px; margin: 0 auto; background: var(--bg-card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.2rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); }
+    h2 { font-size: 1.6rem; color: #2dd4bf; margin-top: 2rem; margin-bottom: 1rem; }
+    h3 { font-size: 1.25rem; color: #67e8f9; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    h4 { font-size: 1.1rem; color: #f472b6; margin-top: 1.2rem; margin-bottom: 0.5rem; }
+    p { margin-bottom: 1.2rem; color: #e2e8f0; }
+    blockquote { background: #0284c715; border-left: 4px solid var(--accent-color); padding: 1rem 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; color: #7dd3fc; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+    ul, ol { margin-left: 1.8rem; margin-bottom: 1.5rem; color: #e2e8f0; }
+    li { margin-bottom: 0.4rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.8); color: #f472b6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.5rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.2rem; border: none; display: block; color: #f8fafc; font-size: 0.92em; }
+    .analysis-box { background: rgba(13, 148, 136, 0.1); border-left: 4px solid #2dd4bf; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 3: Phân Tích Code Off-Chain MeshJS &amp; Tích Hợp UI Next.js dApp Marketplace</h1>
+    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Mục tiêu:</strong> Hiểu sâu cách xây dựng mã Off-chain TypeScript bằng MeshJS SDK, nạp tham số applyParamsToScript, đóng gói Inline Datum Plutus JSON, và mổ xẻ 4 hàm giao dịch cốt lõi listAsset, updatePrice, buyAsset, cancelListing.</blockquote>
+    <hr>
+    
+    <h2>1. Quy Trình Biên Dịch CIP-057 Plutus Blueprint (plutus.json)</h2>
+    <pre><code class="language-bash">aiken build</code></pre>
+    <p>Quá trình biên dịch tạo ra tệp Plutus Blueprint <code>plutus.json</code> theo chuẩn <strong>CIP-057</strong> chứa mã máy CBOR <code>compiledCode</code> và Validator Hash.</p>
+    
+    <hr>
+    <h2>2. Khởi Tạo Parameterized Script Với applyParamsToScript</h2>
+    <pre><code class="language-typescript">import { applyParamsToScript, deserializeAddress, pubKeyAddress, integer } from "@meshsdk/core";
+import blueprint from "./plutus.json";
+
+export class MarketplaceContract extends TxInitiator {
+  ownerAddress: string;
+  feePercentageBasisPoint: number;
+  scriptCbor: string;
+  scriptAddress: string;
+
+  constructor(inputs: TxInitiatorInput, ownerAddress: string, feePercentageBasisPoint: number) {
+    super(inputs);
+    this.ownerAddress = ownerAddress;
+    this.feePercentageBasisPoint = feePercentageBasisPoint;
+
+    const { pubKeyHash: ownerPkh, stakeCredentialHash: ownerStake } = deserializeAddress(ownerAddress);
+
+    this.scriptCbor = applyParamsToScript(
+      blueprint.validators[0].compiledCode,
+      [
+        pubKeyAddress(ownerPkh, ownerStake || ""),
+        integer(feePercentageBasisPoint),
+      ],
+      "JSON"
+    );
+    this.scriptAddress = this.getScriptAddress(this.scriptCbor);
+  }
+}</code></pre>
+
+    <hr>
+    <h2>3. Xây Dựng Inline Datum Plutus JSON (marketplaceDatum)</h2>
+    <pre><code class="language-typescript">export const marketplaceDatum = (
+  sellerAddress: string,
+  priceInLovelace: number,
+  assetsForSale: Asset[],
+  royaltyAddress?: string,
+  royaltyRate: number = 0
+) => {
+  const { pubKeyHash: sellerPkh, stakeCredentialHash: sellerStake } = deserializeAddress(sellerAddress);
+
+  const royaltyRecipientField = royaltyAddress
+    ? (() => {
+        const { pubKeyHash: royPkh, stakeCredentialHash: royStake } = deserializeAddress(royaltyAddress);
+        return conStr0([pubKeyAddress(royPkh, royStake || "")]);
+      })()
+    : { constructor: 1, fields: [] };
+
+  return safePlutusJson(
+    conStr0([
+      pubKeyAddress(sellerPkh, sellerStake || ""),
+      integer(priceInLovelace),
+      value(assetsForSale),
+      royaltyRecipientField,
+      integer(royaltyRate),
+    ])
+  );
+};</code></pre>
+
+    <hr>
+    <h2>4. Mổ Xẻ 4 Hàm Giao Dịch Cốt Lõi Phía Off-Chain (offchain.ts)</h2>
+    
+    <h3>🟢 1. Hàm <code>listAsset</code> (Niêm Yết NFT Khóa Vào Script)</h3>
+    <h4>📝 Code Snippet:</h4>
+    <pre><code class="language-typescript">listAsset = async (assetsForSale: Asset[], price: number, royaltyAddress?: string, royaltyRate: number = 0) => {
+  const { utxos, walletAddress } = await this.getWalletInfoForTx();
+  const outputDatum = marketplaceDatum(walletAddress, price, assetsForSale, royaltyAddress, royaltyRate);
+
+  await this.mesh
+    .txOut(this.scriptAddress, assetsForSale)
+    .txOutInlineDatumValue(outputDatum, "JSON")
+    .changeAddress(walletAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+  return this.mesh.txHex;
+};</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Hàm <code>listAsset</code>:</h3>
+      <ol>
+        <li><strong>Lấy ngữ cảnh ví người dùng:</strong> Gọi <code>this.getWalletInfoForTx()</code> để trích xuất danh sách các UTxO đang sẵn có trong ví và địa chỉ ví <code>walletAddress</code> đóng vai trò người bán (Seller).</li>
+        <li><strong>Khởi tạo Inline Datum Plutus JSON:</strong> Gọi hàm <code>marketplaceDatum(...)</code> để đóng gói dữ liệu Plutus JSON tương thích 100% với <code>MarketplaceDatum</code> trong Aiken (chứa <code>pubKeyAddress</code> ví Seller, mức giá Lovelace, mảng tài sản <code>assetsForSale</code>, và ví Creator).</li>
+        <li><strong>Dựng Giao Dịch Chi Tiết Với MeshJS TxBuilder:</strong>
+          <ul>
+            <li><code>.txOut(this.scriptAddress, assetsForSale)</code>: Tạo Output gửi và khóa toàn bộ tài sản NFT vào địa chỉ Smart Contract (<code>scriptAddress</code>).</li>
+            <li><code>.txOutInlineDatumValue(outputDatum, "JSON")</code>: Gắn trực tiếp Inline Datum chuẩn Plutus JSON lên UTxO Script vừa khởi tạo.</li>
+            <li><code>.changeAddress(walletAddress)</code>: Chỉ định địa chỉ ví cá nhân người bán để nhận số tiền ADA dư (Change) sau giao dịch.</li>
+            <li><code>.selectUtxosFrom(utxos)</code>: Tự động chọn và gom các UTxO phù hợp từ ví để chi trả min-UTxO ADA và phí mạng lưới (Network Fee).</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <h3>🟡 2. Hàm <code>updatePrice</code> (Cập Nhật Giá Niêm Yết On-Chain)</h3>
+    <h4>📝 Code Snippet:</h4>
+    <pre><code class="language-typescript">updatePrice = async (marketplaceUtxo: UTxO, newPrice: number) => {
+  const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+  const { pubKeyHash: sellerPkh } = deserializeAddress(walletAddress);
+  const inlineDatum = deserializeDatum<MarketplaceDatum>(marketplaceUtxo.output.plutusData!);
+
+  const updatedDatum = safePlutusJson(
+    conStr0([
+      inlineDatum.fields[0],    // seller giữ nguyên 100%
+      integer(newPrice),        // price MỚI
+      inlineDatum.fields[2],    // nft giữ nguyên
+      inlineDatum.fields[3],    // royalty_recipient giữ nguyên
+      inlineDatum.fields[4],    // royalty_rate giữ nguyên
+    ])
+  );
+
+  await this.mesh
+    .spendingPlutusScript(this.languageVersion)
+    .txIn(marketplaceUtxo.input.txHash, marketplaceUtxo.input.outputIndex, marketplaceUtxo.output.amount, this.scriptAddress)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(mConStr1([integer(newPrice)]))
+    .txInScript(this.scriptCbor)
+    .txOut(this.scriptAddress, marketplaceUtxo.output.amount)
+    .txOutInlineDatumValue(updatedDatum, "JSON")
+    .requiredSignerHash(sellerPkh)
+    .changeAddress(walletAddress)
+    .txInCollateral(collateral.input.txHash, collateral.input.outputIndex, collateral.output.amount, collateral.output.address)
+    .selectUtxosFrom(utxos)
+    .complete();
+  return this.mesh.txHex;
+};</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Hàm <code>updatePrice</code>:</h3>
+      <ol>
+        <li><strong>Đọc và Giải Mã Datum Hiện Tại:</strong> Sử dụng <code>deserializeDatum</code> bóc tách mã Hex từ <code>marketplaceUtxo.output.plutusData</code> về đối tượng JSON để lấy dữ liệu ban đầu.</li>
+        <li><strong>Khởi Tạo Datum Mới Tuân Thủ Output Validation:</strong>
+          <ul>
+            <li>Giữ nguyên tuyệt đối <code>inlineDatum.fields[0]</code> (Seller), <code>fields[2]</code> (NFT), <code>fields[3]</code> (Creator), <code>fields[4]</code> (Royalty Rate).</li>
+            <li>Chỉ cập nhật giá trị mức giá mới bằng <code>integer(newPrice)</code>.</li>
+            <li>Đảm bảo vượt qua bài test kiểm tra Output Validation nghiêm ngặt phía On-chain Aiken.</li>
+          </ul>
+        </li>
+        <li><strong>Dựng Giao Dịch Chi Tiêu UTxO Script:</strong>
+          <ul>
+            <li><code>.spendingPlutusScript(...)</code>: Khai báo giao dịch chi tiêu UTxO nằm tại Plutus Script.</li>
+            <li><code>.txInRedeemerValue(mConStr1([integer(newPrice)]))</code>: Truyền Redeemer <code>Update</code> (Constructor ID = 1) kèm mức giá mới.</li>
+            <li><code>.txOut(this.scriptAddress, ...)</code> &amp; <code>.txOutInlineDatumValue(updatedDatum, "JSON")</code>: Tạo UTxO Output mới nạp quay về địa chỉ Script với Datum đã cập nhật.</li>
+            <li><code>.requiredSignerHash(sellerPkh)</code>: Bắt buộc xuất trình chữ ký của Seller vào danh sách ký (<code>extra_signatories</code>).</li>
+            <li><code>.txInCollateral(...)</code>: Nạp UTxO thế chấp (Collateral) để bảo chứng khi gọi Plutus Script.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <h3>🔵 3. Hàm <code>buyAsset</code> (Khớp Lệnh Mua NFT &amp; Phân Tách Tiền)</h3>
+    <h4>📝 Code Snippet:</h4>
+    <pre><code class="language-typescript">buyAsset = async (marketplaceUtxo: UTxO) => {
+  const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+  const inlineDatum = deserializeDatum<MarketplaceDatum>(marketplaceUtxo.output.plutusData!);
+
+  // Tính toán số tiền phân tách
+  const sellerAmount = price - royaltyAmount - platformFeeAmount;
+
+  await this.mesh
+    .spendingPlutusScript(this.languageVersion)
+    .txIn(marketplaceUtxo.input.txHash, marketplaceUtxo.input.outputIndex, marketplaceUtxo.output.amount, this.scriptAddress)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(mConStr0([]))
+    .txInScript(this.scriptCbor)
+    .txOut(sellerAddress, [{ unit: "lovelace", quantity: sellerAmount.toString() }])
+    .txOut(this.ownerAddress, [{ unit: "lovelace", quantity: platformFeeAmount.toString() }])
+    // (Nếu có phí bản quyền > 0): .txOut(creatorAddress, [{ unit: "lovelace", quantity: royaltyAmount.toString() }])
+    .changeAddress(walletAddress)
+    .txInCollateral(collateral.input.txHash, collateral.input.outputIndex, collateral.output.amount, collateral.output.address)
+    .selectUtxosFrom(utxos)
+    .complete();
+  return this.mesh.txHex;
+};</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Hàm <code>buyAsset</code>:</h3>
+      <ol>
+        <li><strong>Giải mã Datum &amp; Tính toán phân tách 3 dòng tiền:</strong>
+          <ul>
+            <li>Đọc thông số giá rao bán, tỉ lệ phí bản quyền và phí sàn từ Datum.</li>
+            <li>Tính toán số tiền ADA thực nhận của người bán: <code>sellerAmount = price - royaltyAmount - platformFeeAmount</code>.</li>
+          </ul>
+        </li>
+        <li><strong>Dựng Giao Dịch Mua (Buy):</strong>
+          <ul>
+            <li><code>.txInRedeemerValue(mConStr0([]))</code>: Truyền Redeemer <code>Buy</code> (Constructor ID = 0).</li>
+            <li><code>.txOut(sellerAddress, ...)</code>: Tạo Output chuyển tiền ADA thực nhận về ví người bán.</li>
+            <li><code>.txOut(this.ownerAddress, ...)</code>: Tạo Output chuyển Phí Sàn (Platform Fee) về ví Admin Owner.</li>
+            <li><code>.txOut(creatorAddress, ...)</code>: (Nếu có) Tạo Output chuyển Phí Bản Quyền (Royalty Fee) về ví Creator.</li>
+            <li><code>.changeAddress(walletAddress)</code>: Ví của người mua (Buyer). Toàn bộ số tài sản NFT giải phóng khỏi Script UTxO sẽ tự động chảy về địa chỉ này.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <h3>🔴 4. Hàm <code>cancelListing</code> (Hủy Niêm Yết Rút NFT Về Ví)</h3>
+    <h4>📝 Code Snippet:</h4>
+    <pre><code class="language-typescript">cancelListing = async (marketplaceUtxo: UTxO) => {
+  const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+  const { pubKeyHash: sellerPkh } = deserializeAddress(walletAddress);
+
+  await this.mesh
+    .spendingPlutusScript(this.languageVersion)
+    .txIn(marketplaceUtxo.input.txHash, marketplaceUtxo.input.outputIndex, marketplaceUtxo.output.amount, this.scriptAddress)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(mConStr2([]))
+    .txInScript(this.scriptCbor)
+    .requiredSignerHash(sellerPkh)
+    .changeAddress(walletAddress)
+    .txInCollateral(collateral.input.txHash, collateral.input.outputIndex, collateral.output.amount, collateral.output.address)
+    .selectUtxosFrom(utxos)
+    .complete();
+  return this.mesh.txHex;
+};</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Hàm <code>cancelListing</code>:</h3>
+      <ol>
+        <li><strong>Dựng Giao Dịch Hủy (Cancel):</strong>
+          <ul>
+            <li><code>.txInRedeemerValue(mConStr2([]))</code>: Truyền Redeemer <code>Cancel</code> (Constructor ID = 2).</li>
+            <li><code>.requiredSignerHash(sellerPkh)</code>: Đính kèm chữ ký người bán vào danh sách chữ ký bắt buộc để thỏa mãn <code>key_signed</code> On-chain.</li>
+            <li><code>.changeAddress(walletAddress)</code>: Chỉ định ví của Seller làm địa chỉ nhận tiền thừa và giải phóng NFT. Khi UTxO Script bị chi tiêu, NFT từ Script Address tự động quay trở lại ví cá nhân của Seller.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

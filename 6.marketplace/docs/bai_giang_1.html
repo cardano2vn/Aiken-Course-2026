@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 1: Sàn Giao Dịch Phi Tập Trung (Marketplace dApp) &amp; Kiến Trúc Bảo Mật EUTxO</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --primary-hover: #0f766e;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.7; padding: 2rem 1rem; }
+    .container { max-width: 900px; margin: 0 auto; background: var(--bg-card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.2rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); }
+    h2 { font-size: 1.6rem; color: #2dd4bf; margin-top: 2rem; margin-bottom: 1rem; }
+    h3 { font-size: 1.25rem; color: #67e8f9; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    p { margin-bottom: 1.2rem; color: #e2e8f0; }
+    blockquote { background: #0284c715; border-left: 4px solid var(--accent-color); padding: 1rem 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; color: #7dd3fc; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+    ul, ol { margin-left: 1.8rem; margin-bottom: 1.5rem; color: #e2e8f0; }
+    li { margin-bottom: 0.4rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.8); color: #f472b6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.5rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.2rem; border: none; display: block; color: #f8fafc; font-size: 0.92em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
+    th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: #1e293b80; }
+    .mermaid { background: #111827; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.5rem; display: flex; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 1: Sàn Giao Dịch Phi Tập Trung (Marketplace dApp) &amp; Kiến Trúc Bảo Mật EUTxO</h1>
+    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Chuyên gia đồng hành:</strong> <code>content-creator</code> x <code>frontend-design</code></blockquote>
+    <hr>
+    <h2>🧭 Lộ Trình Khám Phá Bài Học</h2>
+    <div class="mermaid">
+    graph LR
+        A["1. Két Sắt Phi Tập Trung"] --> B["2. 4 Đối Tượng & 3 Redeemer"]
+        B --> C["3. Cấu Trúc Datum & MValue"]
+        C --> D["4. Toán Học Chia Phí Basis Points"]
+        D --> E["5. Lỗ Hổng Manipulate & Output Validation"]
+    </div>
+    <hr>
+    <h2>1. Đặt Vấn Đề: Bài Toán Trưng Bày &amp; Giao Dịch P2P Không Niềm Tin</h2>
+    <p>Hãy tưởng tượng kịch bản thực tế trong thế giới Web3:</p>
+    <ul>
+      <li><strong>Alice (Seller):</strong> Sở hữu tác phẩm NFT độc bản và muốn rao bán với giá <strong>100 ADA</strong>. Alice tuyệt đối <strong>không muốn nạp tài sản lên một sàn tập trung (Custodial)</strong> vì lo ngại rủi ro bị hack sàn hay khoá tài khoản.</li>
+      <li><strong>Bob (Buyer):</strong> Có 100 ADA và muốn sở hữu bức tranh của Alice ngay lập tức.</li>
+      <li><strong>Creator (Tác giả):</strong> Người sáng tạo bộ sưu tập, muốn nhận <strong>5% Phí Bản Quyền (Royalty Fee)</strong> cho mọi giao dịch thứ cấp.</li>
+      <li><strong>Admin Owner (Sàn):</strong> Thu <strong>2% Phí Vận Hành (Platform Fee)</strong> để duy trì dApp.</li>
+    </ul>
+    <h3>🔐 Mô Hình "Két Sắt Kính Cường Lực" Cardano EUTxO</h3>
+    <pre><code class="language-plaintext">[Alice] ---&gt; (Niêm yết NFT + Datum: 100 ADA) ---&gt; [KÉT SẮT SMART CONTRACT]
+                                                           |
+[Bob]   ---&gt; (Nạp 100 ADA &amp; Kích hoạt Buy) --------------+
+                                                           |
+           +-----------------------------------------------+
+           |
+           +---&gt; [Ví Alice]   : 93 ADA (Giá Net)
+           +---&gt; [Ví Creator] :  5 ADA (5% Royalty)
+           +---&gt; [Ví Admin]   :  2 ADA (2% Platform Fee)
+           +---&gt; [Ví Bob]     :  Bức tranh NFT</code></pre>
+    <hr>
+    <h2>2. Thiết Kế Kiến Trúc: 4 Đối Tượng &amp; 3 Nhánh Redeemer</h2>
+    <p>Để hiện thực hóa mô hình Két Sắt On-chain, Validator Marketplace phân tách logic thẩm định thành <strong>3 Redeemer</strong>:</p>
+    <pre><code class="language-aiken">pub type MarketplaceRedeemer {
+  Buy
+  Update { new_price: Int }
+  Cancel
+}</code></pre>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr><th>Redeemer</th><th>Người Thực Thi</th><th>Các Bước Kiểm Duyệt Bắt Buộc Của Smart Contract</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong><code>Buy</code></strong></td><td>Buyer</td><td>1. <strong>Chống Double Satisfaction (<code>is_only_one_input_from_script</code>):</strong> Chỉ duy nhất 1 Script UTxO được chi tiêu trong Tx.<br>2. <strong>Thanh toán Seller (<code>is_seller_paid</code>):</strong> Trả đủ <code>seller_amount</code> về <code>datum.seller</code>.<br>3. <strong>Thanh toán Admin (<code>is_platform_paid</code>):</strong> Trả đủ <code>platform_fee_amount</code> về ví Admin.<br>4. <strong>Thanh toán Creator (<code>is_royalty_paid</code>):</strong> Trả đủ <code>royalty_amount</code> về ví Creator (nếu có).</td></tr>
+          <tr><td><strong><code>Update</code></strong></td><td>Seller</td><td>1. <strong>Chữ ký chứng thực (<code>key_signed</code>):</strong> Bắt buộc có chữ ký ví Seller.<br>2. <strong>Output Validation (<code>is_datum_secure</code>):</strong> Kiểm tra UTxO mới sinh ra tại Script Address: <strong>Bắt buộc giữ nguyên <code>seller</code>, <code>nft</code>, <code>royalty_recipient</code>, <code>royalty_rate</code></strong>; chỉ cho phép <code>price == new_price</code>.</td></tr>
+          <tr><td><strong><code>Cancel</code></strong></td><td>Seller</td><td><strong>Chữ ký chứng thực (<code>key_signed</code>):</strong> Kiểm tra chữ ký ví Seller để rút UTxO hoàn trả NFT về lại ví cá nhân.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <hr>
+    <h2>3. Mổ Xẻ Cấu Trúc Datum Nâng Cao (MarketplaceDatum &amp; MValue)</h2>
+    <pre><code class="language-aiken">pub type MValue =
+  Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;
+
+pub type MarketplaceDatum {
+  MarketplaceDatum {
+    seller: Address,
+    price: Int,
+    nft: MValue,
+    royalty_recipient: Option&lt;Address&gt;,
+    royalty_rate: Int,
+  }
+}</code></pre>
+    <blockquote>💡 <strong>Tại sao lại dùng <code>MValue</code> dạng <code>Pairs</code>?</strong><br>Trong Cardano Plutus Core, tài sản Token/NFT được định danh bởi cặp <code>(PolicyId, AssetName)</code> đi kèm số lượng <code>Int</code>. Sử dụng <code>Pairs</code> giúp hợp đồng xử lý cực kỳ linh hoạt: Nó không chỉ rao bán 1 NFT đơn lẻ mà có thể <strong>niêm yết một gói nhiều tài sản (Multi-asset bundle)</strong> trong cùng một UTxO!</blockquote>
+    <hr>
+    <h2>4. Cơ Chế Toán Học Phí Sàn &amp; Phí Bản Quyền (Basis Points)</h2>
+    <p>Giao dịch <code>Buy</code> thực hiện phân chia dòng tiền theo chuẩn <strong>Basis Points (1/10.000)</strong>:</p>
+    <p>royalty_amount = (datum.price * datum.royalty_rate) / 10000</p>
+    <p>platform_fee_amount = (datum.price * platform_fee_rate) / 10000</p>
+    <p>seller_amount = datum.price - royalty_amount - platform_fee_amount</p>
+    <hr>
+    <h2>5. Phân Tích Sâu Lỗ Hổng Price &amp; Address Manipulation &amp; Kỹ Thuật Output Validation</h2>
+    <p>Trong mô hình Cardano UTxO, khi người bán thực hiện hành động <strong><code>Update</code></strong> để điều chỉnh giá niêm yết, bản chất giao dịch Off-chain sẽ <strong>chi tiêu UTxO cũ tại Script và tạo một UTxO mới đính kèm Inline Datum mới tại Script Address</strong>.</p>
+    <h3>⚠️ Kịch Bản Tấn Công Tráo Ví (Address Manipulation Attack)</h3>
+    <pre><code class="language-plaintext">[UTxO Cũ tại Script: Seller = Alice, Price = 100 ADA, Asset = NFT_A]
+       |
+       |  (Kẻ tấn công can thiệp tạo Datum mới khi Update)
+       v
+[UTxO Mới tại Script: Seller = Hacker_Addr, Price = 80 ADA, Asset = NFT_A]  &lt;-- LỖ HỔNG CHẾT NGƯỜI!
+       |
+       |  (Nạn nhân bấm Buy thanh toán 80 ADA)
+       v
+Validator đọc Datum mới -&gt; Chuyển 80 ADA về ví Hacker_Addr! Alice mất trắng NFT!</code></pre>
+    <h3>🛡️ Giải Pháp Output Validation Triệt Hạ Lỗ Hổng</h3>
+    <pre><code class="language-aiken">let is_datum_secure =
+  output_datum.seller == datum.seller &amp;&amp;
+  output_datum.nft == datum.nft &amp;&amp;
+  output_datum.royalty_recipient == datum.royalty_recipient &amp;&amp;
+  output_datum.royalty_rate == datum.royalty_rate &amp;&amp;
+  output_datum.price == new_price</code></pre>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>
