@@ -38,7 +38,7 @@ Khóa học gồm 12 module - tương ứng với 12 dApp:
 | `03` | **Swap** | [`3.Swap`](./3.Swap) | Defi | Multi-Asset UTxO, Plutus Blueprint, Collateral, Double Satisfaction |
 | `04` | **Membership NFT** | [`4.membership-nft`](./4.membership-nft) | NFT / Định danh | Parameterized Scripts, One-Shot Minting Policy, State Thread Token |
 | `05` | **Multisig Treasury** | [`5.multisig-treasury`](./5.multisig-treasury) | DAO | Quỹ đa chữ ký M-of-N, Aiken Unit Testing với thư viện Vodka |
-| `06` | **Marketplace** | [`6.marketplace`](./6.marketplace) | NFT / Defi | Aiken Pattern Matching, Pipe Operator, CIP-25 NFT, Royalty Fees |
+| `06` | **Marketplace** | [`6.marketplace`](./6.marketplace) | NFT / Defi | Pipe Operator, CIP-25 NFT, Royalty Fees |
 | `07` | **Betting** | [`7.betting`](./7.betting) | Game / Defi | Multi-purpose Script, CIP-20 Transaction Metadata, HD Wallets |
 | `08` | **P2P Lending** | [`8.p2p-lending`](./8.p2p-lending) | Defi | Mô hình cho vay thế chấp ngang hàng, Property-based Testing trong Aiken |
 | `09` | **Stablecoin (VNDC)** | [`9.stablecoin`](./9.stablecoin) | Defi | Stablecoin thế chấp vượt mức, Off-chain Unit Testing với Mesh, Off-chain Property-based Testing |

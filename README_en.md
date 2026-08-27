@@ -38,7 +38,7 @@ The course consists of 12 modules — corresponding to 12 practical dApps:
 | `03` | **Swap** | [`3.Swap`](./3.Swap) | DeFi | Multi-Asset UTxO, Plutus Blueprint, Collateral, Double Satisfaction |
 | `04` | **Membership NFT** | [`4.membership-nft`](./4.membership-nft) | NFT / Identity | Parameterized Scripts, One-Shot Minting Policy, State Thread Token |
 | `05` | **Multisig Treasury** | [`5.multisig-treasury`](./5.multisig-treasury) | DAO | M-of-N Multisig Treasury, Aiken Unit Testing with Vodka |
-| `06` | **Marketplace** | [`6.marketplace`](./6.marketplace) | NFT / DeFi | Aiken Pattern Matching, Pipe Operator, CIP-25 NFT, Royalty Fees |
+| `06` | **Marketplace** | [`6.marketplace`](./6.marketplace) | NFT / DeFi | Pipe Operator, CIP-25 NFT, Royalty Fees |
 | `07` | **Betting** | [`7.betting`](./7.betting) | Gaming / DeFi | Multi-purpose Script, CIP-20 Transaction Metadata, HD Wallets |
 | `08` | **P2P Lending** | [`8.p2p-lending`](./8.p2p-lending) | DeFi | P2P Collateralized Lending, Property-based Testing in Aiken |
 | `09` | **Stablecoin (VNDC)** | [`9.stablecoin`](./9.stablecoin) | DeFi | Overcollateralized Stablecoins, Off-chain Unit Testing with Mesh, Off-chain Property-based Testing |

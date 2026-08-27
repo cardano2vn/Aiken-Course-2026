@@ -1,4 +1,4 @@
-# 📖 Mô Tả Chi Tiết Các DApp Trong Khóa Học
+# 📖 Mô Tả Chi Tiết Các Module Trong Khóa Học
 
 Tài liệu mô tả chi tiết cách dApp hoạt động, logic kiểm tra on-chain (*Aiken Validator*) và các kiến thức nền tảng / bảo mật liên quan cho từng module trong khóa học.
 
@@ -81,6 +81,7 @@ Validator cần kiểm tra 2 kịch bản chính qua Redeemer:
 - Multi-asset UTxO
 - Collateral trong giao dịch Cardano
 - Plutus Blueprint
+- Reference Scripts
 - Double Satisfaction
 
 ---
@@ -159,7 +160,6 @@ Validator cần kiểm soát các hành động thông qua Redeemer:
 
 - CIP-25 NFT
 - Royalty Fees
-- Pattern Matching
 - Pipe operator (`|>`)
 
 ---
