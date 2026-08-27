@@ -85,7 +85,7 @@ export default function Home() {
       if (str.length > 0) {
         return str;
       }
-    } catch {}
+    } catch { }
     return hex;
   };
 
