@@ -261,9 +261,7 @@ export class MarketplaceContract extends TxInitiator {
       Array.isArray(rObj.fields) &&
       rObj.fields.length > 0;
 
-    console.log("isRoyaltyValid check:", { tag, isRoyaltyValid });
-
-    // Tính toán các khoản tiền Y HỆT như Aiken Smart Contract
+    // 2. Tính toán các khoản phân bổ tiền theo đúng công thức Smart Contract Aiken
     const royaltyAmount = isRoyaltyValid
       ? Math.floor((price * royaltyRate) / 10000)
       : 0;
@@ -272,7 +270,7 @@ export class MarketplaceContract extends TxInitiator {
     );
     const sellerAmount = price - royaltyAmount - platformFeeAmount;
 
-    // Địa chỉ Seller (có stake key từ PubKeyAddress)
+    // Serialize địa chỉ ví Seller đầy đủ (Payment Key + Stake Key nếu có)
     const sellerAddress = serializeAddressObj(sellerField, this.networkId);
 
     const tx = this.mesh
@@ -285,41 +283,34 @@ export class MarketplaceContract extends TxInitiator {
       )
       .txInScript(this.scriptCbor)
       .txInInlineDatumPresent()
-      .txInRedeemerValue(mConStr0([])); // Buy: constructor index 0
+      .txInRedeemerValue(mConStr0([])); // Buy action: constructor index 0
 
-    console.log("=== BUY ASSET DEBUG LOG ===");
-    console.log("price (lovelace):", price);
-    console.log("royaltyRate (bps):", royaltyRate);
-    console.log("platformFeeBasisPoint:", this.feePercentageBasisPoint);
-    console.log("sellerAddress:", sellerAddress);
-    console.log("ownerAddress (Admin):", this.ownerAddress);
-    console.log("sellerAmount:", sellerAmount);
-    console.log("platformFeeAmount:", platformFeeAmount);
-    console.log("royaltyAmount:", royaltyAmount);
-
-    // 1. Output cho Seller: (giá bán đầy đủ price hoặc sellerAmount)
-    const testSellerAmount = price; // Đổi thành price (100 ADA) để kiểm tra theo yêu cầu
-    console.log("TxOut 1 (Seller):", sellerAddress, testSellerAmount.toString());
+    // 1. Output cho Seller: (price - royaltyAmount - platformFeeAmount)
     tx.txOut(sellerAddress, [
-      { unit: "lovelace", quantity: testSellerAmount.toString() },
+      { unit: "lovelace", quantity: sellerAmount.toString() },
     ]);
 
-    // 2. Output cho Admin (Platform Fee) nếu platformFeeAmount > 0
+    // 2. Output cho Admin/Marketplace (Platform Fee)
+    // Lưu ý: Nếu ví người mua (buyer) trùng với ví owner (Admin), số ADA phí sàn này sẽ quay trở lại ví người mua.
     if (platformFeeAmount > 0) {
-      console.log("TxOut 2 (Admin Fee):", this.ownerAddress, platformFeeAmount.toString());
       tx.txOut(this.ownerAddress, [
         { unit: "lovelace", quantity: platformFeeAmount.toString() },
       ]);
     }
 
-    // 3. Output cho Creator (Royalty Fee) nếu isRoyaltyValid và royaltyAmount > 0
+    // 3. Output cho Creator (Royalty Fee)
     if (isRoyaltyValid && royaltyAmount > 0) {
       const creatorField = (royaltyRecipientField as any).fields[0];
       const creatorAddress = serializeAddressObj(creatorField, this.networkId);
-      console.log("TxOut 3 (Creator Royalty):", creatorAddress, royaltyAmount.toString());
       tx.txOut(creatorAddress, [
         { unit: "lovelace", quantity: royaltyAmount.toString() },
       ]);
+    }
+
+    // 4. Output gửi NFT (tài sản niêm yết) về cho Người mua (Buyer)
+    const nftAssets = targetUtxo.output.amount.filter((a) => a.unit !== "lovelace");
+    if (nftAssets.length > 0) {
+      tx.txOut(walletAddress, nftAssets);
     }
 
     await tx

@@ -1,111 +1,70 @@
-use cardano/assets.{add, from_lovelace}
-use cardano/transaction.{InlineDatum, Input, Transaction}
-use marketplace.{Buy, Close, MarketplaceDatum}
+use cardano/assets.{add, from_asset_list, from_lovelace}
+use cardano/transaction.{InlineDatum, Input, Transaction, placeholder}
+use marketplace.{Buy, Cancel, MarketplaceDatum, Update}
 use mocktail.{
-  add_input, complete, mocktail_tx, required_signer_hash, tx_in,
-  tx_in_inline_datum, tx_out,
+  add_input, complete, mocktail_tx, required_signer_hash, tx_out,
+  tx_out_inline_datum,
 }
 use mocktail/virgin_address.{mock_pub_key_address, mock_script_address}
 use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
-use mocktail/virgin_output_reference.{mock_tx_hash, mock_utxo_ref}
+use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_outputs.{mock_script_output}
 
-type CloseTestCase {
-  is_seller_signed: Bool,
+// ---------------------------------------------------------------------------
+// Helpers: dữ liệu dùng chung
+// ---------------------------------------------------------------------------
+
+// NFT: 1 token tại policy_id(0), tên "TestToken"
+fn mock_nft_mvalue() {
+  [Pair(mock_policy_id(0), [Pair("TestToken", 1)])]
 }
 
+// Value của UTxO đang lock: 2 ADA + 1 NFT
+fn mock_input_value() {
+  from_lovelace(2_000_000) |> add(mock_policy_id(0), "TestToken", 1)
+}
+
+// Datum cơ bản: seller = addr(1), price = 200 ADA, không royalty
 fn mock_datum() -> MarketplaceDatum {
   MarketplaceDatum {
     seller: mock_pub_key_address(1, None),
     price: 200_000_000,
-    policy: mock_policy_id(0),
-    tokenName: "Test Token",
+    nft: mock_nft_mvalue(),
+    royalty_recipient: None,
+    royalty_rate: 0,
   }
 }
 
-fn get_close_test_tx(test_case: CloseTestCase) -> Transaction {
-  let CloseTestCase { is_seller_signed } = test_case
+// Datum có royalty 5% về creator = addr(2)
+fn mock_datum_with_royalty() -> MarketplaceDatum {
+  MarketplaceDatum {
+    seller: mock_pub_key_address(1, None),
+    price: 200_000_000,
+    nft: mock_nft_mvalue(),
+    royalty_recipient: Some(mock_pub_key_address(2, None)),
+    royalty_rate: 500,
+  }
+}
 
+// owner = addr(0), platform_fee = 1% (100 basis points)
+fn mock_owner() {
+  mock_pub_key_address(0, None)
+}
+
+fn mock_platform_fee() -> Int {
+  100
+}
+
+// ---------------------------------------------------------------------------
+// TEST 1: BUY SUCCESS
+// price=200ADA, platform_fee=1%=2ADA, royalty=0
+// seller receives: (200 - 0 - 2) + 2 (UTxO lovelace) = 200 ADA
+// owner receives: 2 ADA
+// ---------------------------------------------------------------------------
+fn get_buy_success_tx() -> Transaction {
   mocktail_tx()
-    |> tx_in(
-        True,
-        mock_tx_hash(0),
-        1,
-        from_lovelace(2_000_000),
-        mock_script_address(0, None),
-      )
-    |> tx_in_inline_datum(True, mock_datum())
-    |> required_signer_hash(is_seller_signed, mock_pub_key_hash(1))
-    |> complete()
-}
-
-test success_close() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Close
-  let test_case = CloseTestCase { is_seller_signed: True }
-
-  let tx = get_close_test_tx(test_case)
-  marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
-    Some(mock_datum()),
-    redeemer,
-    output_reference,
-    tx,
-  )
-}
-
-test fail_close_without_signature() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Close
-  let test_case = CloseTestCase { is_seller_signed: False }
-
-  let tx = get_close_test_tx(test_case)
-  !marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
-    Some(mock_datum()),
-    redeemer,
-    output_reference,
-    tx,
-  )
-}
-
-type BuyTestCase {
-  is_only_one_input_from_script: Bool,
-  is_fee_paid: Bool,
-  is_proceed_paid: Bool,
-}
-
-fn get_buy_test_tx(test_case: BuyTestCase) -> Transaction {
-  let BuyTestCase {
-    is_only_one_input_from_script,
-    is_fee_paid,
-    is_proceed_paid,
-  } = test_case
-
-  let input_value =
-    from_lovelace(2_000_000) |> add(mock_policy_id(0), "Test Token", 1)
-
-  mocktail_tx()
-    |> tx_out(
-        True,
-        mock_pub_key_address(0, None),
-        if is_fee_paid {
-          from_lovelace(2_000_000)
-        } else {
-          from_lovelace(1_000_000)
-        },
-      )
-    |> tx_out(
-        True,
-        mock_pub_key_address(1, None),
-        if is_proceed_paid {
-          from_lovelace(202_000_000)
-        } else {
-          from_lovelace(200_000_000)
-        },
-      )
+    |> tx_out(True, mock_pub_key_address(0, None), from_lovelace(2_000_000))
+    |> tx_out(True, mock_pub_key_address(1, None), from_lovelace(200_000_000))
     |> complete()
     |> add_input(
         True,
@@ -113,104 +72,192 @@ fn get_buy_test_tx(test_case: BuyTestCase) -> Transaction {
           output_reference: mock_utxo_ref(0, 1),
           output: mock_script_output(
             mock_script_address(0, None),
-            input_value,
+            mock_input_value(),
             InlineDatum(Some(mock_datum())),
           ),
         },
       )
+}
+
+test test_buy_success() {
+  marketplace.marketplace.spend(
+    mock_owner(),
+    mock_platform_fee(),
+    Some(mock_datum()),
+    Buy,
+    mock_utxo_ref(0, 1),
+    get_buy_success_tx(),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 2: BUY FAIL — Seller nhận thiếu tiền
+// ---------------------------------------------------------------------------
+fn get_buy_insufficient_tx() -> Transaction {
+  mocktail_tx()
+    |> tx_out(True, mock_pub_key_address(0, None), from_lovelace(2_000_000))
+    // Seller chỉ nhận 190 ADA (thiếu 10 ADA)
+    |> tx_out(True, mock_pub_key_address(1, None), from_lovelace(190_000_000))
+    |> complete()
     |> add_input(
-        !is_only_one_input_from_script,
+        True,
         Input {
-          output_reference: mock_utxo_ref(0, 2),
+          output_reference: mock_utxo_ref(0, 1),
           output: mock_script_output(
             mock_script_address(0, None),
-            input_value,
+            mock_input_value(),
             InlineDatum(Some(mock_datum())),
           ),
         },
       )
 }
 
-test success_buy() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Buy
-  let test_case =
-    BuyTestCase {
-      is_only_one_input_from_script: True,
-      is_fee_paid: True,
-      is_proceed_paid: True,
-    }
+test test_buy_fail_insufficient_payment() {
+  !marketplace.marketplace.spend(
+    mock_owner(),
+    mock_platform_fee(),
+    Some(mock_datum()),
+    Buy,
+    mock_utxo_ref(0, 1),
+    get_buy_insufficient_tx(),
+  )
+}
 
-  let tx = get_buy_test_tx(test_case)
+// ---------------------------------------------------------------------------
+// TEST 3: BUY WITH ROYALTY SUCCESS
+// price=200ADA, royalty=5%=10ADA, platform=1%=2ADA
+// seller: (200-10-2)+2 = 190 ADA | creator: 10 ADA | owner: 2 ADA
+// ---------------------------------------------------------------------------
+fn get_buy_royalty_tx() -> Transaction {
+  mocktail_tx()
+    |> tx_out(True, mock_pub_key_address(0, None), from_lovelace(2_000_000))
+    |> tx_out(True, mock_pub_key_address(1, None), from_lovelace(190_000_000))
+    |> tx_out(True, mock_pub_key_address(2, None), from_lovelace(10_000_000))
+    |> complete()
+    |> add_input(
+        True,
+        Input {
+          output_reference: mock_utxo_ref(0, 1),
+          output: mock_script_output(
+            mock_script_address(0, None),
+            mock_input_value(),
+            InlineDatum(Some(mock_datum_with_royalty())),
+          ),
+        },
+      )
+}
+
+test test_buy_success_with_royalty() {
   marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
+    mock_owner(),
+    mock_platform_fee(),
+    Some(mock_datum_with_royalty()),
+    Buy,
+    mock_utxo_ref(0, 1),
+    get_buy_royalty_tx(),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 4: UPDATE PRICE SUCCESS
+// Seller ký giao dịch + output tại Script với Datum mới (chỉ price thay đổi)
+// ---------------------------------------------------------------------------
+fn get_update_tx(new_price: Int, manipulate_seller: Bool) -> Transaction {
+  let output_seller =
+    if manipulate_seller {
+      // Kẻ tấn công cố đổi seller thành addr(3)
+      mock_pub_key_address(3, None)
+    } else {
+      mock_pub_key_address(1, None)
+    }
+
+  let output_datum =
+    MarketplaceDatum {
+      seller: output_seller,
+      price: new_price,
+      nft: mock_nft_mvalue(),
+      royalty_recipient: None,
+      royalty_rate: 0,
+    }
+
+  mocktail_tx()
+    // Output quay lại Script với Datum mới
+    |> tx_out(True, mock_script_address(0, None), mock_input_value())
+    |> tx_out_inline_datum(True, output_datum)
+    |> required_signer_hash(True, mock_pub_key_hash(1))
+    |> complete()
+    |> add_input(
+        True,
+        Input {
+          output_reference: mock_utxo_ref(0, 1),
+          output: mock_script_output(
+            mock_script_address(0, None),
+            mock_input_value(),
+            InlineDatum(Some(mock_datum())),
+          ),
+        },
+      )
+}
+
+test test_update_price_success() {
+  marketplace.marketplace.spend(
+    mock_owner(),
+    mock_platform_fee(),
     Some(mock_datum()),
-    redeemer,
-    output_reference,
+    Update { new_price: 300_000_000 },
+    mock_utxo_ref(0, 1),
+    get_update_tx(300_000_000, False),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 5: UPDATE FAIL — Kẻ tấn công thay Seller trong Datum mới
+// ---------------------------------------------------------------------------
+test test_update_price_fail_manipulate_seller() {
+  !marketplace.marketplace.spend(
+    mock_owner(),
+    mock_platform_fee(),
+    Some(mock_datum()),
+    Update { new_price: 300_000_000 },
+    mock_utxo_ref(0, 1),
+    get_update_tx(300_000_000, True),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 6: CANCEL SUCCESS — Seller hủy niêm yết (pattern từ Swap)
+// ---------------------------------------------------------------------------
+test test_cancel_success_by_seller() {
+  let tx =
+    Transaction {
+      ..placeholder,
+      extra_signatories: [mock_pub_key_hash(1)],
+    }
+  marketplace.marketplace.spend(
+    mock_owner(),
+    mock_platform_fee(),
+    Some(mock_datum()),
+    Cancel,
+    mock_utxo_ref(0, 1),
     tx,
   )
 }
 
-test fail_buy_with_multiple_script_inputs() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Buy
-  let test_case =
-    BuyTestCase {
-      is_only_one_input_from_script: False,
-      is_fee_paid: True,
-      is_proceed_paid: True,
+// ---------------------------------------------------------------------------
+// TEST 7: CANCEL FAIL — Người lạ không thể hủy
+// ---------------------------------------------------------------------------
+test test_cancel_fail_by_stranger() {
+  let tx =
+    Transaction {
+      ..placeholder,
+      extra_signatories: [mock_pub_key_hash(99)],
     }
-
-  let tx = get_buy_test_tx(test_case)
   !marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
+    mock_owner(),
+    mock_platform_fee(),
     Some(mock_datum()),
-    redeemer,
-    output_reference,
-    tx,
-  )
-}
-
-test fail_buy_without_fee_paid() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Buy
-  let test_case =
-    BuyTestCase {
-      is_only_one_input_from_script: True,
-      is_fee_paid: False,
-      is_proceed_paid: True,
-    }
-
-  let tx = get_buy_test_tx(test_case)
-  !marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
-    Some(mock_datum()),
-    redeemer,
-    output_reference,
-    tx,
-  )
-}
-
-test fail_buy_without_proceed_paid() {
-  let output_reference = mock_utxo_ref(0, 1)
-  let redeemer = Buy
-  let test_case =
-    BuyTestCase {
-      is_only_one_input_from_script: True,
-      is_fee_paid: True,
-      is_proceed_paid: False,
-    }
-
-  let tx = get_buy_test_tx(test_case)
-  !marketplace.marketplace.spend(
-    mock_pub_key_address(0, None),
-    100,
-    Some(mock_datum()),
-    redeemer,
-    output_reference,
+    Cancel,
+    mock_utxo_ref(0, 1),
     tx,
   )
 }

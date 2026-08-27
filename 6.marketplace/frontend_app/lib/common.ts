@@ -22,8 +22,8 @@ export class TxInitiator {
     wallet?: IWallet;
     stakeCredential?: string;
     networkId = 0;
-    version = 2;
-    languageVersion: LanguageVersion = "V2";
+    version = 3;
+    languageVersion: LanguageVersion = "V3";
 
     constructor({
         mesh,
@@ -31,7 +31,7 @@ export class TxInitiator {
         wallet,
         networkId = 0,
         stakeCredential = "c08f0294ead5ab7ae0ce5471dd487007919297ba95230af22f25e575",
-        version = 2,
+        version = 3,
     }: TxInitiatorInput) {
         this.mesh = mesh;
         if (fetcher) {
@@ -53,7 +53,13 @@ export class TxInitiator {
         this.version = version;
         switch (this.version) {
             case 1:
+                this.languageVersion = "V1";
+                break;
+            case 2:
                 this.languageVersion = "V2";
+                break;
+            case 3:
+                this.languageVersion = "V3";
                 break;
             default:
                 this.languageVersion = "V3";

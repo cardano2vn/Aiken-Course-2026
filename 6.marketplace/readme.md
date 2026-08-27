@@ -1,26 +1,32 @@
-# 🛒 Dự án Marketplace - Sàn Giao dịch NFT Cardano
+# 🛒 Dự án Marketplace - Aiken Cardano
 
-Dự án này triển khai một **Marketplace phi tập trung** đơn giản theo mô hình "Listing & Buying" (Đăng tin & Mua bán) cho các tài sản trên Cardano (NFT/Tokens).
+Dự án này triển khai một hợp đồng thông minh **Marketplace phi tập trung** (Sàn giao dịch NFT / Tokens) trên Cardano theo mô hình "Listing, Updating & Buying". Nó cho phép người bán niêm yết tài sản, cập nhật giá niêm yết, hoặc hủy niêm yết bất kỳ lúc nào nếu chưa có ai mua.
 
 ## 🧩 Cơ chế hoạt động (Validators)
 
 Hợp đồng Marketplace này hỗ trợ:
-1.  **Phí bản quyền (Marketplace Fee)**: Một tỉ lệ phí (`fee_percentage_basis_point`) sẽ được gửi về ví người sở hữu sàn (`owner`) khi có giao dịch thành công.
-2.  **Bảo mật thanh toán**: Đảm bảo người bán (`seller`) nhận được đủ số tiền yêu cầu cộng với minUTxO nguyên thủy.
+1. **Chỉ một input kịch bản**: Đảm bảo không có việc thực hiện nhiều giao dịch mua cùng lúc trong một transaction (tránh tấn công Double Satisfaction).
+2. **Phí bản quyền & Phí sàn**: Tự động trích xuất Phí sàn (`platform_fee_rate`) gửi về địa chỉ Admin (`owner`) và Phí bản quyền (`royalty_rate`) gửi về cho Creator (`royalty_recipient`) khi có giao dịch mua thành công.
+3. **Bảo mật giá & địa chỉ (Price & Address Manipulation)**: Đảm bảo khi người bán cập nhật giá (`Update`), UTxO mới tại Script chỉ được đổi `price` và bắt buộc giữ nguyên các thông tin khác (`seller`, `nft`, `royalty`).
 
 ### 📋 Cấu trúc dữ liệu (Datum)
 ```rust
+pub type MValue =
+  Pairs<PolicyId, Pairs<AssetName, Int>>
+
 pub type MarketplaceDatum {
-  seller: Address,    // Địa chỉ người bán NFT
-  price: Int,         // Giá bán (tính bằng lovelace)
-  policy: ByteArray,  // Chính sách tài sản của NFT
-  tokenName: ByteArray, // Tên NFT (token name)
+  seller: Address,                    // Địa chỉ người bán NFT (đầy đủ stake key)
+  price: Int,                         // Giá bán (tính bằng lovelace)
+  nft: MValue,                        // Cấu trúc danh sách tài sản (NFT/Tokens) rao bán
+  royalty_recipient: Option<Address>, // Địa chỉ Creator nhận phí bản quyền (nếu có)
+  royalty_rate: Int,                  // Tỷ lệ Royalty (Basis points: 500 = 5%)
 }
 ```
 
 ### ⚡ Hành động (Redeemer)
-*   `Buy`: Người mua thanh toán giá listing của người bán và phí (fee) cho sàn để gỡ NFT khỏi script.
-*   `Close`: Chỉ người bán ban đầu mới có quyền gỡ bỏ (cancel) listing mà không cần ai mua.
+* `Buy`: Người mua thanh toán giá listing (gồm tiền cho seller + phí sàn + phí bản quyền) để nhận NFT.
+* `Update`: Người bán cập nhật lại giá niêm yết (yêu cầu chữ ký của seller).
+* `Cancel`: Người bán hủy niêm yết và rút lại tài sản về ví cá nhân (yêu cầu chữ ký của seller).
 
 ---
 
@@ -28,7 +34,7 @@ pub type MarketplaceDatum {
 
 ### 1. Xây dựng Hợp đồng (Aiken)
 ```bash
-# Biên dịch contract
+# Biên dịch contract sang Plutus Core (plutus.json)
 aiken build
 
 # Chạy Unit Tests
@@ -38,25 +44,22 @@ aiken check
 ### 2. 🎨 Giao diện người dùng (Frontend)
 Thư mục `frontend_app` chứa mã nguồn giao diện web sử dụng **MeshSDK** và **Next.js**.
 
-#### Ví dụ khởi tạo Marketplace với MeshSDK:
-```javascript
-import { MeshMarketplaceContract } from '@meshsdk/contracts';
+#### 🔑 Cấu hình biến môi trường (.env)
+Tạo file `.env` bên trong thư mục `frontend_app/` (hoặc copy từ `.env.example`) để ứng dụng tự động nhận diện Blockfrost API Key khi khởi chạy:
 
-const contract = new MeshMarketplaceContract(
-  {
-    mesh: meshTxBuilder,
-    fetcher: provider,
-    wallet: wallet,
-    networkId: 0,
-  },
-  'addr_test1...owner_address', // Địa chỉ nhận phí của sàn
-  200 // 2% fee (200 basis points)
-);
+```bash
+cd frontend_app
+cp .env.example .env
 ```
 
----
+Nội dung `.env`:
+```env
+NEXT_PUBLIC_BLOCKFROST_KEY=preprodYOUR_BLOCKFROST_PROJECT_ID
+```
 
-## 🚀 Cách chạy Frontend
+> **Lưu ý:** Bạn có thể đăng ký tài khoản và lấy Project ID Preprod miễn phí tại [Blockfrost.io](https://blockfrost.io).
+
+#### 🚀 Khởi chạy ứng dụng Web
 ```bash
 cd frontend_app
 npm install
@@ -65,10 +68,11 @@ npm run dev
 
 ---
 
-## 📂 Tài nguyên
-*   `validators/marketplace.ak`: Code Aiken chính.
-*   `plutus.json`: Kết quả biên dịch (Artifact).
-*   `docs.md`: Tài liệu tham khảo thêm.
+## 📂 Cấu trúc thư mục
+* `validators/marketplace.ak`: Chứa code logic contract chính.
+* `validators/tests/marketplace.ak`: Suite các bài test thử nghiệm (7 test cases).
+* `frontend_app/`: Mã nguồn ứng dụng web Next.js + MeshSDK.
+* `plutus.json`: Artifact được tạo ra sau khi build.
 
 ---
-*Dự án nằm trong chuỗi Khóa học Aiken 2026. Một giải pháp Marketplace bền vững cho Cardano.*
+*Dự án nằm trong chuỗi Khóa học Aiken 2026.*
