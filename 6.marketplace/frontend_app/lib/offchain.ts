@@ -142,9 +142,10 @@ export class MarketplaceContract extends TxInitiator {
 
   // -------------------------------------------------------------------------
   // 2. Update Price — Seller cập nhật giá niêm yết
-  // Redeemer: Update { new_price } = mConStr1([new_price])
+  // Redeemer: Update { new_price: Int } = { alternative: 1, fields: [priceLovelace] }
   // -------------------------------------------------------------------------
   updatePrice = async (marketplaceUtxo: UTxO, newPrice: number) => {
+    this.mesh.reset();
     const { utxos, walletAddress, collateral } =
       await this.getWalletInfoForTx();
 
@@ -164,17 +165,57 @@ export class MarketplaceContract extends TxInitiator {
       targetUtxo.output.plutusData!
     );
 
-    // Datum mới: giữ nguyên seller/nft/royalty, chỉ đổi price
-    const updatedDatum = safePlutusJson(
-      conStr0([
-        inlineDatum.fields[0],    // seller (Address) — giữ nguyên
-        integer(newPrice),        // price MỚI
-        inlineDatum.fields[2],    // nft (MValue) — giữ nguyên
-        inlineDatum.fields[3],    // royalty_recipient — giữ nguyên
-        inlineDatum.fields[4],    // royalty_rate — giữ nguyên
-      ])
+    // 1. Trích xuất các thông tin nguyên bản từ Datum cũ
+    const sellerField = inlineDatum.fields[0];
+    const sellerAddress = serializeAddressObj(sellerField, this.networkId);
+
+    const royaltyRecipientField = inlineDatum.fields[3];
+    const rawRoyaltyRate = inlineDatum.fields[4];
+    const royaltyRate = typeof rawRoyaltyRate === "object" && rawRoyaltyRate !== null && "int" in (rawRoyaltyRate as any)
+      ? Number((rawRoyaltyRate as any).int)
+      : Number(rawRoyaltyRate ?? 0);
+
+    const rObj = royaltyRecipientField as any;
+    const tag = rObj && typeof rObj === "object"
+      ? (Object.prototype.hasOwnProperty.call(rObj, "constructor")
+          ? Number(rObj.constructor)
+          : (Object.prototype.hasOwnProperty.call(rObj, "alternative")
+              ? Number(rObj.alternative)
+              : undefined))
+      : undefined;
+
+    const isRoyaltyValid =
+      rObj &&
+      typeof rObj === "object" &&
+      tag === 0 &&
+      Array.isArray(rObj.fields) &&
+      rObj.fields.length > 0;
+
+    const royaltyAddress = isRoyaltyValid
+      ? serializeAddressObj(rObj.fields[0], this.networkId)
+      : undefined;
+
+    const priceLovelace = Math.floor(Number(newPrice));
+
+    // 2. Lấy danh sách NFT Assets trong UTxO của Script
+    const nftAssets = targetUtxo.output.amount.filter((a) => a.unit !== "lovelace");
+
+    // 3. Tái tạo Datum mới sạch sẽ bằng marketplaceDatum helper
+    const outputDatum = marketplaceDatum(
+      sellerAddress,
+      priceLovelace,
+      nftAssets,
+      royaltyAddress,
+      royaltyRate
     );
 
+    // 4. Redeemer cho Update { new_price: Int } trong MeshTxBuilder V3
+    const redeemerData = {
+      alternative: 1,
+      fields: [priceLovelace],
+    };
+
+    // 5. Xây dựng giao dịch: Rút UTxO cũ, nạp lại UTxO mới vào Script với Datum đã cập nhật giá
     await this.mesh
       .spendingPlutusScript(this.languageVersion)
       .txIn(
@@ -183,12 +224,11 @@ export class MarketplaceContract extends TxInitiator {
         targetUtxo.output.amount,
         this.scriptAddress
       )
-      .txInInlineDatumPresent()
-      .txInRedeemerValue(mConStr1([integer(newPrice)])) // Update{new_price}
       .txInScript(this.scriptCbor)
-      // Output quay lại Script với Datum và Assets giữ nguyên
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(redeemerData)
       .txOut(this.scriptAddress, targetUtxo.output.amount)
-      .txOutInlineDatumValue(updatedDatum, "JSON")
+      .txOutInlineDatumValue(outputDatum, "JSON")
       .requiredSignerHash(sellerPkh)
       .changeAddress(walletAddress)
       .txInCollateral(
@@ -202,7 +242,7 @@ export class MarketplaceContract extends TxInitiator {
 
     return this.mesh.txHex;
   };
-
+  
   // -------------------------------------------------------------------------
   // 3. Buy Asset — Người mua thanh toán ADA để nhận NFT
   // Redeemer: Buy = mConStr0([])
