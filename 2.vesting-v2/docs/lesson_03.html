@@ -1,0 +1,305 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Khóa học:</strong> Building with Aiken<br /><strong>Module 2:</strong> Vesting Smart Contract (Khóa tài sản)</p>
+</blockquote>
+
+<hr />
+
+<h2>📋 Mục lục</h2>
+<ol>
+  <li><a href="#1-tong-quan-kien-truc-off-chain-frontend">Tổng quan Kiến trúc Off-chain &amp; Frontend</a></li>
+  <li><a href="#2-cau-truc-thu-muc-du-an-frontend">Cấu trúc Thư mục Dự án Frontend</a></li>
+  <li><a href="#3-phan-tich-chi-tiet-logic-off-chain-liboffchaints">Phân tích Chi tiết Logic Off-chain (<code>lib/offchain.ts</code>)</a>
+    <ul>
+      <li><a href="#31-ham-createvesting-nap-tien-dinh-kem-inline-datum">3.1. Hàm createVesting (Nạp tiền &amp; Đính kèm Inline Datum)</a></li>
+      <li><a href="#32-ham-claimvesting-rut-tien-xu-ly-thoi-gian-off-chain">3.2. Hàm claimVesting (Rút tiền &amp; Xử lý thời gian Off-chain)</a></li>
+      <li><a href="#33-ham-cancelvesting-huy-bo-dinh-kem-chu-ky">3.3. Hàm cancelVesting (Hủy bỏ &amp; Đính kèm chữ ký)</a></li>
+    </ul>
+  </li>
+  <li><a href="#4-toi-uu-hoa-phi-giao-dich-sua-loi-thieu-evaluator">Tối ưu hóa Phí Giao Dịch: Sửa lỗi thiếu Evaluator</a></li>
+  <li><a href="#5-xay-dung-giao-dien-nguoi-dung-apppagetsx">Xây dựng Giao diện Người dùng (<code>app/page.tsx</code>)</a></li>
+  <li><a href="#6-huong-dan-deploy-test-tren-cardano-preprod-testnet">Hướng dẫn Deploy &amp; Test trên Cardano Preprod Testnet</a></li>
+  <li><a href="#7-tong-ket-module-2">Tổng kết Module 2</a></li>
+</ol>
+
+<hr />
+
+<h2 id="1-tong-quan-kien-truc-off-chain-frontend">1. Tổng quan Kiến trúc Off-chain &amp; Frontend</h2>
+<p>Một Smart Contract On-chain (Aiken) dù có hoàn hảo đến đâu cũng sẽ trở nên vô dụng nếu không có <strong>Mã nguồn Off-chain</strong> để tương tác và tạo giao dịch.</p>
+
+<h4>Vai trò của Off-chain Code:</h4>
+<ul>
+  <li>Khởi tạo giao dịch (Transaction Building).</li>
+  <li>Đóng gói dữ liệu <code>Datum</code> và <code>Redeemer</code> thành chuẩn Plutus Data.</li>
+  <li>Quy đổi mốc thời gian của người dùng thành <code>Slot</code> và đặt <code>Validity Range</code> cho giao dịch.</li>
+  <li>Gửi giao dịch đến Ví người dùng (Nami, Eternl, Lace...) để ký tên và phát sóng (broadcast) lên mạng lưới Cardano.</li>
+</ul>
+<p>Trong Module này, chúng ta sử dụng <strong>Next.js</strong> cho Frontend và <strong>MeshJS SDK</strong> (thư viện TypeScript hàng đầu trên Cardano) để làm Off-chain.</p>
+
+<hr />
+
+<h2 id="2-cau-truc-thu-muc-du-an-frontend">2. Cấu trúc Thư mục Dự án Frontend</h2>
+<p>Dự án Frontend nằm trong thư mục <code>frontend_app/</code>:</p>
+
+<pre><code>frontend_app/
+├── app/
+│   ├── layout.tsx         # Root Layout chứa MeshProvider
+│   └── page.tsx           # Giao diện chính (UI &amp; Filter UTxO)
+├── lib/
+│   ├── offchain.ts        # Logic khởi tạo giao dịch MeshJS TxBuilder
+│   ├── common.ts          # Chứa các hàm helper
+│   └── plutus.json        # Plutus Blueprint chứa mã biên dịch của validator</code></pre>
+
+<hr />
+
+<h2 id="3-phan-tich-chi-tiet-logic-off-chain-liboffchaints">3. Phân tích Chi tiết Logic Off-chain (<code>lib/offchain.ts</code>)</h2>
+
+<h3 id="31-ham-createvesting-nap-tien-dinh-kem-inline-datum">3.1. Hàm <code>createVesting</code> (Nạp tiền &amp; Đính kèm Inline Datum)</h3>
+<p>Khi <code>Owner</code> điền thông tin và bấm nút "Create Plan", hàm này được gọi để tạo một UTxO bị khóa tại địa chỉ của Smart Contract.</p>
+
+<pre><code>createVesting = async (
+  amount: Asset[],                 // Mảng Asset cần khóa (ví dụ: [{ unit: 'lovelace', quantity: '10000000' }])
+  lockUntilTimeStampMs: number,    // Thời điểm khóa (POSIX ms)
+  beneficiary: string,             // Địa chỉ ví của Beneficiary
+): Promise&lt;string&gt; =&gt; {            // Trả về txHex
+  this.mesh.reset();
+  const { utxos, walletAddress } = await this.getWalletInfoForTx();
+
+  const { pubKeyHash: ownerPubKeyHash } = deserializeAddress(walletAddress);
+  const { pubKeyHash: beneficiaryPubKeyHash } = deserializeAddress(beneficiary);
+
+  await this.mesh
+    .txOut(this.scriptAddress, amount)
+    // Tạo Datum đóng gói 3 trường: lock_until, owner, beneficiary
+    .txOutInlineDatumValue(
+      mConStr0([
+        lockUntilTimeStampMs,
+        ownerPubKeyHash,
+        beneficiaryPubKeyHash,
+      ])
+    )
+    .changeAddress(walletAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+
+  return this.mesh.txHex;
+};</code></pre>
+
+<p>Hàm trả về <code>txHex</code> (giao dịch chưa ký). Việc ký (<code>wallet.signTx</code>) và phát sóng (<code>provider.submitTx</code>) được thực hiện ở lớp Frontend (trong <code>page.tsx</code>).</p>
+
+<hr />
+
+<h3 id="32-ham-claimvesting-rut-tien-xu-ly-thoi-gian-off-chain">3.2. Hàm <code>claimVesting</code> (Rút tiền &amp; Xử lý thời gian Off-chain)</h3>
+<p>Khi <code>Beneficiary</code> bấm "Claim" sau khi hết thời hạn khóa:</p>
+
+<pre><code>claimVesting = async (vestingUtxo: UTxO): Promise&lt;string&gt; =&gt; {
+  this.mesh.reset();
+  const { utxos, walletAddress, collateral } =
+    await this.getWalletInfoForTx(true); // true = yêu cầu collateral
+  const { input: collateralInput, output: collateralOutput } = collateral!;
+  const { pubKeyHash } = deserializeAddress(walletAddress);
+
+  // 1. Giải mã Datum từ UTxO bị khóa để lấy mốc lockUntil
+  const datum = deserializeDatum&lt;VestingDatum&gt;(vestingUtxo.output.plutusData!);
+  const lockUntil = Number(datum.fields[0].int);
+
+  // 2. CHUYỂN ĐỔI THỜI GIAN: POSIX Time (ms) -&gt; Slot
+  // Thêm +1000ms (1 giây) làm khoảng đệm (Buffer Time) an toàn
+  const invalidBefore = unixTimeToEnclosingSlot(
+    lockUntil + 1000,
+    this.networkId === 0
+      ? SLOT_CONFIG_NETWORK.preprod
+      : SLOT_CONFIG_NETWORK.mainnet,
+  );
+
+  await this.mesh
+    .spendingPlutusScript(this.languageVersion)
+    .txIn(
+      vestingUtxo.input.txHash,
+      vestingUtxo.input.outputIndex,
+      vestingUtxo.output.amount,
+      this.scriptAddress
+    )
+    .txInScript(this.scriptCbor)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(mConStr1([]))  // Constructor Index 1 = Claim
+    .txInCollateral(
+      collateralInput.txHash,
+      collateralInput.outputIndex,
+      collateralOutput.amount,
+      collateralOutput.address,
+    )
+    .invalidBefore(invalidBefore)   // Thiết lập validity_range.lower_bound
+    .requiredSignerHash(pubKeyHash) // bắt buộc Beneficiary phải ký giao dịch này
+    .changeAddress(walletAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+
+  return this.mesh.txHex; // Trả về txHex để Frontend ký và submit
+};</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 <strong>Tại sao phải có khoảng đệm (Buffer Time) +1000ms?</strong><br />Vì thời gian đồng hồ giữa các node trên mạng lưới có thể lệch vài mili-giây. Nếu ta đặt <code>invalidBefore</code> sát khít với <code>lockUntil</code>, khi giao dịch truyền tới Validator có thể bị lỗi ranh giới (Edge Case) làm Validator đánh giá giao dịch xảy ra quá sớm. Thêm 1-2 giây giúp giao dịch đảm bảo 100% thành công.</p>
+</blockquote>
+
+<hr />
+
+<h3 id="33-ham-cancelvesting-huy-bo-dinh-kem-chu-ky">3.3. Hàm <code>cancelVesting</code> (Hủy bỏ &amp; Đính kèm chữ ký)</h3>
+<p>Khi <code>Owner</code> muốn rút lại tiền:</p>
+
+<pre><code>cancelVesting = async (vestingUtxo: UTxO): Promise&lt;string&gt; =&gt; {
+  this.mesh.reset();
+  const { utxos, walletAddress, collateral } =
+    await this.getWalletInfoForTx(true); // true = yêu cầu collateral
+  const { input: collateralInput, output: collateralOutput } = collateral!;
+  const { pubKeyHash } = deserializeAddress(walletAddress);
+
+  await this.mesh
+    .spendingPlutusScript(this.languageVersion)
+    .txIn(
+      vestingUtxo.input.txHash,
+      vestingUtxo.input.outputIndex,
+      vestingUtxo.output.amount,
+      this.scriptAddress
+    )
+    .txInScript(this.scriptCbor)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(mConStr0([])) // Constructor Index 0 = Cancel
+    .txInCollateral(
+      collateralInput.txHash,
+      collateralInput.outputIndex,
+      collateralOutput.amount,
+      collateralOutput.address,
+    )
+    .requiredSignerHash(pubKeyHash)  // bắt buộc Owner phải ký giao dịch này
+    .changeAddress(walletAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+
+  return this.mesh.txHex; // Trả về txHex để Frontend ký và submit
+};</code></pre>
+
+<hr />
+
+<h2 id="4-toi-uu-hoa-phi-giao-dich-sua-loi-thieu-evaluator">4. Tối ưu hóa Phí Giao Dịch: Sửa lỗi thiếu Evaluator</h2>
+<p>Trong quá trình phát triển dApp với MeshJS, lập trình viên thường gặp một hiện tượng: <strong>Phí giao dịch báo trên ví Eternl/Nami cao bất thường (ví dụ: vài ADA thay vì 0.2 ADA).</strong></p>
+
+<h4>Nguyên nhân:</h4>
+<p>Nếu khởi tạo <code>MeshTxBuilder</code> mà không truyền tham số <code>evaluator</code>:</p>
+<pre><code>// ❌ SAI: Thiếu Evaluator
+const txBuilder = new MeshTxBuilder({
+  fetcher: provider,
+  submitter: provider,
+});</code></pre>
+
+<p>Khi thiếu <code>evaluator</code>, MeshJS không thể chạy mô phỏng (evaluate) hợp đồng Aiken off-chain để tính toán lượng Memory và CPU thực tế. Do đó, MeshJS buộc phải đặt <strong>mức ngân sách an toàn tối đa (Max Budget)</strong>:</p>
+<ul>
+  <li>Memory: <code>7,000,000</code> units</li>
+  <li>CPU: <code>3,000,000,000</code> steps</li>
+</ul>
+<p>Mạng lưới Cardano sẽ tính phí giao dịch dựa trên mức trần này, làm phí giao dịch tăng vọt!</p>
+
+<h4>Cách khắc phục chuẩn xác:</h4>
+<p>Truyền thêm <code>evaluator: provider</code> (ví dụ BlockfrostProvider hoặc MaestroProvider) vào cấu hình:</p>
+
+<pre><code>// ✅ ĐÚNG: Đã thêm Evaluator
+const txBuilder = new MeshTxBuilder({
+  fetcher: provider,
+  submitter: provider,
+  evaluator: provider, // Bắt buộc để mô phỏng &amp; tính chuẩn phí!
+});</code></pre>
+
+<p>Nhờ có <code>evaluator</code>, MeshJS sẽ chạy thử mã Plutus trước, tính toán chính xác hợp đồng Aiken tốn bao nhiêu tài nguyên (ví dụ chỉ tốn 200,000 CPU steps), và phí giao dịch sẽ lập tức hạ về mức rẻ nhất (~0.17 - 0.2 ADA).</p>
+
+<hr />
+
+<h2 id="5-xay-dung-giao-dien-nguoi-dung-apppagetsx">5. Xây dựng Giao diện Người dùng (<code>app/page.tsx</code>)</h2>
+<p>Trong file <code>page.tsx</code>, ứng dụng sẽ thực hiện:</p>
+<ol>
+  <li>Lấy danh sách UTxO tại địa chỉ Smart Contract qua API <code>provider.fetchAddressUTxOs(scriptAddress)</code>.</li>
+  <li>Giải mã Inline Datum của từng UTxO.</li>
+  <li>So sánh <code>owner</code> và <code>beneficiary</code> với PubKeyHash của ví đang đăng nhập.</li>
+  <li>Lọc và hiển thị thành 2 Tab:
+    <ul>
+      <li><strong>Sponsored Plans:</strong> Hiển thị các gói do user làm Owner (kèm nút <em>Cancel</em>).</li>
+      <li><strong>Claimable Plans:</strong> Hiển thị các gói do user làm Beneficiary (kèm đồng hồ đếm ngược và nút <em>Claim</em>).</li>
+    </ul>
+  </li>
+</ol>
+
+<pre><code>// 1. Quét UTxO tại Script và giải mã Datum (trong hàm loadScriptUtxos)
+const utxos = await provider.fetchAddressUTxOs(contract.scriptAddress);
+
+const plans = utxos.map((utxo) =&gt; {
+  ...
+  // Giải mã Inline Datum của từng UTxO
+  const datum = deserializeDatum&lt;VestingDatum&gt;(utxo.output.plutusData);
+  ...
+  return {
+    utxo,
+    lockUntil,
+    ownerHash,
+    beneficiaryHash,
+    ownerAddress,
+    beneficiaryAddress,
+    amount: utxo.output.amount
+  };
+}).filter(p =&gt; p !== null);
+...
+setVestingPlans(plans);
+
+// 2. Lọc kế hoạch tương ứng với Tab đang chọn (trong phần render giao diện)
+{vestingPlans.map((plan, i) =&gt; {
+  const { pubKeyHash: myPubKeyHash } = deserializeAddress(userAddress);
+  const isOwner = plan.ownerHash.toLowerCase() === myPubKeyHash.toLowerCase();
+  const isBeneficiary = plan.beneficiaryHash.toLowerCase() === myPubKeyHash.toLowerCase();
+
+  // Nếu đang ở tab "sponsor", chỉ hiển thị gói mà user là Owner
+  if (activeTab === "sponsor" &amp;&amp; !isOwner) return null;
+  
+  // Nếu đang ở tab "beneficiary", chỉ hiển thị gói mà user là Beneficiary
+  if (activeTab === "beneficiary" &amp;&amp; !isBeneficiary) return null;
+
+  return (
+    // Hiển thị các plan tương ứng với tab
+  );
+})}</code></pre>
+
+<hr />
+
+<h2 id="6-huong-dan-deploy-test-tren-cardano-preprod-testnet">6. Hướng dẫn Deploy &amp; Test trên Cardano Preprod Testnet</h2>
+
+<h4>Các bước thực hành thực tế:</h4>
+<ol>
+  <li><strong>Chuẩn bị ví Testnet:</strong> Cài đặt ví Eternl hoặc Lace, chuyển sang mạng <code>Preprod Testnet</code>.</li>
+  <li><strong>Xin tADA miễn phí (Faucet):</strong> Rút tADA từ <a href="https://docs.cardano.org/cardano-testnets/tools/faucet/" target="_blank" rel="noopener">Cardano Preprod Faucet</a>.</li>
+  <li><strong>Chạy ứng dụng Frontend:</strong>
+    <pre><code>cd frontend_app
+npm install
+npm run dev</code></pre>
+  </li>
+  <li><strong>Thực hiện Test Flow:</strong>
+    <ul>
+      <li><strong>Bước 1:</strong> Kết nối Ví A (Owner). Tạo gói Vesting khóa 10 ADA trong 3 phút gửi cho Ví B (Beneficiary).</li>
+      <li><strong>Bước 2:</strong> Đổi sang Ví B và nhấn <strong>SCAN</strong> để tải các gói Vesting. Khi thời gian khóa (3 phút) chưa hết, kiểm tra xem gói có hiển thị trạng thái <code>🔒 Locked</code> và nút <strong>Claim</strong> có bị khóa (disabled) hay không.</li>
+      <li><strong>Bước 3:</strong> Đợi đồng hồ đếm ngược chạy về 0. Bấm <strong>Claim</strong> từ Ví B và xác nhận giao dịch nhận 10 ADA thành công.</li>
+      <li><strong>Bước 4:</strong> Thử nghiệm tính năng <strong>Cancel</strong> từ Ví A đối với một gói khóa khác.</li>
+    </ul>
+  </li>
+</ol>
+
+<hr />
+
+<h2 id="7-tong-ket-module-2">7. Tổng kết Module 2</h2>
+<p>Chúc mừng bạn đã hoàn thành trọn vẹn <strong>Module 2: Vesting Smart Contract trên Cardano</strong>!</p>
+
+<h4>Những kiến thức cốt lõi bạn đã chinh phục:</h4>
+<ul>
+  <li>✅ Hiểu sâu sắc cơ chế thời gian <code>Validity Range</code> trên Cardano EUTxO.</li>
+  <li>✅ Lập trình thành thạo On-chain Validator bằng <strong>Aiken</strong> với Datum và Redeemer.</li>
+  <li>✅ Nhận diện và khắc phục lỗ hổng bảo mật <strong>Unbounded Validity Interval</strong>.</li>
+  <li>✅ Xây dựng mã nguồn Off-chain &amp; Giao diện Web3 mượt mà với <strong>MeshJS SDK</strong> và <strong>Next.js</strong>.</li>
+</ul>
+
+<hr />
+
+<p>🎉 <strong>Hãy tự hào về thành quả của bạn! Hẹn gặp lại bạn ở Module 3!</strong></p>

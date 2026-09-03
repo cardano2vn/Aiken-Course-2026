@@ -1,0 +1,190 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Khóa học:</strong> Building with Aiken<br /><strong>Module 2:</strong> Vesting Smart Contract (Khóa tài sản)<br /><strong>Tài liệu tham khảo:</strong> <a href="https://docs.cardano2vn.io/docs/dr-lars-lession/K_03/Lecture_03" target="_blank" rel="noopener">Dr. Lars Lesson 3 - PPP Cohort 3</a> &amp; Kịch bản Module 2</p>
+</blockquote>
+
+<hr />
+
+<h2>📋 Mục lục</h2>
+<ol>
+  <li><a href="#1-cau-truc-ma-nguon-du-an-aiken">Cấu trúc Mã nguồn Dự án Aiken</a></li>
+  <li><a href="#2-dinh-nghia-datum-va-redeemer">Định nghĩa Datum và Redeemer</a></li>
+  <li><a href="#3-phan-tich-ma-nguon-validator-vestingak">Phân tích Mã nguồn Validator <code>vesting.ak</code></a></li>
+  <li><a href="#4-phan-tich-lo-hong-bao-mat-unbounded-validity-interval">Phân tích Lỗ hổng Bảo mật: Unbounded Validity Interval</a></li>
+  <li><a href="#5-bai-tap-ve-nha-mo-rong-homework">BÀI TẬP VỀ NHÀ MỞ RỘNG (HOMEWORK)</a>
+    <ul>
+      <li><a href="#bai-tap-1-gioi-han-quyen-cancel-cua-owner-truoc-thoi-diem-claim">Bài tập 1: Giới hạn quyền Cancel của Owner trước thời điểm Claim</a></li>
+      <li><a href="#bai-tap-2-khoa-theo-cua-so-thoi-gian-beneficiary-claim-window-owner-reclaim">Bài tập 2: Khóa theo Cửa sổ Thời gian (Beneficiary Claim Window &amp; Owner Reclaim)</a></li>
+    </ul>
+  </li>
+</ol>
+
+<hr />
+
+<h2 id="1-cau-truc-ma-nguon-du-an-aiken">1. Cấu trúc Mã nguồn Dự án Aiken</h2>
+<p>Mã nguồn On-chain của hợp đồng Vesting được đặt trong thư mục <code>validators/vesting.ak</code>.</p>
+
+<pre><code>validators/
+└── vesting.ak       # Chứa logic xác thực Datum, Redeemer và các Unit Test</code></pre>
+
+<h4>Khai báo các Module phụ thuộc:</h4>
+<pre><code>use cardano/transaction.{OutputReference, Transaction}
+use mocktail.{complete, invalid_before, mocktail_tx, required_signer_hash}
+use mocktail/virgin_key_hash.{mock_pub_key_hash}
+use mocktail/virgin_output_reference.{mock_utxo_ref}
+use vodka_extra_signatories.{key_signed}
+use vodka_validity_range.{valid_after}</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 <code>key_signed</code> và <code>valid_after</code> là các hàm helper được cung cấp sẵn bởi thư viện <strong>vodka</strong>, giúp code ngắn gọn và đã được kiểm thử kỹ lưỡng.</p>
+</blockquote>
+
+<hr />
+
+<h2 id="2-dinh-nghia-datum-va-redeemer">2. Định nghĩa Datum và Redeemer</h2>
+<p>Trên Cardano EUTxO, thông tin trạng thái được lưu ở <strong>Datum</strong> đính kèm trên UTxO, còn hành động rút tiền được truyền qua <strong>Redeemer</strong>.</p>
+
+<h4>2.1. Cấu trúc <code>VestingDatum</code></h4>
+<p><code>VestingDatum</code> lưu trữ 3 thông tin quan trọng:</p>
+<pre><code>pub type VestingDatum {
+  /// Thời điểm kết thúc khóa (POSIX time - miligiây)
+  lock_until: Int,
+  /// Mã băm khóa công khai (PubKeyHash) của Người chủ / Người gửi tiền
+  owner: ByteArray,
+  /// PubKeyHash của Người thụ hưởng / Người nhận tiền
+  beneficiary: ByteArray,
+}</code></pre>
+
+<h4>2.2. Cấu trúc <code>VestingRedeemer</code></h4>
+<p><code>VestingRedeemer</code> định nghĩa 2 hành động có thể thực hiện trên UTxO này:</p>
+<pre><code>pub type VestingRedeemer {
+  Cancel
+  Claim
+}</code></pre>
+
+<hr />
+
+<h2 id="3-phan-tich-ma-nguon-validator-vestingak">3. Phân tích Mã nguồn Validator <code>vesting.ak</code></h2>
+<p>Validator chính sử dụng mục đích <code>spend</code> (tiêu dùng UTxO tại địa chỉ script):</p>
+
+<pre><code>validator vesting {
+  spend(
+    datum_opt: Option&lt;VestingDatum&gt;,
+    redeemer: VestingRedeemer,
+    _input: OutputReference,
+    tx: Transaction,
+  ) {
+    // 1. Giải mã Datum
+    expect Some(datum) = datum_opt
+
+    // 2. Phân nhánh xử lý dựa vào Redeemer
+    when redeemer is {
+      // Luồng Cancel: Kiểm tra giao dịch có chữ ký của Owner hay không
+      Cancel -&gt; key_signed(tx.extra_signatories, datum.owner)
+
+      // Luồng Claim: Yêu cầu cả 2 điều kiện đều phải thỏa mãn (and)
+      Claim -&gt;
+        and {
+          // Điều kiện 1: Phải có chữ ký của người thụ hưởng
+          key_signed(tx.extra_signatories, datum.beneficiary),
+          // Điều kiện 2: Khoảng thời gian giao dịch phải nằm SAU lock_until
+          valid_after(tx.validity_range, datum.lock_until),
+        }
+    }
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+<h4>Các hàm Helper bổ trợ (thư viện <code>vodka</code>):</h4>
+
+<h5>1. Kiểm tra chữ ký người dùng (<code>key_signed</code>):</h5>
+<pre><code>fn key_signed(
+  extra_signatories: List&lt;VerificationKeyHash&gt;,
+  key: VerificationKeyHash,
+) -&gt; Bool {
+  list.has(extra_signatories, key)
+}</code></pre>
+
+<h5>2. Kiểm tra khoảng thời gian hợp lệ (<code>valid_after</code>):</h5>
+<pre><code>fn valid_after(range: ValidityRange, lock_until: Int) -&gt; Bool {
+  when range.lower_bound.bound_type is {
+    Finite(tx_valid_from) -&gt; tx_valid_from &gt;= lock_until
+    _ -&gt; false
+  }
+}</code></pre>
+
+<hr />
+
+<h2 id="4-phan-tich-lo-hong-bao-mat-unbounded-validity-interval">4. Phân tích Lỗ hổng Bảo mật: Unbounded Validity Interval</h2>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>⚠️ <strong>CẢNH BÁO BẢO MẬT CỰC KỲ QUAN TRỌNG!</strong></p>
+</blockquote>
+
+<p>Trong các dApp thời gian trên Cardano, một lỗ hổng rất phổ biến đối với lập trình viên mới là <strong>Unbounded Validity Interval</strong> (Khoảng thời gian không có giới hạn).</p>
+
+<h4>Kịch bản tấn công (Vulnerability Scenario):</h4>
+<p>Giả sử lập trình viên viết hàm kiểm tra thời gian lỏng lẻo như sau:</p>
+<pre><code>// ❌ CODE LỖ HỔNG - ĐỪNG VIẾT THẾ NÀY!
+fn bad_valid_after(range: ValidityRange, lock_until: Int) -&gt; Bool {
+  when range.upper_bound.bound_type is {
+    Finite(tx_valid_to) -&gt; tx_valid_to &gt; lock_until
+    _ -&gt; false
+  }
+}</code></pre>
+
+<p><strong>Tại sao dòng code trên lại gây mất tiền?</strong></p>
+<ol>
+  <li>Nếu kẻ tấn công gửi một giao dịch <strong>không cài đặt <code>valid_from</code></strong> (cận dưới mặc định là <code>-∞</code> ở quá khứ), và đặt <code>valid_to</code> ở tương lai xa (ví dụ năm 2099).</li>
+  <li>Khi đó <code>tx_valid_to &gt; lock_until</code> sẽ trả về <code>True</code>!</li>
+  <li>Kẻ tấn công có thể rút sạch tiền <strong>ngay lập tức</strong>, cho dù mốc khóa <code>lock_until</code> thực tế còn 5 năm nữa mới tới!</li>
+</ol>
+
+<h4>Cách khắc phục chuẩn xác:</h4>
+<p>Phải luôn luôn kiểm tra <strong>Cận Dưới (<code>lower_bound</code> / <code>valid_from</code>)</strong> của giao dịch. Cận dưới bắt buộc phải là một giá trị hữu hạn (<code>Finite</code>) và phải lớn hơn hoặc bằng mốc <code>lock_until</code>.</p>
+
+<pre><code>// ✅ CODE CHUẨN AN TOÀN
+fn valid_after(range: ValidityRange, lock_until: Int) -&gt; Bool {
+  when range.lower_bound.bound_type is {
+    Finite(tx_valid_from) -&gt; tx_valid_from &gt;= lock_until
+    _ -&gt; false
+  }
+}</code></pre>
+
+<hr />
+
+<h2 id="5-bai-tap-ve-nha-mo-rong-homework">5. BÀI TẬP VỀ NHÀ MỞ RỘNG (HOMEWORK)</h2>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 <strong>Mục tiêu:</strong> Nâng cấp hợp đồng Vesting cơ bản thành một hợp đồng thông minh thực tế, tuân thủ các quy tắc bảo vệ quyền lợi hai chiều giữa Owner và Beneficiary.</p>
+</blockquote>
+
+<hr />
+
+<h3 id="bai-tap-1-gioi-han-quyen-cancel-cua-owner-truoc-thoi-diem-claim">Bài tập 1: Giới hạn quyền Cancel của Owner trước thời điểm Claim</h3>
+
+<h4>📌 Yêu cầu bài tập:</h4>
+<p>Trong hợp đồng mẫu ở trên, <code>Owner</code> có thể gọi <code>Cancel</code> để rút lại tiền ở <strong>bất kỳ thời điểm nào</strong>.<br />Tuy nhiên trong thực tế kinh doanh, điều này tạo ra rủi ro <em>Rug-Pull</em>: Khi mốc <code>lock_until</code> trôi qua, người thụ hưởng chuẩn bị vào claim tiền thì Owner lại nhanh tay gọi <code>Cancel</code> để cướp lại tài sản.</p>
+<p><strong>Hãy nâng cấp hợp đồng sao cho:</strong></p>
+<ul>
+  <li><code>Owner</code> <strong>CHỈ ĐƯỢC PHÉP CANCEL TRƯỚC THỜI ĐIỂM <code>lock_until</code></strong> (tức là khi khoản tiền chưa bước vào giai đoạn cho phép Claim).</li>
+  <li>Ngay khi thời gian vượt qua <code>lock_until</code>, <code>Owner</code> <strong>HOÀN TOÀN MẤT QUYỀN CANCEL</strong>. Quyền sở hữu tài sản lúc này thuộc về <code>Beneficiary</code>.</li>
+</ul>
+
+<hr />
+
+<h3 id="bai-tap-2-khoa-theo-cua-so-thoi-gian-beneficiary-claim-window-owner-reclaim">Bài tập 2: Khóa theo Cửa sổ Thời gian (Beneficiary Claim Window &amp; Owner Reclaim)</h3>
+
+<h4>📌 Yêu cầu bài tập:</h4>
+<p>Trong hợp đồng Vesting thương mại thực tế, người nạp tiền (<code>Owner</code>) không thể khóa tài sản vĩnh viễn nếu người thụ hưởng (<code>Beneficiary</code>) bỏ quên hoặc không bao giờ đến rút tiền.</p>
+<p><strong>Hãy thiết kế một Smart Contract mở rộng với điều kiện hai chiều như sau:</strong></p>
+<ol>
+  <li><strong>Cửa sổ thời gian rút tiền của Beneficiary:</strong><br /><code>Beneficiary</code> chỉ được phép rút tiền (<code>Claim</code>) <strong>TRONG KHOẢNG THỜI GIAN</strong> từ <code>lock_until</code> đến <code>deadline</code> (ví dụ: trong vòng 30 ngày kể từ mốc giải ngân).</li>
+  <li><strong>Quyền rút lại tiền của Owner khi quá hạn:</strong><br />Nếu <code>Beneficiary</code> không rút tiền trong cửa sổ thời gian cho phép (tức là thời gian đã vượt qua mốc <code>deadline</code>), quyền Claim của Beneficiary sẽ <strong>hết hạn</strong>. Lúc này, <code>Owner</code> được quyền rút lại toàn bộ số tiền (<code>Cancel</code> / <code>Reclaim</code>).</li>
+</ol>
+
+<hr />
+
+<p>👉 <strong>Tiếp theo:</strong> Chuyển sang <strong><a href="./lesson_03.html">Bài giảng 3: Xây dựng Off-chain &amp; Frontend cho Vesting dApp với MeshJS</a></strong> để kết nối hợp đồng Aiken vừa viết với ứng dụng Web!</p>

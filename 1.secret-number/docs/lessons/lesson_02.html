@@ -1,0 +1,364 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục tiêu bài học</h4>
+  <p>Tìm hiểu logic on-chain, cùng xây dựng Secret Number validator. Nắm vững các kiến thức cơ bản như Script Purpose, cấu trúc Aiken validator, <code>spend</code> handler, và từ khóa <code>expect</code> trong Aiken.</p>
+</blockquote>
+
+<hr />
+
+<h2>1. On-chain và Off-chain trên Cardano</h2>
+<p>Một trong những điểm khác biệt lớn nhất trong mô hình smart contract của Cardano so với các blockchain khác (như Ethereum) là cách phân chia công việc giữa <strong>On-chain</strong> (chạy trên mạng lưới blockchain) và <strong>Off-chain</strong> (chạy trên máy khách/server).</p>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Tiêu chí</th>
+      <th>ON-CHAIN (Validator)</th>
+      <th>OFF-CHAIN</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Nơi thực thi</strong></td>
+      <td>Trên chuỗi: Các node mạng</td>
+      <td>Ngoài chuỗi: Clients / Servers</td>
+    </tr>
+    <tr>
+      <td><strong>Nhiệm vụ cốt lõi</strong></td>
+      <td>Xác thực giao dịch (Phê duyệt)</td>
+      <td>- Truy vấn dữ liệu blockchain - Xây dựng giao dịch (Hành động)</td>
+    </tr>
+    <tr>
+      <td><strong>Cập nhật/Nâng cấp</strong></td>
+      <td>- Tần suất hạn chế - Cập nhật: tạo ra hợp đồng mới hoàn toàn</td>
+      <td>Linh hoạt, dễ dàng</td>
+    </tr>
+    <tr>
+      <td><strong>Tốc độ &amp; Chi phí</strong></td>
+      <td>- Chậm, cần sự đồng thuận - Tốn phí giao dịch</td>
+      <td>- Nhanh - Chi phí rẻ hơn</td>
+    </tr>
+    <tr>
+      <td><strong>Yêu cầu</strong></td>
+      <td>Business logic cốt lõi, chính xác, tối ưu</td>
+      <td>Ổn định, linh hoạt, dễ bảo trì</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Khi xây dựng on-chain code, chúng ta <strong>chỉ đưa vào những business logic cốt lõi</strong>, thực sự cần thiết và nhiệm vụ của nó chỉ là xác thực — cho phép hoặc từ chối giao dịch. Còn các tác vụ khác như xử lý tính toán, chuẩn bị dữ liệu thì chuyển hết cho off-chain.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Điểm khác biệt quan trọng:</strong><br />Trên <strong>Ethereum</strong>: "Smart Contract <em>thực hiện</em> hành động"<br />Trên <strong>Cardano</strong>: "Transaction <em>thực hiện (tạo ra đề xuất)</em> hành động, Validator là <em>người phê duyệt</em>"</p>
+</blockquote>
+<p>Chính vì kiến trúc này, on-chain code trên Cardano được gọi với cái tên đúng với nhiệm vụ của nó: <strong>Validator</strong>. Nếu đúng luật (trả về <code>True</code>), giao dịch được ghi vào block. Nếu sai luật (trả về <code>False</code>), giao dịch bị từ chối.</p>
+
+<hr />
+
+<h2>2. Script Purpose</h2>
+<p><strong>Script Purpose</strong> chỉ mục đích sử dụng khi một validator được gọi trong transaction. Nó cho biết validator này đang được kích hoạt để kiểm tra <em>hành động gì</em>. Hiện tại, Cardano hỗ trợ <strong>6 loại</strong> script purpose:</p>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Purpose</th>
+      <th>Kích hoạt khi</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>spend</code></td>
+      <td>Giao dịch tiêu thụ UTxO tại Script Address</td>
+    </tr>
+    <tr>
+      <td><code>mint</code></td>
+      <td>Giao dịch đúc hoặc đốt native token</td>
+    </tr>
+    <tr>
+      <td><code>withdraw</code></td>
+      <td>Giao dịch rút staking reward</td>
+    </tr>
+    <tr>
+      <td><code>publish</code></td>
+      <td>Giao dịch đăng ký / ủy quyền / huỷ chứng chỉ (stake, DRep...)</td>
+    </tr>
+    <tr>
+      <td><code>vote</code></td>
+      <td>Giao dịch bỏ phiếu các đề xuất quản trị</td>
+    </tr>
+    <tr>
+      <td><code>propose</code></td>
+      <td>Giao dịch đệ trình các đề xuất quản trị</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>3. Cấu trúc Aiken Validator</h2>
+<p>Validator trong ngôn ngữ Aiken được định nghĩa bằng từ khóa <code>validator</code>. Trong mỗi khối <code>validator</code>, chúng ta lần lượt triển khai các hàm xử lý (<strong>handlers</strong>) cho từng Script Purpose.</p>
+<p>Tương ứng với 6 loại script purpose, chúng ta có 6 loại handler. Tên của chúng <strong>không được đặt tùy ý</strong> mà bắt buộc phải khớp chính xác: <code>spend</code>, <code>mint</code>, <code>withdraw</code>, <code>publish</code>, <code>vote</code>, <code>propose</code>. Mỗi handler là một <strong>predicate function</strong> (hàm trả về giá trị boolean).</p>
+<pre><code>validator validator_name {
+  spend(datum, redeemer, output_reference, transaction) {
+    // Logic kiểm tra chi tiêu UTxO
+  }
+
+  mint(redeemer, policy_id, transaction) {
+    // Logic kiểm tra mint / burn token
+  }
+
+  else(_) {
+    // BẮT TẤT CẢ purpose không được khai báo ở trên
+    fail  // Từ chối giao dịch ngay lập tức
+  }
+}</code></pre>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><code>else</code> là một handler đặc biệt (<strong>fallback / catch-all</strong>) có nhiệm vụ <em>bắt tất cả</em> các purpose không được định nghĩa trong validator để xử lý chung. Thông thường, với các giao dịch rơi vào nhánh này, chúng ta mong đợi chúng sẽ <em>fail</em>. Trong trường hợp không khai báo đầy đủ 6 handler, bạn <strong>bắt buộc</strong> phải có <code>else</code>.</p>
+</blockquote>
+<p>Đây chính là cấu trúc điển hình của một Aiken validator: triển khai một hoặc vài handler cần thiết, cuối cùng là <code>else</code> để bắt tất cả mục đích còn lại.</p>
+
+<hr />
+
+<h2>4. Spending Validator</h2>
+<p>Trong các loại script purpose, <code class="whitespace-pre-wrap">spend</code> là mục đích phổ biến nhất, chịu trách nhiệm kiểm soát việc mở khóa và chi tiêu UTxO tại địa chỉ hợp đồng. Validator của <strong>Secret Number</strong> thuộc loại này — một <strong>Spending Validator</strong>, trong đó chúng ta chỉ cần triển khai duy nhất handler <code class="whitespace-pre-wrap">spend</code>.</p>
+<pre><code>spend(datum_opt: Option&lt;MyDatum&gt;, redeemer: MyRedeemer, input: OutputReference, self: Transaction) {
+    ...
+}</code></pre>
+<p><code>spend</code> handler nhận vào <strong>4 đối số</strong>:</p>
+<img class="wp-image-2504 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/4-300x135.png" alt="Spending_Validator" width="838" height="377" />
+<p style="text-align: center;"><em>Hình ảnh ẩn dụ Spending Validator — Khách hàng giao dịch tài khoản tiết kiệm tại ngân hàng</em></p>
+
+<h4>Datum (<code>Option&lt;DatumType&gt;</code>)</h4>
+<p>Dữ liệu được gắn vào Script UTxO, đại diện cho <em>trạng thái hiện tại</em> của smart contract. Datum tồn tại trên blockchain cùng UTxO.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Tại sao <code>Option</code>?</strong> Trong Cardano, bất kỳ ai cũng có thể gửi UTxO vào địa chỉ hợp đồng mà không bắt buộc đính kèm datum. Đối với Plutus V1/V2, validator bắt buộc datum phải có mặt — UTxO không có datum sẽ không thể chi tiêu. Kể từ <strong>Plutus V3</strong>, datum có kiểu <code>Option</code>, thêm khả năng xử lý trường hợp datum vắng mặt. Tùy vào cách xử lý của validator mà có thể cho phép rút tiền trong trường hợp gửi nhầm vào địa chỉ hợp đồng mà không đi kèm datum.</p>
+</blockquote>
+
+<h4>Redeemer</h4>
+<p>Dữ liệu người dùng đính kèm <em>trong giao dịch</em> khi muốn tiêu Script UTxO. Thường thể hiện ý định hoặc hành động của họ. Redeemer không tồn tại trên blockchain trước đó — chỉ xuất hiện trong giao dịch.</p>
+
+<h4>OutputReference</h4>
+<p>Đối tượng mục tiêu của hành động spend, là "mã tham chiếu" chỉ đích danh script UTxO nào đang được chi tiêu, bao gồm mã băm giao dịch tạo ra nó (Transaction ID) và vị trí trong các đầu ra giao dịch (Output Index).</p>
+
+<h4>Transaction (Script Context)</h4>
+<p>Toàn bộ thông tin của giao dịch đang thực thi: inputs, outputs, fee, validity range...</p>
+
+<hr />
+
+<h2>5. Thiết kế Secret Number Spending Validator</h2>
+<h4>Phân tích dữ liệu</h4>
+<p>Chúng ta có hai trạng thái của trò chơi cần được bảo vệ trên chuỗi: <strong>con số bí mật</strong> và <strong>quỹ thưởng</strong>. Cả hai được đặt trong một Script UTxO — gọi nó là <strong>Game UTxO</strong>, chứa trạng thái của trò chơi<strong>.</strong></p>
+<ul>
+  <li><strong>Treasury (quỹ thưởng)</strong>: Là tài sản gắn liền với UTxO, không cần ghi trong datum.</li>
+  <li><strong>Secret (con số bí mật)</strong>: Được lưu trong <strong>Datum</strong>.</li>
+  <li><strong>Guess (con số đoán)</strong>: Được cung cấp qua <strong>Redeemer</strong>.</li>
+</ul>
+
+<h4><strong>Continuing Output Pattern</strong></h4>
+<p>Đây là một trong những pattern quan trọng trên Cardano.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><em><strong>Vấn đề:</strong> Trong mô hình eUTxO, một UTxO chỉ được tiêu <strong>một lần duy nhất</strong> và biến mất. Vậy kho bạc tồn tại thế nào sau 1 ván chơi?</em><br /><br /><em><strong>Giải pháp:</strong> Khi Game UTxO hiện tại bị chi tiêu, validator bắt buộc giao dịch phải tạo ra <strong>đúng một UTxO mới gửi ngược lại về địa chỉ hợp đồng</strong> (được gọi là <strong>Continuing Output</strong>). UTxO này chính là <strong>Game UTxO mới</strong>, lưu giữ số dư quỹ thưởng còn lại cùng con số bí mật cho ván chơi kế tiếp.</em></p>
+</blockquote>
+<img class="wp-image-2505 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/5-300x120.png" alt="secret-number-validator" width="1028" height="411" />
+
+<h4>Ba điều kiện validator phải kiểm tra</h4>
+<p>Khi ai đó muốn mở khóa (spend) UTxO chứa tiền thưởng, giao dịch phải chứng minh nó thỏa mãn <strong>3 điều kiện</strong>:</p>
+
+<h5><strong>Điều kiện 1 — Lời giải phải chính xác</strong></h5>
+<pre><code>let correct_guess = redeemer.guess == own_datum.secret</code></pre>
+<p>Validator kiểm tra trực tiếp số đoán của người chơi (<code>redeemer.guess</code>) có khớp với số bí mật thực tế đang được giấu trong Game UTxO (<code>own_datum.secret</code>).</p>
+
+<h5>Điều kiện 2 — Quỹ thưởng phải được cập nhật chính xác</h5>
+<p>Mỗi lần có người đoán đúng, <strong>10 ADA</strong> được trả về cho người thắng. Hợp đồng đảm bảo phần còn lại được hoàn trả đầy đủ về quỹ thưởng — không ai có thể rút vượt quá số tiền quy định.</p>
+<pre><code>let correct_amount = output_lovelace == input_lovelace - reward_amount_lovelace</code></pre>
+
+<h5>Điều kiện 3 — Thử thách kế tiếp phải được đặt ra hợp lệ</h5>
+<pre><code>expect InlineDatum(datum_data) = continuing_output.datum
+expect new_datum: MyDatum = datum_data
+let new_secret = new_datum.secret
+...
+let valid_new_secret = new_secret &gt;= min_secret &amp;&amp; new_secret &lt;= max_secret</code></pre>
+<p>Người thắng không chỉ nhận tiền là xong — họ còn có trách nhiệm đặt con số bí mật mới. Validator đảm bảo:</p>
+<ul>
+  <li>Continuing output phải có <strong>Inline Datum</strong></li>
+  <li>Datum mới phải đúng kiểu <code>MyDatum { secret: Int }</code></li>
+  <li>Số bí mật mới phải trong khoảng hợp lệ <code>[1, 999.999]</code></li>
+</ul>
+
+<h4>Hai cách đính kèm datum vào UTxO: Inline Datum vs Datum Hash</h4>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th></th>
+      <th>Datum Hash</th>
+      <th>Inline Datum</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Hình thức lưu</strong></td>
+      <td>Chỉ mã hash dữ liệu (32 bytes)</td>
+      <td>Toàn bộ dữ liệu</td>
+    </tr>
+    <tr>
+      <td><strong>Ai biết dữ liệu gốc</strong></td>
+      <td>Chỉ người tạo</td>
+      <td>Bất kỳ ai, vì dữ liệu công khai trên chuỗi</td>
+    </tr>
+    <tr>
+      <td><strong>Chi phí</strong></td>
+      <td>Rẻ hơn</td>
+      <td>Đắt hơn một chút</td>
+    </tr>
+  </tbody>
+</table>
+<p>Hiện nay, <strong>Inline Datum</strong> gần như là tiêu chuẩn vì tính tiện dụng. Trước đây khi chưa có Inline Datum, người ta dùng Datum Hash — phương pháp này giúp giảm kích thước dữ liệu nhưng khá bất tiện: chỉ có người tạo biết nội dung gốc, và người chi tiêu phải được thông báo giá trị datum gốc để đưa vào giao dịch.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> Với game đoán số, lẽ ra sử dụng Datum Hash là hợp lý hơn (vì khi đó con số mới thực sự là "bí mật"). Tuy nhiên, để giữ sự đơn giản, chúng ta lựa chọn Inline Datum — và bản thân nó cũng là lựa chọn phổ biến hiện nay trong thực hành.</p>
+</blockquote>
+
+<hr />
+
+<h2>6. Khám phá Code Aiken</h2>
+<p>Hãy cùng xem toàn bộ validator được triển khai thế nào trong file <code>./validators/secret_number.ak</code>:</p>
+
+<h4>Khai báo kiểu dữ liệu</h4>
+<pre><code>type MyDatum {
+  secret: Int,
+}
+
+type MyRedeemer {
+  guess: Int,
+}</code></pre>
+<p><strong>Tại sao không dùng trực tiếp kiểu <code>Int</code>?</strong> Có hai lý do:</p>
+<ol>
+  <li><strong>Tính tường minh</strong>: Đặt tên rõ ràng cho trường dữ liệu (<code>secret</code>, <code>guess</code>) giúp mã dễ đọc hơn.</li>
+  <li><strong>Khả năng mở rộng</strong>: Nếu sau này cần lưu thêm thông tin, chỉ việc thêm trường mới vào cấu trúc Record. Cấu trúc Plutus Data ở tầng dưới vẫn giữ nguyên định dạng Constructor — giúp code không phải viết lại nhiều, kể cả phần off-chain.</li>
+</ol>
+
+<h4>Hằng số</h4>
+<pre><code>const reward_amount_lovelace = 10_000_000  // 10 ADA
+const max_secret = 999_999
+const min_secret = 1</code></pre>
+
+<h4>Validator</h4>
+<pre><code>validator secret_number {
+  spend(datum, redeemer, output_reference, transaction) {
+    // Khớp mẫu datum (datum phải có mặt)
+    expect Some(own_datum) = datum
+
+    // Tìm game UTxO đang được chi tiêu 
+    expect Some(own_input) = transaction.inputs
+      |&gt; list.find(fn(input) { input.output_reference == output_reference })
+    let own_address = own_input.output.address
+    let input_lovelace = lovelace_of(own_input.output.value)
+
+    // Tìm Continuing Output (đảm bảo có đúng 1 output trả về địa chỉ hợp đồng)
+    expect [continuing_output] = transaction.outputs
+      |&gt; list.filter(fn(output) { output.address == own_address })
+    let output_lovelace = lovelace_of(continuing_output.value)
+
+    // Lấy số bí mật mới từ datum của continuing output
+    expect InlineDatum(datum_data) = continuing_output.datum
+    expect new_datum: MyDatum = datum_data
+    let new_secret = new_datum.secret
+
+    // Ba điều kiện cốt lõi
+    let correct_guess = redeemer.guess == own_datum.secret
+    let correct_continuing_output = output_lovelace == input_lovelace - reward_amount_lovelace
+    let valid_new_secret = new_secret &gt;= min_secret &amp;&amp; new_secret &lt;= max_secret
+
+    correct_guess &amp;&amp; correct_continuing_output &amp;&amp; valid_new_secret
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+<h4>Từ khóa <code>expect</code></h4>
+<p><code>expect</code> là một từ khóa đặc biệt trong Aiken, được dùng rất phổ biến với hai tác dụng chính:</p>
+
+<h5>Tác dụng 1: Khớp mẫu không đầy đủ (Non-exhaustive pattern-matching)</h5>
+<p>Khi chúng ta khớp mẫu cho một giá trị mà kiểu của nó có nhiều constructor (ví dụ <code>Option</code> có <em><code>Some</code></em> và <code><em>None</em></code>), thông thường cần khớp đầy đủ tất cả trường hợp. Nhưng nếu chỉ quan tâm đến <strong>một constructor duy nhất</strong> và muốn fail ngay với mọi trường hợp khác, chúng ta dùng <code>expect</code>:</p>
+<pre><code>// Khớp mẫu: Nếu datum là None → validator fail
+expect Some(own_datum) = datum
+
+// Khớp mẫu: Nếu không tìm thấy target UTxO → validator fail
+expect Some(own_input) = transaction.inputs
+  |&gt; list.find(fn(input) { input.output_reference == output_reference })
+
+// Khớp mẫu: Nếu không có đúng 1 continuing output → validator fail
+expect [continuing_output] = transaction.outputs
+  |&gt; list.filter(fn(output) { output.address == own_address })
+
+// Khớp mẫu: Nếu không phải InlineDatum → validator fail
+expect InlineDatum(datum_data) = continuing_output.datum</code></pre>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Bóc tách dữ liệu:</strong> Một tác dụng rất hay của khớp mẫu là ngoài việc khớp hình dạng dữ liệu, nó còn giúp bóc tách lớp vỏ constructor ra và gán giá trị bên trong cho biến để sử dụng. Ví dụ: <code>expect Some(own_datum) = datum</code> vừa ép datum phải là <code>Some</code>, vừa lấy được giá trị bên trong gán cho <code>own_datum</code>.</p>
+</blockquote>
+
+<h5>Tác dụng 2: Ép kiểu từ <code>Data</code> sang kiểu cụ thể (Type Casting)</h5>
+<p>Khi làm việc với datum đính kèm trên output, giá trị thường có kiểu <code>Data</code> thô. Dùng <code>expect</code> để chuyển đổi sang kiểu tùy chỉnh:</p>
+<pre><code>// Ép kiểu
+expect new_datum: MyDatum = datum_data</code></pre>
+<p><strong>Cú pháp:</strong> chỉ định rõ kiểu dữ liệu mong muốn sau dấu hai chấm (<code>:</code>). Phép ép kiểu sẽ thất bại nếu giá trị <code>datum_data</code> không phải là biểu diễn hợp lệ của kiểu <code>MyDatum</code> mục tiêu.</p>
+
+<h4>list.find vs list.filter</h4>
+<p>Trong code, có một chi tiết quan trọng: hai đoạn tìm Input và tìm Output nhìn qua có vẻ giống nhau, nhưng một bên dùng <code>list.find</code>, bên kia dùng <code>list.filter</code>. Tại sao?</p>
+
+<h5><code>list.find</code> — Tìm Input</h5>
+<p>Hàm <code>find</code> dừng tìm kiếm ngay khi thấy phần tử đầu tiên thỏa mãn. Vì mã tham chiếu UTxO (<code>output_reference</code>) là <strong>độc nhất</strong> trên toàn mạng lưới, nên chỉ có tối đa 1 input khớp điều kiện tìm kiếm (<code>input.output_reference == output_reference</code>). Dùng <code>find</code> hoàn toàn hợp lý và giúp tối ưu hiệu suất.</p>
+
+<h5><code>list.filter</code> — Tìm Continuing Output</h5>
+<p>Hoàn toàn có thể có <strong>nhiều output</strong> gửi về địa chỉ hợp đồng. Phải dùng <code>filter</code> để lọc ra <strong>toàn bộ</strong>, sau đó dùng <code>expect [continuing_output]</code> để ép buộc chỉ được có <strong>đúng 1</strong> đầu ra thỏa mãn. Nếu dùng <code>find</code>, validator sẽ không nhận biết được output thứ 2, thứ 3, ... gửi về hợp đồng — tạo ra <strong>lỗ hổng bảo mật</strong>.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Sau khi viết xong validator, hãy chạy <code>aiken check</code> để kiểm tra và <code>aiken build</code> để tạo ra Plutus script.</p>
+</blockquote>
+
+<hr />
+
+<h2>Tóm tắt bài học</h2>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Khái niệm</th>
+      <th>Vai trò trong Secret Number</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>On-chain vs Off-chain</strong></td>
+      <td>On-chain xác thực; Off-chain truy xuất dữ liệu từ chuỗi, xây dựng giao dịch</td>
+    </tr>
+    <tr>
+      <td><strong>Script Purpose</strong></td>
+      <td><code>spend</code> - kích hoạt khi chi tiêu UTxO tại script address</td>
+    </tr>
+    <tr>
+      <td><strong>Datum</strong></td>
+      <td><code>{ secret: Int }</code> — trạng thái game lưu trên blockchain</td>
+    </tr>
+    <tr>
+      <td><strong>Redeemer</strong></td>
+      <td><code>{ guess: Int }</code> — số đoán người chơi gửi trong giao dịch</td>
+    </tr>
+    <tr>
+      <td><strong>Continuing Output</strong></td>
+      <td>UTxO mới gửi lại hợp đồng — game tiếp tục sau mỗi ván</td>
+    </tr>
+    <tr>
+      <td><strong>Inline Datum</strong></td>
+      <td>Datum lưu trực tiếp on-chain, đọc được qua explorer</td>
+    </tr>
+    <tr>
+      <td><strong><code>expect</code></strong></td>
+      <td>
+        <ul>
+          <li>Pattern matching</li>
+          <li>Ép kiểu</li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ xem cách Frontend và Off-chain phối hợp để biến các thao tác trên giao diện thành giao dịch tương tác với On-chain validator. Hẹn gặp lại!</p>

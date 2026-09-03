@@ -10,20 +10,18 @@ import {
 export type TxInitiatorInput = {
     mesh: MeshTxBuilder;
     fetcher?: IFetcher;
-    wallet?: IWallet;
+    wallet?: IWallet | any;
     networkId?: number;
     stakeCredential?: string;
-    version?: number;
 };
 
 export class TxInitiator {
     mesh: MeshTxBuilder;
     fetcher?: IFetcher;
-    wallet?: IWallet;
+    wallet?: IWallet | any;
     stakeCredential?: string;
     networkId = 0;
-    version = 2;
-    languageVersion: LanguageVersion = "V2";
+    languageVersion: LanguageVersion = "V3";
 
     constructor({
         mesh,
@@ -31,7 +29,6 @@ export class TxInitiator {
         wallet,
         networkId = 0,
         stakeCredential = "c08f0294ead5ab7ae0ce5471dd487007919297ba95230af22f25e575",
-        version = 2,
     }: TxInitiatorInput) {
         this.mesh = mesh;
         if (fetcher) {
@@ -48,15 +45,6 @@ export class TxInitiator {
                 break;
             default:
                 this.mesh.setNetwork("preprod");
-        }
-
-        this.version = version;
-        switch (this.version) {
-            case 1:
-                this.languageVersion = "V2";
-                break;
-            default:
-                this.languageVersion = "V3";
         }
 
         if (stakeCredential) {
@@ -176,14 +164,14 @@ export class TxInitiator {
         });
     };
 
-    protected getWalletInfoForTx = async () => {
+    protected getWalletInfoForTx = async (requireCollateral = false) => {
         const utxos = await this.wallet?.getUtxos();
-        const collateral = await this.getWalletCollateral();
+        const collateral = requireCollateral ? await this.getWalletCollateral() : undefined;
         const walletAddress = await this.getWalletDappAddress();
         if (!utxos || utxos?.length === 0) {
             throw new Error("No utxos found");
         }
-        if (!collateral) {
+        if (requireCollateral && !collateral) {
             throw new Error("No collateral found");
         }
         if (!walletAddress) {

@@ -1,0 +1,203 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Khóa học:</strong> Building with Aiken<br /><strong>Module 2:</strong> Vesting Smart Contract (Khóa tài sản)</p>
+</blockquote>
+
+<hr />
+
+<h2>📋 Mục lục</h2>
+<ol>
+  <li><a href="#1-gioi-thieu-bai-toan-vesting-trong-web3">Giới thiệu Bài toán Vesting trong Web3</a></li>
+  <li><a href="#2-phan-tich-thiet-ke-dapp-vesting">Phân tích Thiết kế dApp Vesting</a></li>
+  <li><a href="#3-co-che-thoi-gian-tren-cardano-eutxo">Cơ chế Thời gian trên Cardano EUTxO</a></li>
+  <li><a href="#4-so-sanh-cardano-validity-range-va-ethereum-blocktimestamp">So sánh Cardano (Validity Range) và Ethereum (block.timestamp)</a></li>
+  <li><a href="#5-quy-doi-giua-posix-time-va-slot">Quy đổi giữa POSIX Time và Slot</a></li>
+  <li><a href="#6-tong-ket-cau-hoi-tu-duy">Tổng kết &amp; Câu hỏi tư duy</a></li>
+</ol>
+
+<hr />
+
+<h2 id="1-gioi-thieu-bai-toan-vesting-trong-web3">1. Giới thiệu Bài toán Vesting trong Web3</h2>
+<p>Trong hệ sinh thái Web3 và Crypto, <strong>Vesting</strong> (hay Khóa tài sản) là một bài toán kinh điển và bắt buộc đối với hầu hết các dự án blockchain.</p>
+
+<h4>Vesting là gì?</h4>
+<p>Vesting là quá trình <strong>khóa token/tài sản</strong> trong một khoảng thời gian nhất định và giải ngân dần dần hoặc giải ngân toàn bộ sau khi đạt đến một mốc thời gian quy định (gọi là <em>Vesting Cliff</em> hoặc <em>Lock Period</em>).</p>
+
+<h4>Tại sao Vesting lại cực kỳ quan trọng?</h4>
+<ul>
+  <li><strong>Bảo vệ dự án &amp; nhà đầu tư:</strong> Tránh tình trạng Đội ngũ sáng lập (Founders/Team) hoặc các Quỹ đầu tư sớm (Venture Capitals) xả token ồ ạt ngay khi token vừa lên sàn, gây sập giá dự án.</li>
+  <li><strong>Tạo động lực dài hạn:</strong> Ràng buộc quyền lợi của các thành viên trong đội ngũ với sự phát triển lâu dài của dự án.</li>
+  <li><strong>Minh bạch hóa trên Blockchain:</strong> Thay vì hứa hẹn trên giấy tờ, việc sử dụng Smart Contract để khóa tài sản đảm bảo tính phi tập trung, không ai có thể can thiệp hay gian lận.</li>
+</ul>
+
+<pre><code>+-----------------+        Gửi token vào Smart Contract       +-------------------------+
+|   Owner/Sender  |  --------------------------------------&gt;  |  Vesting Smart Contract |
++-----------------+                                           +-------------------------+
+                                                                           |
+                                                                           | Đợi qua mốc thời gian khóa (lock_until)
+                                                                           v
++-----------------+                 Rút tiền                  +-------------------------+
+|   Beneficiary   |  &lt;--------------------------------------  |    UTxO (Locked ADA)    |
++-----------------+                                           +-------------------------+</code></pre>
+
+<hr />
+
+<h2 id="2-phan-tich-thiet-ke-dapp-vesting">2. Phân tích Thiết kế dApp Vesting</h2>
+<p>Để xây dựng ứng dụng Vesting, chúng ta cần xác định rõ các <strong>Vai trò (Roles)</strong> và các <strong>Hành động (Actions)</strong> trong hệ thống.</p>
+
+<h4>2.1. Các Vai Trò (Roles)</h4>
+<ol>
+  <li><strong>Owner (Người khởi tạo / Người nạp tiền):</strong>
+    <ul>
+      <li>Là người sở hữu ban đầu của tài sản.</li>
+      <li>Nạp tiền vào Smart Contract và thiết lập điều kiện: người thụ hưởng và thời gian khóa.</li>
+    </ul>
+  </li>
+  <li><strong>Beneficiary (Người thụ hưởng):</strong>
+    <ul>
+      <li>Là người sẽ nhận số tài sản được khóa sau khi thời gian khóa kết thúc.</li>
+    </ul>
+  </li>
+</ol>
+
+<h4>2.2. Các Hành Động (Actions / Redeemers)</h4>
+<p>Smart Contract của chúng ta sẽ hỗ trợ 2 hành động chính:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Hành động</th>
+      <th>Người thực hiện</th>
+      <th>Điều kiện bắt buộc</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Claim (Rút tiền)</strong></td>
+      <td><code>Beneficiary</code></td>
+      <td>1. Có chữ ký của <code>Beneficiary</code><br />2. Thời gian thực hiện giao dịch phải <strong>SAU</strong> mốc thời gian khóa (<code>lock_until</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>Cancel (Hủy bỏ)</strong></td>
+      <td><code>Owner</code></td>
+      <td>1. Có chữ ký của <code>Owner</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="3-co-che-thoi-gian-tren-cardano-eutxo">3. Cơ chế Thời gian trên Cardano EUTxO</h2>
+<p>Thời gian là yếu tố cốt lõi của hợp đồng Vesting. Tuy nhiên, cách Cardano xử lý thời gian trong Smart Contract hoàn toàn khác biệt so với các blockchain tài khoản (Account-based) như Ethereum.</p>
+
+<h4>Cardano Smart Contracts là Hàm Thuần Túy (Pure Functions)</h4>
+<p>Trên Cardano, một Validator Script là một <strong>Pure Function</strong> (hàm thuần túy) mang tính <strong>Deterministic</strong> (tất định tuyệt đối).</p>
+<ul>
+  <li>Validator chỉ nhận đầu vào: <code>Datum</code>, <code>Redeemer</code>, và <code>ScriptContext</code> (thông tin giao dịch).</li>
+  <li>Với cùng một đầu vào, Validator <strong>luôn luôn trả về cùng một kết quả</strong> (<code>True</code> hoặc <code>False</code>), dù chạy ở bất kỳ máy tính nào hay ở bất kỳ thời điểm nào.</li>
+</ul>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Đặt câu hỏi:</strong> Nếu Validator mang tính thuần túy và không thể truy cập trực tiếp đồng hồ thời gian của máy chủ, làm sao nó biết "bây giờ là mấy giờ" để quyết định cho rút tiền?</p>
+</blockquote>
+
+<h4>Giải pháp: Transaction Validity Range (Khoảng thời gian hợp lệ)</h4>
+<p>Thay vì để Smart Contract hỏi thời gian hệ thống, Cardano yêu cầu <strong>chính giao dịch (Transaction)</strong> khi được tạo off-chain phải tự khai báo khoảng thời gian mà giao dịch đó có hiệu lực. Trường này được gọi là <strong><code>Validity Range</code></strong> (hay <code>Validity Interval</code>).</p>
+<p>Một <code>Validity Range</code> gồm 2 cận:</p>
+<ul>
+  <li><code>valid_from</code> (hoặc <code>lower_bound</code>): Giao dịch chỉ bắt đầu có hiệu lực từ mốc thời gian này.</li>
+  <li><code>valid_to</code> (hoặc <code>upper_bound</code>): Giao dịch hết hiệu lực sau mốc thời gian này.</li>
+</ul>
+
+<pre><code>          Quá khứ                   Hiện tại                     Tương lai
+------------|---------------------------|----------------------------|-------------&gt; Thời gian
+                                [==== Validity Range ====]
+                                valid_from            valid_to</code></pre>
+
+<h4>Quy trình xác thực thời gian trên Cardano:</h4>
+<ol>
+  <li><strong>Bước 1 (Cardano Node / Ledger Level):</strong> Khi giao dịch được gửi lên mạng lưới, Cardano Node sẽ kiểm tra thời gian thực hiện tại của hệ thống. Nếu thời gian hiện tại nằm ngoài khoảng <code>[valid_from, valid_to]</code>, Node sẽ <strong>từ chối giao dịch ngay lập tức</strong> mà không chạy Smart Contract (giúp người dùng không bị tốn phí gas).</li>
+  <li><strong>Bước 2 (Validator Level - Aiken):</strong> Khi giao dịch đã lọt qua Bước 1, Validator On-chain chỉ cần kiểm tra logic: <strong>Liệu khoảng <code>Validity Range</code> khai báo trên giao dịch có nằm hoàn toàn sau mốc <code>lock_until</code> hay không?</strong></li>
+</ol>
+
+<hr />
+
+<h2 id="4-so-sanh-cardano-validity-range-va-ethereum-blocktimestamp">4. So sánh Cardano (Validity Range) và Ethereum (block.timestamp)</h2>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Tiêu chí</th>
+      <th>Ethereum (Solidity)</th>
+      <th>Cardano (Aiken / Plutus)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Cơ chế thời gian</strong></td>
+      <td><code>block.timestamp</code> (Lấy mốc thời gian của block đang được đúc).</td>
+      <td><code>Transaction Validity Range</code> (Khai báo khoảng thời gian giao dịch hợp lệ).</td>
+    </tr>
+    <tr>
+      <td><strong>Tính chất</strong></td>
+      <td>Không tất định (Non-deterministic) vì timestamp phụ thuộc thợ đào/validator.</td>
+      <td>Thuần túy &amp; Tất định (Deterministic). Kết quả xác thực được tính trước off-chain.</td>
+    </tr>
+    <tr>
+      <td><strong>Rủi ro Miner Manipulation</strong></td>
+      <td>Thợ đào có thể lệch timestamp vài giây để trục lợi.</td>
+      <td>Hoàn toàn không thể trục lợi vì Node kiểm tra tính hợp lệ trước khi Validator chạy.</td>
+    </tr>
+    <tr>
+      <td><strong>Phí thất bại (Failed Tx)</strong></td>
+      <td>Nếu mốc thời gian chưa đến, giao dịch vẫn bị đưa lên chain và <strong>mất phí gas</strong>.</td>
+      <td>Nếu mốc thời gian chưa đến, Cardano Node loại giao dịch từ vòng ngoài, <strong>không tốn 1 xu phí nào</strong>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="5-quy-doi-giua-posix-time-va-slot">5. Quy đổi giữa POSIX Time và Slot</h2>
+<p>Khi lập trình dApp Cardano, bạn sẽ gặp 2 khái niệm thời gian song song:</p>
+<ol>
+  <li><strong>POSIX Time (Mili-giây):</strong>
+    <ul>
+      <li>Được sử dụng trong mã nguồn On-chain (Aiken / Plutus).</li>
+      <li>Tính bằng số mili-giây kể từ <code>1970-01-01T00:00:00Z</code> (Unix Epoch).</li>
+      <li>Ví dụ: <code>1700000000000</code> ms.</li>
+    </ul>
+  </li>
+  <li><strong>Slot (Số đếm nhịp của Mạng lưới):</strong>
+    <ul>
+      <li>Được sử dụng bởi Cardano Node và Off-chain SDK (như MeshJS, Cardano-CLI).</li>
+      <li>Trên Cardano Mainnet và Preprod Testnet, <strong>1 Slot = 1 Giây</strong>.</li>
+    </ul>
+  </li>
+</ol>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 <strong>Lưu ý quan trọng cho Lập trình viên:</strong><br />Trong video và bài giảng tiếp theo về Off-chain, chúng ta sẽ sử dụng các hàm helper của MeshJS (như <code>unixTimeToEnclosingSlot</code>) để quy đổi từ thời gian POSIX của người dùng sang số <code>Slot</code> tương ứng trước khi đính kèm vào giao dịch.</p>
+</blockquote>
+
+<hr />
+
+<h2 id="6-tong-ket-cau-hoi-tu-duy">6. Tổng kết &amp; Câu hỏi tư duy</h2>
+
+<h4>Tóm tắt bài học:</h4>
+<ul>
+  <li>Vesting giúp khóa tài sản và giải ngân theo điều kiện thời gian.</li>
+  <li>dApp Vesting gồm 2 vai trò (<code>Owner</code>, <code>Beneficiary</code>) và 2 hành động (<code>Claim</code>, <code>Cancel</code>).</li>
+  <li>Cardano sử dụng cơ chế <code>Validity Range</code> để xác thực thời gian một cách thuần túy (pure) và an toàn tuyệt đối.</li>
+  <li>On-chain dùng POSIX Time (ms), Off-chain dùng Slot.</li>
+</ul>
+
+<h4>❓ Câu hỏi tư duy (Tự kiểm tra kiến thức):</h4>
+<ol>
+  <li><strong>Tại sao Smart Contract trên Cardano không thể đọc thời gian trực tiếp từ hệ điều hành?</strong></li>
+  <li><strong>Nếu giao dịch gửi lên Cardano khai báo <code>valid_from</code> là 10:00 AM, nhưng giao dịch đến Cardano Node lúc 9:30 AM thì điều gì sẽ xảy ra? Tài khoản gửi giao dịch có bị trừ phí không?</strong></li>
+  <li><strong>Giả sử mốc khóa <code>lock_until</code> là <code>1700000000000</code>. Để giao dịch Claim hợp lệ, cận <code>valid_from</code> của giao dịch phải thỏa mãn điều kiện gì?</strong></li>
+</ol>
+
+<hr />
+
+<p>👉 <strong>Tiếp theo:</strong> Chuyển sang <strong><a href="./lesson_02.html">Bài giảng 2: Lập trình Smart Contract Vesting với Aiken &amp; Bài tập Mở rộng</a></strong> để trực tiếp viết mã nguồn On-chain và thực hành bài tập bảo mật mở rộng!</p>

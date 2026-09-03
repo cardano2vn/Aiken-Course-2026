@@ -1,0 +1,331 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục tiêu bài học</h4>
+  <p>Hiểu cách Frontend và Off-chain phối hợp hoạt động: từ kết nối ví, truy vấn trạng thái game, xây dựng giao dịch, đến polling chờ xác nhận. Làm quen với CBOR và Plutus Data.</p>
+</blockquote>
+
+<hr />
+
+<h2>1. Luồng hoạt động tổng quan</h2>
+<p>Trong bài học trước, chúng ta đã xây dựng xong logic on-chain bằng Aiken. Bây giờ, chúng ta sẽ nhìn vào phần còn lại: làm sao từ các thao tác trên giao diện, có thể biến thành một giao dịch trên Cardano. Để thực hiện điều này, Front-end và Off-chain cần phối hợp chặt chẽ.</p>
+<p>Có <strong>4 luồng hoạt động chính</strong> trong dApp:</p>
+
+<h4>Luồng 1: Khởi tạo &amp; Truy vấn quỹ thưởng</h4>
+<img class="wp-image-2506 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/3.1-300x167.png" alt="m1-flow1" width="800" height="445" />
+<p>Sau khi mở dApp, Frontend yêu cầu Off-chain cung cấp thông tin trạng thái game. Off-chain sẽ truy vấn Blockfrost để lấy về toàn bộ UTxO tại địa chỉ hợp đồng, sau đó lọc tìm Game UTxO và trả về cho Frontend. Cuối cùng, Frontend đọc dữ liệu và hiển thị lên Game Board.</p>
+
+<h4>Luồng 2: Kết nối ví</h4>
+<img class="aligncenter wp-image-2507" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/3.2-300x167.png" alt="m1-flow2" width="800" height="446" />
+<p>Ngay khi mở dApp, Frontend tự quét và tìm danh sách các ví đã cài trên trình duyệt. Khi người dùng chọn một ví và nhấn kết nối, yêu cầu được gửi đến ví. Nếu là lần đầu tiên, một popup yêu cầu cấp quyền sẽ hiện ra. Sau khi xác nhận, Frontend truy cập thông tin ví (địa chỉ, collateral...) và mở khóa bảng nhập số.</p>
+
+<h4>Luồng 3: Gửi giao dịch đoán số</h4>
+<img class="aligncenter wp-image-2508" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/3.3-300x168.png" alt="m1-flow3" width="800" height="448" />
+<p>Người chơi nhập số đoán và số bí mật mới, nhấn Submit. Frontend chuyển thông tin cho Off-chain để xây dựng giao dịch. Giao dịch thô được trả về, chuyển sang ví để ký và gửi lên mạng lưới. Mã giao dịch (Transaction Hash) được trả về.</p>
+
+<h4>Luồng 4: Transaction Polling (Chờ xác nhận)</h4>
+<img class="wp-image-2509 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/3.4-300x297.png" alt="m1-flow4" width="500" height="495" />
+<p>Sau khi submit, giao diện hiển thị "Đang chờ xác nhận...". Hệ thống chạy vòng lặp kiểm tra liên tục (mỗi 5 giây, tối đa 150 giây) xem giao dịch đã được ghi nhận trên Blockfrost hay chưa. Nếu thành công → thông báo chiến thắng và cập nhật Game Board. Nếu hết thời gian → thông báo để người chơi kiểm tra trên explorer.</p>
+
+<hr />
+
+<h2>2. Cấu trúc Frontend</h2>
+<p>Giao diện dApp được xây dựng bằng <strong>Next.js</strong> và <strong>Framer Motion</strong>, tích hợp SDK <strong>MeshJS</strong> để xử lý các tác vụ Web3 trực tiếp trên trình duyệt.</p>
+
+<h4>Các components chính</h4>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Component</th>
+      <th>Chức năng</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>WalletConnect</code></td>
+      <td>Quản lý kết nối ví chuẩn CIP-30</td>
+    </tr>
+    <tr>
+      <td><code>GameBoard</code></td>
+      <td>Hiển thị trạng thái quỹ thưởng và thông tin Game UTxO</td>
+    </tr>
+    <tr>
+      <td><code>GuessForm</code></td>
+      <td>Biểu mẫu nhập dự đoán và thiết lập con số bí mật mới</td>
+    </tr>
+    <tr>
+      <td><code>TransactionStatus</code></td>
+      <td>Hiển thị trực quan trạng thái giao dịch trong suốt quá trình xử lý</td>
+    </tr>
+    <tr>
+      <td><code>DatumDecoder</code></td>
+      <td>Khu vực dành cho bài tập thực hành giải mã con số bí mật</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Off-chain code</h4>
+<p>Trong Off-chain, chúng ta chú ý đến 2 file chính:</p>
+<ul>
+  <li><code>queries.ts</code> — Truy xuất dữ liệu game trên blockchain</li>
+  <li><code>transactions.ts</code> — Tạo giao dịch đoán số</li>
+</ul>
+
+<hr />
+
+<h2>3. Kết nối ví (Connect Wallet)</h2>
+<p>Để dApp tương tác được với ví Cardano, chúng ta sử dụng class <code>BrowserWallet</code> từ package <code>@meshsdk/wallet</code>.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> Mesh cung cấp sẵn component <code>&lt;CardanoWallet /&gt;</code> trong <code>@meshsdk/react</code>. Tuy nhiên, package này đã lên v2 (beta) với API mới, trong khi <code>@meshsdk/core</code> vẫn ở v1.9.1 ổn định. Do đó, chúng ta tự viết component kết nối ví — qua đó hiểu rõ hơn cơ chế hoạt động bên trong.</p>
+</blockquote>
+
+<h4>Bước 1: Quét danh sách ví đã cài đặt</h4>
+<pre><code>// WalletConnect.tsx
+useEffect(() =&gt; {
+  const wallets = BrowserWallet.getInstalledWallets();
+  setInstalledWallets(wallets as InstalledWallet[]);
+}, []);</code></pre>
+<p>Hàm <code>getInstalledWallets()</code> quét trình duyệt và trả về danh sách các extension ví hỗ trợ chuẩn CIP-30. Mỗi phần tử chứa: mã id, tên và biểu tượng ví.</p>
+
+<h4>Bước 2: Kết nối vào ví người dùng chọn</h4>
+<pre><code>// WalletConnect.tsx
+const handleConnect = async (walletId: string) =&gt; {
+  ...
+  const connectedWallet = await BrowserWallet.enable(walletId);
+  onConnect(connectedWallet);
+  ...
+};</code></pre>
+<p><code>BrowserWallet.enable(walletId)</code> kích hoạt kết nối đến ví. Popup yêu cầu phê duyệt sẽ hiện ra nếu là lần đầu kết nối. Hàm trả về đối tượng <code>BrowserWallet</code> chứa các API được ủy quyền.</p>
+
+<h4>Bước 3: Nhận instance ví và lấy thông tin</h4>
+<pre><code>// page.tsx
+const handleWalletConnect = async (connectedWallet: BrowserWallet) =&gt; {
+  setWallet(connectedWallet);
+  
+  // Lấy địa chỉ ví → đích đến cho phần thưởng 10 ADA
+  const addr = await connectedWallet.getChangeAddress();
+  setWalletAddress(addr);
+  ...
+  // Kiểm tra UTxO thế chấp (collateral) 
+  const collateral = await connectedWallet.getCollateral();
+  setHasCollateral(collateral &amp;&amp; collateral.length &gt; 0);
+  ...
+};</code></pre>
+<p>Khi ví được kết nối thành công, dApp có quyền yêu cầu lấy địa chỉ ví, collateral, ...</p>
+
+<hr />
+
+<h2>4. Truy vấn dữ liệu (Querying)</h2>
+<p>Trước khi người dùng có thể đoán số, dApp phải tìm được vị trí kho tiền đang nằm ở đâu trên blockchain.</p>
+
+<h4>Hàm <code>fetchGameData</code></h4>
+<p>Khi người dùng mở trang, hàm <code>fetchGameData</code> sẽ được kích hoạt. Nó gọi đến <code>getGameUtxo</code> trong off-chain để lấy về Game UTxO, rồi cập nhật các trạng thái hiển thị: quỹ thưởng hiện tại, raw datum.</p>
+<p><code>fetchGameData</code> được gọi trong <code>useEffect</code>, chạy lần đầu khi dApp khởi chạy và tự động kích hoạt lại mỗi khi địa chỉ ví thay đổi.</p>
+
+<h4>Hàm <code>getGameUtxo</code> (trong <code>queries.ts</code>)</h4>
+<pre><code>// Lấy tất cả UTxO đang có ở địa chỉ script
+const utxos = await provider.fetchAddressUTxOs(scriptAddress);
+...
+// Lọc UTxO hợp lệ có Datum đúng cấu trúc game
+const validGameUtxos = utxos.filter((utxo) =&gt; isValidGameDatum(utxo.output.plutusData));
+...
+// Chọn UTxO có lượng ADA nhiều nhất
+const highestAdaUtxo = validGameUtxos.reduce((prev, current) =&gt; {
+    const prevAda = prev.output.amount.find(a =&gt; a.unit === "lovelace")?.quantity || "0";
+    const currentAda = current.output.amount.find(a =&gt; a.unit === "lovelace")?.quantity || "0";
+    return BigInt(prevAda) &gt; BigInt(currentAda) ? prev : current;
+});</code></pre>
+<p>Quy trình lọc này ngăn chặn lỗi do kẻ tấn công spam UTxO rác vào địa chỉ hợp đồng. Phương án chọn UTxO có ADA cao nhất không đảm bảo 100% lựa chọn đúng Game UTxO chính thức, nhưng đủ an toàn cho yêu cầu hiện tại.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Giải pháp chuẩn:</strong> Sử dụng <strong>State Thread Token</strong> (đính kèm một NFT vào state UTxO để đánh dấu). Chúng ta sẽ tìm hiểu cách này ở các module sau.</p>
+</blockquote>
+<p>Xem cách hàm <code>isValidGameDatum</code> kiểm tra Game Datum ở phần sau.</p>
+
+<hr />
+
+<h2>5. Plutus Data &amp; CBOR</h2>
+<p>Trước khi xem cách off-chain xử lý datum, hãy tìm hiểu Cardano lưu dữ liệu trên chuỗi như thế nào.</p>
+
+<h4>Pipeline chuyển đổi dữ liệu</h4>
+<p>Ngôn ngữ smart contract thực sự chạy trên Cardano là <strong>Plutus Core</strong>, tên đầy đủ là Untyped Plutus Core (UPLC). Các validator viết bằng Aiken, hay Opshin, Plinth, Plu-ts ..., cuối cùng đều được biên dịch về Plutus Core. Các dữ liệu mà validator sử dụng cũng vậy. Datum hay Redeemer trước khi gửi lên chuỗi cần phải chuyển đổi sang <strong>Plutus Data</strong> trước khi gửi lên chuỗi.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Câu hỏi:</strong> Giá trị <strong>Plutus Data</strong> có được mang nguyên lên blockchain Cardano hay không?<br /><strong>Trả lời:</strong> <em><strong>Không.</strong></em> Nó sẽ qua thêm 1 bước mã hóa thành định dạng <strong>CBOR</strong> rồi mới được đưa lên chuỗi. Bước mã hóa này được gọi là <em>serialize</em>.</p>
+</blockquote>
+<p>Ví dụ với kiểu <code>MyDatum</code>:</p>
+<img class="wp-image-2510 aligncenter" src="https://lms.cardano2vn.io/wp-content/uploads/2026/08/3.6-300x138.png" alt="m1-plutus-data" width="800" height="367" />
+
+<h4>Giải mã CBOR từng byte</h4>
+<p>Phân tích chuỗi <code>d8799f190378ff</code> — tổng cộng 7 bytes:</p>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Bytes</th>
+      <th>Ý nghĩa</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>d879</code></td>
+      <td>CBOR tag 121 → Constructor index 0 (constructor đầu tiên trong type Aiken)</td>
+    </tr>
+    <tr>
+      <td><code>9f</code></td>
+      <td>Bắt đầu indefinite-length array</td>
+    </tr>
+    <tr>
+      <td><code>19 0378</code></td>
+      <td>Tag <code>19</code>: chỉ định 2 byte tiếp theo là số nguyên dương. <code>0378</code> = 888 trong hệ thập lục phân</td>
+    </tr>
+    <tr>
+      <td><code>ff</code></td>
+      <td>Kết thúc array (break code)</td>
+    </tr>
+  </tbody>
+</table>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>CBOR (Concise Binary Object Representation)</strong> là định dạng nhị phân có cấu trúc, tương tự JSON dạng nhị phân. Giúp làm gọn dữ liệu, tiết kiệm dung lượng lưu trữ. Toàn bộ <em>transactions, datums, redeemers</em> và <em>scripts</em> đều encode bằng CBOR trước khi ghi lên chain.</p>
+</blockquote>
+
+<h4>Biểu diễn trong MeshJS</h4>
+<p>Mesh mô phỏng giá trị Plutus Data bằng đối tượng JavaScript:</p>
+<pre><code>// MeshJS representation
+{
+  constructor: 0,
+  fields: [{ int: 888 }]
+}</code></pre>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Khi xử lý giá trị datum trên chuỗi bằng MeshJS, chúng ta cần chuyển đổi nó về dạng đối tượng Plutus Data như trên. Việc chuyển đổi này có thể được thực hiện bởi hàm <code>deserializeDatum()</code> hoặc <code>parseDatumCbor()</code>.</p>
+</blockquote>
+
+<h4>Hàm tiện ích <code>mConStr0</code></h4>
+<p>Khi muốn khởi tạo giá trị datum/redeemer trong Mesh, cách đơn giản nhất là dùng hàm <code>mConStr</code>:</p>
+<p><code>mConStr(0, [888n])   // → Plutus Data: Constr(0, [Int(888)])</code></p>
+<p>Hoặc các hàm dẫn xuất: <code>mConStr0</code>, <code>mConStr1</code>, <code>mConStr2</code>, <code>mConStr3</code> tạo constructor có index tương ứng:</p>
+<p><code>mConStr0([888n])</code></p>
+<p>Khi build giao dịch, <code>MeshTxBuilder</code> có nhiệm vụ serialize các giá trị này và toàn bộ giao dịch sang định dạng CBOR.</p>
+
+<h4>Hàm <code>isValidGameDatum</code> (trong <code>queries.ts</code>)</h4>
+<p>Hàm này kiểm tra UTxO có chứa datum game hợp lệ hay không:</p>
+<ol>
+  <li>Đảm bảo UTxO có <strong>Inline Datum</strong> (giá trị raw datum phải có kiểu <code>string</code> và không rỗng).</li>
+  <li>Sử dụng <code>deserializeDatum</code> để chuyển đổi CBOR thành đối tượng Mesh Plutus Data.</li>
+  <li>Kiểm tra: constructor index = 0, fields chứa đúng 1 phần tử mang thuộc tính <code>int</code>, giá trị nằm trong khoảng [1, 999.999].</li>
+</ol>
+
+<hr />
+
+<h2>6. Xây dựng giao dịch (Building Transaction)</h2>
+<p>Khi người chơi nhấn Submit, dữ liệu đi qua <code>GuessForm</code> → <code>handleSubmit</code> (kiểm tra tính hợp lệ) → <code>handleSubmitGuess</code> (component cha).</p>
+
+<h4>Kiểm tra trước khi tạo giao dịch</h4>
+<ul>
+  <li>Đã kết nối ví ✓</li>
+  <li>Đã có blockchain provider ✓</li>
+  <li>Đã tìm thấy Game UTxO ✓</li>
+  <li>Ví đã thiết lập collateral ✓</li>
+</ul>
+<p>Trước khi tạo giao dịch, gọi <code>fetchGameData()</code> lần nữa để đảm bảo lấy được Game UTxO mới nhất — vì hoàn toàn có khả năng một người chơi khác vừa chiến thắng khiến Game UTxO thay đổi.</p>
+
+<h4>Hàm <code>buildGuessTransaction</code> (trong <code>transactions.ts</code>)</h4>
+<p>Khởi tạo giá trị redeemer và game datum mới:</p>
+<pre><code>const redeemerData = mConStr0([BigInt(guess)]);
+const newDatumData = mConStr0([BigInt(newSecret)]);</code></pre>
+
+<p>Tính toán số lượng ADA trả lại về hợp đồng:</p>
+<pre><code>const newScriptLovelace = currentScriptLovelace - REWARD_AMOUNT_LOVELACE;</code></pre>
+
+<p>Tạo giao dịch:</p>
+<pre><code>await txBuilder
+  .spendingPlutusScriptV3()             // Giao dịch tiêu UTxO từ địa chỉ PlutusV3 script
+  .txIn(txHash, outputIndex, ...)       // Khai báo UTxO được chi tiêu
+  .txInInlineDatumPresent()             // Sử dụng Inline Datum sẵn trên UTxO
+  .txInRedeemerValue(redeemerData)      // Đính kèm Redeemer (số đoán)
+  .txInScript(SCRIPT_CBOR)             // Cung cấp bytecode validator để node chạy
+  .txOut(SCRIPT_ADDRESS, [...])         // Khai báo Continuing output
+  .txOutInlineDatumValue(newDatumData)  // Datum mới đính kèm continuing output
+  .changeAddress(userAddress)           // ADA thừa (phần thưởng) về ví người chơi
+  .txInCollateral(...)                 // Khai báo collateral
+  .complete();                         // Hoàn thiện giao dịch thô</code></pre>
+
+<p><strong>Mỗi method trên trực tiếp phản ánh một yêu cầu của validator on-chain.</strong> Xây dựng sai bất kỳ bước nào → validator reject → giao dịch thất bại.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong><code>changeAddress(userAddress)</code>:</strong> Nhờ câu lệnh này, chúng ta không cần tạo một output trực tiếp vào ví người chơi. Khi txBuilder cân bằng giao dịch, sẽ thừa ra 10 ADA. Giá trị này, sau khi trừ phí giao dịch, sẽ được tự động chuyển về change address.</p>
+</blockquote>
+
+<hr />
+
+<h2>7. Ký, gửi giao dịch &amp; Transaction Polling</h2>
+<p>Sau khi <code>buildGuessTransaction</code> trả về giao dịch thô:</p>
+<pre><code>// Ký giao dịch
+const signedTx = await wallet.signTx(unsignedTx);
+...
+// Gửi lên mạng lưới
+const hash = await wallet.submitTx(signedTx);
+...
+// Polling: kiểm tra xác nhận (mỗi 5 giây, tối đa 150 giây)
+setTxStatus("confirming");
+let confirmed = false;
+for (let i = 0; i &lt; 30; i++) {
+  await new Promise((r) =&gt; setTimeout(r, 5000));
+  try {
+    const txInfo = await provider.fetchTxInfo(hash);
+    if (txInfo) {
+      confirmed = true;
+      break;
+    }
+  } catch {
+    // Chưa confirmed, tiếp tục chờ
+  }
+}</code></pre>
+<p>Trong suốt quá trình này, component <code>TransactionStatus</code> ghi nhận sự thay đổi trạng thái giao dịch để hiển thị lên màn hình: Building → Signing → Confirming → Success / Submitted.</p>
+
+<hr />
+
+<h2>8. Bài tập thực hành</h2>
+<p><strong>Nhiệm vụ:</strong> Implement hàm <code>decodeDatum</code> trong file <code>offchain/src/decode.ts</code>.</p>
+<pre><code>export function decodeDatum(rawDatumHex: string): number {
+    // TODO: BÀI TẬP THỰC HÀNH!
+    // Hãy giải mã chuỗi rawDatum (CBOR Hex) từ Game UTxO 
+    // để xem được giá trị Secret Number.
+
+    // Xóa dòng dưới đây và bắt đầu viết logic parse của bạn:
+    throw new Error("TODO_DECODE_DATUM: Hãy implement hàm này");
+}</code></pre>
+<p><strong>Mục tiêu:</strong> Sau khi implement, component <strong>Datum Decoder</strong> trên giao diện sẽ hiển thị con số bí mật hiện tại khi bạn nhấn nút "Decode Datum".</p>
+<p>Hãy chia sẻ cách làm của bạn và những góp ý cho bài học ở phần bình luận!</p>
+
+<hr />
+
+<h2>Tài liệu tham khảo</h2>
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Chủ đề</th>
+      <th>Tài liệu</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Aiken docs</td>
+      <td><a href="https://aiken-lang.org/fundamentals/getting-started" target="_blank" rel="noopener">https://aiken-lang.org/fundamentals/getting-started</a></td>
+    </tr>
+    <tr>
+      <td>Aiken stdlib</td>
+      <td><a href="https://aiken-lang.github.io/stdlib/" target="_blank" rel="noopener">https://aiken-lang.github.io/stdlib/</a></td>
+    </tr>
+    <tr>
+      <td>CIP-30</td>
+      <td><a href="https://cips.cardano.org/cip/CIP-30" target="_blank" rel="noopener">https://cips.cardano.org/cip/CIP-30</a></td>
+    </tr>
+    <tr>
+      <td>Extended UTXO model</td>
+      <td><a href="https://developers.cardano.org/docs/developers/curriculum/fundamentals/core-concepts/eutxo/" target="_blank" rel="noopener">https://developers.cardano.org/docs/developers/curriculum/fundamentals/core-concepts/eutxo/</a></td>
+    </tr>
+    <tr>
+      <td>Plutus Core Specification</td>
+      <td><a href="https://plutus.cardano.intersectmbo.org/resources/plutus-core-spec.pdf" target="_blank" rel="noopener">https://plutus.cardano.intersectmbo.org/resources/plutus-core-spec.pdf</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<p><strong>Chúc mừng bạn đã hoàn thành Module 1!</strong> Hẹn gặp lại trong module tiếp theo, nơi chúng ta sẽ xây dựng dApp phức tạp hơn. 🎉</p>

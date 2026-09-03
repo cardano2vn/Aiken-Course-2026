@@ -25,7 +25,7 @@ export default function Home() {
   const [lockDate, setLockDate] = useState<string>("");
 
   // Blockfrost Key (Hardcoded)
-  const BLOCKFROST_KEY = "preprod2EkL4jB7Awsl1ugTeMg1oOID9gHLi6pd";
+  const BLOCKFROST_KEY = process.env.NEXT_PUBLIC_BLOCKFROST_KEY || "";
 
   useEffect(() => {
     if (connected) {
@@ -96,7 +96,14 @@ export default function Home() {
   async function getContract() {
     const { BlockfrostProvider } = await import("@meshsdk/core");
     const provider = new BlockfrostProvider(BLOCKFROST_KEY);
-    const mesh = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+    // Fetch actual protocol parameters to get correct cost models for Conway/PlutusV3
+    const protocolParameters = await provider.fetchProtocolParameters();
+    const mesh = new MeshTxBuilder({
+      fetcher: provider,
+      submitter: provider,
+      evaluator: provider,
+      params: protocolParameters, // Fix: use real cost models for scriptIntegrityHash
+    });
     const contract = new VestingContract({
       mesh,
       wallet,
@@ -253,8 +260,10 @@ export default function Home() {
       const signedTx = await wallet.signTx(txHex, true);
       const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
+      // Optimistic: xóa ngay UTxO đã spend khỏi danh sách
+      setVestingPlans(prev => prev.filter(p => p.utxo.input.txHash !== plan.utxo.input.txHash));
       alert("Vesting Cancelled! Tx: " + hash);
-      setTimeout(loadScriptUtxos, 5000);
+      setTimeout(loadScriptUtxos, 15000); // Chờ Blockfrost indexing
     } catch (e) {
       console.error(e);
       alert("Cancel Failed: " + (e as any).message);
@@ -271,8 +280,10 @@ export default function Home() {
       const signedTx = await wallet.signTx(txHex, true);
       const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
+      // Optimistic: xóa ngay UTxO đã spend khỏi danh sách
+      setVestingPlans(prev => prev.filter(p => p.utxo.input.txHash !== plan.utxo.input.txHash));
       alert("Vesting Claimed! Tx: " + hash);
-      setTimeout(loadScriptUtxos, 5000);
+      setTimeout(loadScriptUtxos, 15000); // Chờ Blockfrost indexing
     } catch (e) {
       console.error(e);
       alert("Claim Failed: " + (e as any).message);
