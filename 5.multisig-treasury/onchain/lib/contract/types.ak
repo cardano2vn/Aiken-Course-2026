@@ -6,14 +6,13 @@ pub type Datum {
   signers: List<Address>,
 }
 
-pub type Mint {
-  Init
-  End
-}
-
 pub type Spend {
   Deposit
   Execute
   Signature
 }
 
+pub type Mint {
+  Init
+  End
+}
