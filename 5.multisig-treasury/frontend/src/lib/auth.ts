@@ -28,9 +28,6 @@ export const config: NextAuthOptions = {
                 if (!credentials?.data) {
                     return null;
                 }
-
-                console.log(credentials)
-
                 let parsed: Credentials;
                 try {
                     parsed = JSON.parse(credentials.data as string) as Credentials;
