@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Asset, BlockfrostProvider, MeshTxBuilder, deserializeDatum, serializeAddressObj } from "@meshsdk/core";
+import { MeshValue } from "@meshsdk/common";
 import { CardanoWallet, useWallet } from "@meshsdk/react";
 import { MeshSwapContract, SwapDatum } from "../lib/offchain";
 
@@ -13,7 +14,8 @@ export default function Home() {
   const [loading, setLoading] = useState<boolean>(false);
 
   // Blockfrost & Market State
-  const [blockfrostKey, setBlockfrostKey] = useState<string>("");
+  const BLOCKFROST_KEY = process.env.NEXT_PUBLIC_BLOCKFROST_KEY || "";
+  const [blockfrostKey, setBlockfrostKey] = useState<string>(BLOCKFROST_KEY);
   const [swaps, setSwaps] = useState<any[]>([]);
   const [loadingSwaps, setLoadingSwaps] = useState<boolean>(false);
   const [userAddress, setUserAddress] = useState<string>("");
@@ -70,20 +72,62 @@ export default function Home() {
     return Math.floor(val * 1_000_000).toString();
   };
 
-  // Safely determine asset type from Plutus Data Value
-  const safeRenderValue = (val: any) => {
+  // Helper to decode hex asset name to UTF-8 text string
+  const hexToUtf8 = (hex: string): string => {
+    if (!hex) return "";
     try {
-      // If it's a Map (Mesh usually returns map array or object)
-      // Check if it has any keys other than "" (lovelace often has empty policy or special key)
-      // For simplicity: If json string contains "policy_id" or similar structure, it's tokens.
-      // Or if the array length > 0.
-      // Let's just dump it safely or return "Unknown"
-      const str = JSON.stringify(val);
-      if (str.length > 50) return "Assets"; // Heuristic
-      return "ADA";
-    } catch {
+      const cleanHex = hex.replace(/^0x/, "");
+      const bytes = new Uint8Array(
+        cleanHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
+      );
+      const decoded = new TextDecoder().decode(bytes);
+      const str = decoded.replace(/\0/g, "").replace(/[\x00-\x1F\x7F-\x9F]/g, "").trim();
+      if (str.length > 0) {
+        return str;
+      }
+    } catch { }
+    return hex;
+  };
+
+  // Format Plutus Data Value to human readable string (quantity + decoded asset name)
+  const formatAssetValue = (val: any): string => {
+    try {
+      const assets = MeshValue.fromValue(val).toAssets();
+      if (!assets || assets.length === 0) return "0 ADA";
+
+      return assets
+        .map((asset) => {
+          if (asset.unit === "lovelace" || asset.unit === "") {
+            const ada = (Number(asset.quantity) / 1_000_000).toLocaleString("en-US", {
+              maximumFractionDigits: 6,
+            });
+            return `${ada} ADA`;
+          } else {
+            const name = formatAssetName(asset.unit);
+            const qty = Number(asset.quantity).toLocaleString("en-US");
+            return `${qty} ${name}`;
+          }
+        })
+        .join(" + ");
+    } catch (e) {
+      console.error("Error formatting asset value", e);
       return "Unknown";
     }
+  };
+
+  // Helper to format single asset unit to human readable token name
+  const formatAssetName = (unit: string): string => {
+    if (unit === "lovelace" || unit === "") return "ADA";
+    if (unit.length >= 56) {
+      const policyId = unit.slice(0, 56);
+      const assetNameHex = unit.slice(56);
+      if (assetNameHex) {
+        const text = hexToUtf8(assetNameHex);
+        return text;
+      }
+      return `Token (${policyId.slice(0, 6)}...)`;
+    }
+    return hexToUtf8(unit);
   };
 
   const getBalance = (unit: string) => {
@@ -105,6 +149,7 @@ export default function Home() {
         mesh: new MeshTxBuilder({ fetcher: realProvider, submitter: realProvider }),
         fetcher: realProvider,
         networkId: 0,
+        version: 3,
       });
 
       const utxos = await realProvider.fetchAddressUTxOs(contract.scriptAddress);
@@ -128,22 +173,34 @@ export default function Home() {
     setLoadingSwaps(false);
   }
 
+  async function getContract() {
+    const provider = new BlockfrostProvider(blockfrostKey);
+    const protocolParameters = await provider.fetchProtocolParameters();
+    const mesh = new MeshTxBuilder({
+      fetcher: provider,
+      submitter: provider,
+      evaluator: provider,
+      params: protocolParameters,
+    });
+    const contract = new MeshSwapContract({
+      mesh,
+      wallet,
+      networkId: 0,
+      fetcher: provider,
+      version: 3,
+    });
+    return { provider, contract };
+  }
+
   async function handleBuy(swapItem: any) {
     if (!connected) { alert("Connect wallet first"); return; }
     setLoading(true);
     try {
-      const provider = new BlockfrostProvider(blockfrostKey);
-      const meshTxBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
-      const contract = new MeshSwapContract({
-        mesh: meshTxBuilder,
-        wallet: wallet,
-        networkId: 0,
-        fetcher: provider
-      });
+      const { provider, contract } = await getContract();
 
       const txHex = await contract.acceptSwap(swapItem.utxo);
-      const signedTx = await wallet.signTx(txHex);
-      const hash = await wallet.submitTx(signedTx);
+      const signedTx = await wallet.signTx(txHex, true);
+      const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
       setTimeout(fetchSwaps, 5000);
     } catch (error) {
@@ -157,18 +214,11 @@ export default function Home() {
     if (!connected) { alert("Connect wallet first"); return; }
     setLoading(true);
     try {
-      const provider = new BlockfrostProvider(blockfrostKey);
-      const meshTxBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
-      const contract = new MeshSwapContract({
-        mesh: meshTxBuilder,
-        wallet: wallet,
-        networkId: 0,
-        fetcher: provider
-      });
+      const { provider, contract } = await getContract();
 
       const txHex = await contract.cancelSwap(swapItem.utxo);
-      const signedTx = await wallet.signTx(txHex);
-      const hash = await wallet.submitTx(signedTx);
+      const signedTx = await wallet.signTx(txHex, true);
+      const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
       setTimeout(fetchSwaps, 5000);
     } catch (error) {
@@ -182,24 +232,7 @@ export default function Home() {
     setLoading(true);
     setTxHash(null);
     try {
-      const meshTxBuilder = new MeshTxBuilder({
-        fetcher: undefined, // You might need a fetcher here for full functionality in some cases, but for constructing tx from wallet utxos strictly it might pass
-        submitter: undefined,
-      });
-      // Note: MeshSwapContract expects a MeshTxBuilder and Wallet. 
-      // The original code passed a Provider. Here we rely on the Wallet for submission? 
-      // Wait, MeshTxBuilder needs a provider usually. 
-      // But let's check the logic. MeshTxInitiator uses `this.mesh.completeSigning()`. 
-      // If we don't provide a fetcher, `queryUtxos` might fail if it relies on it. 
-      // But `initiateSwap` uses `selectUtxosFrom(utxos)` which comes from `getWalletInfoForTx`.
-      // `getWalletInfoForTx` calls `wallet.getUtxos()`.
-      // So fetcher might not be strictly needed for `initiateSwap`.
-
-      const contract = new MeshSwapContract({
-        mesh: meshTxBuilder,
-        wallet: wallet,
-        networkId: 0, // Preprod
-      });
+      const { provider, contract } = await getContract();
 
       const toProvide: Asset[] = [
         {
@@ -216,8 +249,8 @@ export default function Home() {
       ];
 
       const txHex = await contract.initiateSwap(toProvide, toReceive);
-      const signedTx = await wallet.signTx(txHex);
-      const hash = await wallet.submitTx(signedTx);
+      const signedTx = await wallet.signTx(txHex, true);
+      const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
     } catch (error) {
       console.error("Swap creation failed", error);
@@ -301,7 +334,7 @@ export default function Home() {
                 >
                   {assets.map((asset) => (
                     <option key={asset.unit} value={asset.unit}>
-                      {asset.unit === "lovelace" ? "ADA" : asset.unit.slice(0, 10) + "..."}
+                      {formatAssetName(asset.unit)}
                     </option>
                   ))}
                 </select>
@@ -364,8 +397,8 @@ export default function Home() {
 
             {/* Summary */}
             <div className="mb-6 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 rounded-lg text-sm">
-              You are selling <b>{sellAmount || "0"} {sellUnit === "lovelace" ? "ADA" : "Asset"}</b>
-              {" "}for <b>{receiveAmount || "0"} {receiveType === "lovelace" ? "ADA" : "Asset"}</b>.
+              You are selling <b>{sellAmount || "0"} {formatAssetName(sellUnit)}</b>
+              {" "}for <b>{receiveAmount || "0"} {receiveType === "lovelace" ? "ADA" : (receiveTokenUnit ? formatAssetName(receiveTokenUnit) : "Asset")}</b>.
             </div>
 
             <button
@@ -412,10 +445,14 @@ export default function Home() {
                         <span className="text-indigo-500">🔄</span> Swap #{i + 1}
                         <span className="text-xs font-normal text-neutral-400 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full font-mono">{swap.utxo.input.txHash.slice(0, 8)}...</span>
                       </p>
-                      <div className="text-xs text-neutral-600 mt-1">
-                        <span className="opacity-50">Sell:</span> {safeRenderValue(swap.datum.fields[1])}
-                        {" -> "}
-                        <span className="opacity-50">Buy:</span> {safeRenderValue(swap.datum.fields[2])}
+                      <div className="text-xs text-neutral-600 dark:text-neutral-300 mt-2 flex items-center gap-1.5 flex-wrap font-medium">
+                        <span className="text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 rounded-md border border-red-200 dark:border-red-900/50">
+                          Sell: <b>{formatAssetValue(swap.datum.fields[1])}</b>
+                        </span>
+                        <span className="text-neutral-400 font-bold">➔</span>
+                        <span className="text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/40 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-900/50">
+                          Buy: <b>{formatAssetValue(swap.datum.fields[2])}</b>
+                        </span>
                       </div>
                     </div>
                     {(() => {

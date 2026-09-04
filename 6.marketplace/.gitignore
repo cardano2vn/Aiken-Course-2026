@@ -1,0 +1,32 @@
+# Node / Dependencies
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Aiken build artifacts
+artifacts/
+build/
+
+# Environment files & Secrets
+.env
+.env*.local
+.env.production
+.env.development
+
+# Logs & Debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / Editor files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary / OS junk
+Thumbs.db

@@ -1,7 +1,7 @@
 {
   "preamble": {
-    "title": "meshjs/swap",
-    "description": "Aiken contracts for project 'meshjs/swap'",
+    "title": "cardano2vn-dapps/swap",
+    "description": "Aiken contracts for project 'cardano2vn-dapps/swap'",
     "version": "0.0.0",
     "plutusVersion": "v3",
     "compiler": {

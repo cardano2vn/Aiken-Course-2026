@@ -1,12 +1,12 @@
-name = "meshjs/swap"
+name = "cardano2vn-dapps/swap"
 version = "0.0.0"
 compiler = "v1.1.0"
 plutus = "v3"
 license = "Apache-2.0"
-description = "Aiken contracts for project 'meshjs/swap'"
+description = "Aiken contracts for project 'cardano2vn-dapps/swap'"
 
 [repository]
-user = "meshjs"
+user = "cardano2vn-dapps"
 project = "swap"
 platform = "github"
 

@@ -37,6 +37,16 @@ aiken check
 ### 2. 🎨 Giao diện người dùng (Frontend)
 Thư mục `frontend_app` chứa mã nguồn giao diện web sử dụng **MeshSDK** và **Next.js**.
 
+#### 🔑 Cấu hình biến môi trường (.env)
+Tạo file `.env` bên trong thư mục `frontend_app/` để ứng dụng tự động nhận diện Blockfrost API Key khi khởi chạy:
+
+```env
+NEXT_PUBLIC_BLOCKFROST_KEY=preprodYOUR_BLOCKFROST_PROJECT_ID
+```
+
+> **Lưu ý:** Bạn có thể đăng ký tài khoản và lấy Project ID Preprod miễn phí tại [Blockfrost.io](https://blockfrost.io).
+
+#### 🚀 Khởi chạy ứng dụng Web
 ```bash
 cd frontend_app
 npm install

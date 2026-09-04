@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 2: Phân Tích Chi Tiết Mã Nguồn Aiken marketplace.ak &amp; Demo UI</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --primary-hover: #0f766e;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.7; padding: 2rem 1rem; }
+    .container { max-width: 900px; margin: 0 auto; background: var(--bg-card); padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.2rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); }
+    h2 { font-size: 1.6rem; color: #2dd4bf; margin-top: 2rem; margin-bottom: 1rem; }
+    h3 { font-size: 1.25rem; color: #67e8f9; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    h4 { font-size: 1.1rem; color: #f472b6; margin-top: 1.2rem; margin-bottom: 0.5rem; }
+    p { margin-bottom: 1.2rem; color: #e2e8f0; }
+    blockquote { background: #0284c715; border-left: 4px solid var(--accent-color); padding: 1rem 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; color: #7dd3fc; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+    ul, ol { margin-left: 1.8rem; margin-bottom: 1.5rem; color: #e2e8f0; }
+    li { margin-bottom: 0.4rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.8); color: #f472b6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.5rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.2rem; border: none; display: block; color: #f8fafc; font-size: 0.92em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
+    th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: #1e293b80; }
+    .mermaid { background: #111827; padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.5rem; display: flex; justify-content: center; }
+    .analysis-box { background: rgba(13, 148, 136, 0.1); border-left: 4px solid #2dd4bf; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
+    .info-box { background: rgba(56, 189, 248, 0.1); border-left: 4px solid #38bdf8; padding: 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 2: Phân Tích Chi Tiết Mã Nguồn Aiken marketplace.ak &amp; Demo UI</h1>
+    <blockquote><strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br><strong>Module 6:</strong> Marketplace Smart Contract (Sàn Giao Dịch Phi Tập Trung NFT/Token)<br><strong>Mục tiêu:</strong> Nắm vững từng dòng code Aiken On-chain, hiểu sâu logic thẩm định 3 hành động Buy, Update, Cancel, cú pháp Pipe Operator (|>) và kỹ thuật bảo mật Output Validation.</blockquote>
+    <hr>
+    
+    <h2>1. Khai Báo Cấu Trúc Dữ Liệu (MarketplaceDatum &amp; MarketplaceRedeemer)</h2>
+    <pre><code class="language-rust">pub type MValue =
+  Pairs<PolicyId, Pairs<AssetName, Int>>
+
+pub type MarketplaceDatum {
+  MarketplaceDatum {
+    seller: Address,
+    price: Int,
+    nft: MValue,
+    royalty_recipient: Option<Address>,
+    royalty_rate: Int,
+  }
+}
+
+pub type MarketplaceRedeemer {
+  Buy
+  Update { new_price: Int }
+  Cancel
+}</code></pre>
+
+    <hr>
+    <h2>2. Mổ Xẻ Chi Tiết Logic Mã Nguồn Aiken On-Chain (validators/marketplace.ak)</h2>
+    
+    <h3>🟢 1. Hành Động <code>Buy</code> (Mua NFT &amp; Phân Tách 3 Dòng Tiền)</h3>
+    <h4>📝 Code Snippet Nhánh <code>Buy</code>:</h4>
+    <pre><code class="language-rust">validator marketplace(owner: Address, platform_fee_rate: Int) {
+  spend(
+    datum_opt: Option<MarketplaceDatum>,
+    redeemer: MarketplaceRedeemer,
+    input: OutputReference,
+    tx: Transaction,
+  ) {
+    expect Some(datum) = datum_opt
+
+    when redeemer is {
+      Buy -> {
+        expect Some(own_input) = find_input(tx.inputs, input)
+        let own_address = own_input.output.address
+
+        // a. Chống lỗi Double Satisfaction
+        let is_only_one_input_from_script =
+          when inputs_at(tx.inputs, own_address) is {
+            [_] -> True
+            _ -> False
+          }
+
+        // b. Tính toán 3 khoản tiền
+        let royalty_amount = datum.price * datum.royalty_rate / 10000
+        let platform_fee_amount = datum.price * platform_fee_rate / 10000
+        let seller_amount = datum.price - royalty_amount - platform_fee_amount
+
+        // c. Kiểm tra tiền gửi về ví Seller
+        let is_seller_paid =
+          get_all_value_to(tx.outputs, datum.seller)
+            |> value_geq(from_lovelace(seller_amount))
+
+        // d. Kiểm tra Phí Sàn gửi về ví Admin Owner
+        let is_platform_paid =
+          if platform_fee_amount > 0 {
+            get_all_value_to(tx.outputs, owner)
+              |> value_geq(from_lovelace(platform_fee_amount))
+          } else {
+            True
+          }
+
+        // e. Kiểm tra Phí Bản Quyền gửi về ví Creator
+        let is_royalty_paid =
+          when datum.royalty_recipient is {
+            Some(creator) ->
+              if royalty_amount > 0 {
+                get_all_value_to(tx.outputs, creator)
+                  |> value_geq(from_lovelace(royalty_amount))
+              } else {
+                True
+              }
+            None -> True
+          }
+
+        is_only_one_input_from_script && is_seller_paid && is_platform_paid && is_royalty_paid
+      }</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Logic Hành Động <code>Buy</code>:</h3>
+      <ol>
+        <li><strong>Phòng chống Lỗ hổng Double Satisfaction (<code>is_only_one_input_from_script</code>):</strong>
+          <ul>
+            <li>Hàm <code>inputs_at(tx.inputs, own_address)</code> đếm toàn bộ số lượng UTxO từ địa chỉ Script bị chi tiêu trong cùng một giao dịch.</li>
+            <li>Bằng cách sử dụng pattern matching <code>[_]</code>, hợp đồng bắt buộc mỗi giao dịch <code>Buy</code> chỉ được phép chi tiêu <strong>duy nhất 1 UTxO từ Script</strong>.</li>
+            <li>Nếu kẻ tấn công gom 2 UTxO niêm yết NFT vào 1 giao dịch nhưng chỉ nạp tiền trả cho 1 NFT, điều kiện này sẽ trả về <code>False</code> và hủy bỏ giao dịch ngay lập tức.</li>
+          </ul>
+        </li>
+        <li><strong>Tính toán phân tách 3 dòng tiền theo chuẩn Basis Points:</strong>
+          <ul>
+            <li><code>royalty_amount</code>: Phí tác giả = <code>datum.price * datum.royalty_rate / 10000</code> (ví dụ: <code>500</code> = <code>5%</code>).</li>
+            <li><code>platform_fee_amount</code>: Phí sàn = <code>datum.price * platform_fee_rate / 10000</code> (ví dụ: <code>200</code> = <code>2%</code>).</li>
+            <li><code>seller_amount</code>: Số tiền thực nhận của ví người bán = <code>datum.price - royalty_amount - platform_fee_amount</code>.</li>
+          </ul>
+        </li>
+        <li><strong>Thẩm định 3 khoản thanh toán trên <code>tx.outputs</code>:</strong>
+          <ul>
+            <li><code>is_seller_paid</code>: Sử dụng <code>get_all_value_to(tx.outputs, datum.seller)</code> cộng dồn tất cả ADA gửi về địa chỉ <code>datum.seller</code> và dùng <code>value_geq(from_lovelace(seller_amount))</code> đảm bảo người bán nhận đủ tiền net.</li>
+            <li><code>is_platform_paid</code>: Thẩm định nếu <code>platform_fee_amount > 0</code> thì địa chỉ <code>owner</code> (Admin Sàn) phải nhận đủ phí sàn.</li>
+            <li><code>is_royalty_paid</code>: Kiểm tra nếu <code>datum.royalty_recipient</code> mang giá trị <code>Some(creator)</code> và <code>royalty_amount > 0</code>, giao dịch bắt buộc phải chuyển đủ phí bản quyền về ví <code>creator</code>.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <div class="info-box">
+      <h3>🔗 Phân Tích Sâu Cú Pháp Toán Tử Pipe Operator (<code>|></code>) Trong Aiken</h3>
+      <p>Trong nhánh <code>Buy</code> trên, toán tử Pipe <code>|></code> xuất hiện liên tục trong việc thẩm định các khoản thanh toán. Hãy cùng giải mã chi tiết cơ chế của toán tử này:</p>
+      <ul>
+        <li><strong>Cơ chế hoạt động cú pháp:</strong> Khi viết <code>expression |> function(arg2)</code>, Aiken tự động lấy kết quả của <code>expression</code> ở vế trái để truyền làm <strong>đối số đầu tiên</strong> cho <code>function</code> ở vế phải.</li>
+        <li><strong>Ví dụ cụ thể:</strong>
+          <pre><code class="language-rust">// Cú pháp dùng Pipe Operator (|>):
+get_all_value_to(tx.outputs, datum.seller)
+  |> value_geq(from_lovelace(seller_amount))
+
+// Hoàn toàn tương đương với cách viết lồng hàm truyền thống:
+value_geq(get_all_value_to(tx.outputs, datum.seller), from_lovelace(seller_amount))</code></pre>
+        </li>
+        <li><strong>Ưu điểm vượt trội:</strong> Giúp luồng xử lý dữ liệu chảy tự nhiên từ trái sang phải theo dạng đường ống (Pipeline), tránh bẫy hàm lồng nhau (Nested Functions Hell) khi xử lý qua nhiều bước biến đổi dữ liệu phức tạp.</li>
+      </ul>
+    </div>
+
+    <h3>🟡 2. Hành Động <code>Update</code> (Cập Nhật Giá Niêm Yết &amp; Output Validation)</h3>
+    <h4>📝 Code Snippet Nhánh <code>Update</code>:</h4>
+    <pre><code class="language-rust">      Update { new_price } -> {
+        // a. Bắt buộc có chữ ký của Seller
+        expect Some(seller_pkh) = address_pub_key(datum.seller)
+        let is_signed_by_seller = key_signed(tx.extra_signatories, seller_pkh)
+
+        // b. Truy xuất Output gửi về lại Script Address
+        expect Some(own_input) = find_input(tx.inputs, input)
+        let script_address = own_input.output.address
+        expect Some(output) =
+          list.find(tx.outputs, fn(out) { out.address == script_address })
+
+        // c. Bóc tách và ép kiểu InlineDatum mới
+        expect InlineDatum(raw_datum) = output.datum
+        expect output_datum: MarketplaceDatum = raw_datum
+
+        // d. Output Validation: Đảm bảo chỉ có price thay đổi, dữ liệu khác giữ nguyên
+        let is_datum_secure =
+          output_datum.seller == datum.seller &&
+          output_datum.nft == datum.nft &&
+          output_datum.royalty_recipient == datum.royalty_recipient &&
+          output_datum.royalty_rate == datum.royalty_rate &&
+          output_datum.price == new_price
+
+        is_signed_by_seller && is_datum_secure
+      }</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Logic Hành Động <code>Update</code>:</h3>
+      <ol>
+        <li><strong>Xác thực chữ ký hợp lệ của người bán (<code>is_signed_by_seller</code>):</strong>
+          <ul>
+            <li>Trích xuất <code>seller_pkh</code> từ <code>datum.seller</code> bằng <code>address_pub_key(datum.seller)</code>.</li>
+            <li>Dùng <code>key_signed(tx.extra_signatories, seller_pkh)</code> kiểm tra xem giao dịch có chứa chữ ký số của ví người bán hay không.</li>
+          </ul>
+        </li>
+        <li><strong>Kỹ thuật Output Validation triệt hạ lỗ hổng Price &amp; Address Manipulation:</strong>
+          <ul>
+            <li>Bản chất hành động <code>Update</code> trên Cardano EUTxO là chi tiêu UTxO cũ tại Script và tạo ra một UTxO mới đính kèm Inline Datum mới tại chính Script Address đó.</li>
+            <li><code>list.find(tx.outputs, ...)</code> tìm UTxO Output mới sinh ra có địa chỉ trùng khớp với <code>script_address</code>.</li>
+            <li>Bóc tách <code>InlineDatum</code> và ép kiểu về <code>MarketplaceDatum</code>.</li>
+            <li>Biến <code>is_datum_secure</code> kiểm tra tính toàn vẹn dữ liệu:
+              <ul>
+                <li><code>output_datum.seller == datum.seller</code>: Ví người bán PHẢI giữ nguyên 100%.</li>
+                <li><code>output_datum.nft == datum.nft</code>: Danh sách NFT PHẢI giữ nguyên, không bị rút bớt tài sản.</li>
+                <li><code>output_datum.royalty_recipient</code> &amp; <code>royalty_rate</code>: Thông tin tác giả PHẢI giữ nguyên.</li>
+                <li><code>output_datum.price == new_price</code>: Thông số duy nhất ĐƯỢC PHẾP THAY ĐỔI chính là mức giá bán mới khớp với <code>new_price</code> truyền trong Redeemer.</li>
+              </ul>
+            </li>
+            <li><em>Ý nghĩa bảo mật:</em> Ngăn chặn hoàn toàn kịch bản Hacker can thiệp tráo địa chỉ <code>seller</code> thành ví của Hacker khi người bán thao tác Edit Price.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <h3>🔴 3. Hành Động <code>Cancel</code> (Hủy Niêm Yết Rút NFT)</h3>
+    <h4>📝 Code Snippet Nhánh <code>Cancel</code>:</h4>
+    <pre><code class="language-rust">      Cancel -> {
+        expect Some(seller_pkh) = address_pub_key(datum.seller)
+        key_signed(tx.extra_signatories, seller_pkh)
+      }
+    }
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+    <div class="analysis-box">
+      <h3>🔍 Phân Tích Chi Tiết Logic Hành Động <code>Cancel</code>:</h3>
+      <ol>
+        <li><strong>Kiểm duyệt quyền sở hữu thông qua chữ ký số:</strong>
+          <ul>
+            <li>Trích xuất <code>seller_pkh</code> từ <code>datum.seller</code>.</li>
+            <li>Kiểm tra <code>key_signed(tx.extra_signatories, seller_pkh)</code>. Chỉ duy nhất địa chỉ ví đã niêm yết bán NFT mới có quyền hủy lệnh niêm yết.</li>
+          </ul>
+        </li>
+        <li><strong>Cơ chế giải phóng UTxO:</strong>
+          <ul>
+            <li>Khi điều kiện chữ ký thỏa mãn, Smart Contract mở khóa UTxO.</li>
+            <li>Giao dịch Off-chain tự động thu hồi NFT và tiền min-UTxO hoàn trả về ví cá nhân của Seller.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <hr>
+    <h2>3. Ma Trận 7 Bài Unit Test On-Chain (aiken check)</h2>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr><th>Tên Bài Test</th><th>Kịch Bản Thử Nghiệm On-Chain</th><th>Trạng Thái Mong Đợi</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>buy_success</code></td><td>Người mua thanh toán đầy đủ 3 khoản ADA hợp lệ.</td><td><code>ok</code> (PASS)</td></tr>
+          <tr><td><code>buy_fail_insufficient_seller_amount</code></td><td>Người mua nạp thiếu tiền cho Seller.</td><td><code>fail</code> (REJECT)</td></tr>
+          <tr><td><code>buy_fail_insufficient_platform_fee</code></td><td>Giao dịch gian lận thiếu Phí Sàn Admin.</td><td><code>fail</code> (REJECT)</td></tr>
+          <tr><td><code>update_price_success</code></td><td>Seller cập nhật giá niêm yết đúng quy định Output Validation.</td><td><code>ok</code> (PASS)</td></tr>
+          <tr><td><code>update_price_fail_changed_seller</code></td><td>Hacker can thiệp tráo ví Seller trong Datum mới khi Update.</td><td><code>fail</code> (REJECT)</td></tr>
+          <tr><td><code>cancel_success</code></td><td>Seller xuất trình đúng chữ ký để hủy niêm yết thành công.</td><td><code>ok</code> (PASS)</td></tr>
+          <tr><td><code>cancel_fail_unsigned</code></td><td>Kẻ gian tự ý hủy niêm yết không có chữ ký của Seller.</td><td><code>fail</code> (REJECT)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+    <h2>4. Quy Trình Ánh Xạ Giữa Smart Contract &amp; Thao Tác UI Next.js</h2>
+    <div class="mermaid">
+    sequenceDiagram
+        autonumber
+        actor User as Người dùng (Web3 UI)
+        participant OffChain as MeshJS SDK (offchain.ts)
+        participant Validator as Aiken Validator (marketplace.ak)
+
+        User->>OffChain: Bấm "List Asset" (Điền giá & Creator)
+        OffChain->>Validator: Khóa NFT vào Script Address + Inline Datum
+        User->>OffChain: Bấm "EDIT PRICE" (Nhập new_price)
+        OffChain->>Validator: Chi tiêu UTxO cũ + Tạo UTxO mới (Update Redeemer)
+        Validator->>Validator: Thẩm định is_datum_secure & key_signed
+        User->>OffChain: Bấm "BUY NFT" (Nạp ADA)
+        OffChain->>Validator: Chi tiêu UTxO Script (Buy Redeemer)
+        Validator->>Validator: Phân tách 3 dòng tiền trên tx.outputs
+    </div>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>
