@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 2: Phân Tích Chi Tiết Mã Nguồn On-Chain Smart Contract Swap</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      padding: 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border-color);
+    }
+    h1 { font-size: 2rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); }
+    h2 { font-size: 1.5rem; color: #2dd4bf; margin-top: 2rem; margin-bottom: 1rem; }
+    h3 { font-size: 1.25rem; color: #67e8f9; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    h4 { font-size: 1.05rem; color: #a5f3fc; margin-top: 1.2rem; margin-bottom: 0.5rem; }
+    p { margin-bottom: 1.2rem; color: #e2e8f0; }
+    blockquote { background: rgba(2, 132, 199, 0.1); border-left: 4px solid var(--accent-color); padding: 1rem 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; color: #7dd3fc; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+    ul, ol { margin-left: 1.8rem; margin-bottom: 1.5rem; color: #e2e8f0; }
+    li { margin-bottom: 0.4rem; }
+    code { font-family: "Fira Code", Monaco, Consolas, monospace; background: rgba(15, 23, 42, 0.8); color: #f472b6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.5rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.2rem; border: none; display: block; color: #f8fafc; font-size: 0.92em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
+    th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: rgba(30, 41, 59, 0.5); }
+    a { color: var(--accent-color); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 2: Phân Tích Chi Tiết Mã Nguồn On-Chain Smart Contract Swap (<code>validators/swap.ak</code>)</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br>
+      <strong>Module 3:</strong> Atomic Swap Smart Contract (Hoán đổi nguyên tử / Limit Order P2P)
+    </blockquote>
+    <hr>
+    <h2>📋 Mục lục</h2>
+    <ol>
+      <li><a href="#sec1">Tổng quan Kiến trúc Mã nguồn On-chain</a></li>
+      <li><a href="#sec2">Cấu trúc Dữ liệu Datum &amp; Redeemer</a></li>
+      <li><a href="#sec3">Phân tích Chi tiết Validator <code>swap</code></a></li>
+      <li><a href="#sec4">Bài Tập Thực Hành &amp; Thử Thách Code On-Chain</a></li>
+      <li><a href="#sec5">Tổng kết Bài học</a></li>
+    </ol>
+    <hr>
+    <h2 id="sec1">1. Tổng quan Kiến trúc Mã nguồn On-chain</h2>
+    <p>Mã nguồn On-chain của dApp Swap nằm tại file <code>validators/swap.ak</code>. Toàn bộ file gồm 185 dòng code, bao gồm phần khai báo hợp đồng và bộ Unit Test tự động.</p>
+    <h3>Danh sách các Module được Import</h3>
+    <pre><code class="language-rust">use cardano/address.{Address}
+use cardano/assets.{
+  AssetName, PolicyId, from_asset, from_asset_list, from_lovelace,
+}
+use cardano/transaction.{
+  Input, OutputReference, Transaction, find_input, placeholder,
+}
+use mocktail.{complete, mocktail_tx, tx_in, tx_in_inline_datum, tx_out}
+use mocktail/virgin_address.{mock_pub_key_address, mock_script_address}
+use mocktail/virgin_key_hash.{mock_pub_key_hash}
+use mocktail/virgin_output_reference.{mock_tx_hash, mock_utxo_ref}
+use vodka_address.{address_pub_key}
+use vodka_extra_signatories.{key_signed}
+use vodka_inputs.{inputs_at}
+use vodka_value.{get_all_value_from, get_all_value_to, value_geq}</code></pre>
+    <ul>
+      <li><code>cardano/*</code>: Các thư viện chuẩn của Aiken để thao tác với kiểu dữ liệu Address, Assets (Token, Lovelace) và Transaction Context.</li>
+      <li><code>vodka_*</code>: Các thư viện helper hữu ích xử lý địa chỉ ví, danh sách chữ ký (<code>key_signed</code>), lọc danh sách UTxO inputs (<code>inputs_at</code>) và so sánh giá trị tài sản (<code>value_geq</code>, <code>get_all_value_to</code>).</li>
+      <li><code>mocktail</code>: Framework chuyên dụng để viết Unit Test giả lập Transaction trong Aiken.</li>
+    </ul>
+    <hr>
+    <h2 id="sec2">2. Cấu trúc Dữ liệu Datum &amp; Redeemer</h2>
+    <pre><code class="language-rust">pub type MValue =
+  Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;
+
+pub type SwapDatum {
+  SwapDatum { initiator: Address, to_provide: MValue, to_receive: MValue }
+}
+
+pub type SwapRedeemer {
+  Cancel
+  Swap
+}</code></pre>
+    <h3>Giải thích chi tiết các kiểu dữ liệu:</h3>
+    <ol>
+      <li><code>MValue</code>: Biểu diễn danh sách tài sản dưới dạng Map các cặp Key-Value lồng nhau <code>Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;</code>.</li>
+      <li><code>SwapDatum</code>: Là tờ giấy "điều kiện niêm phong" đính kèm trên UTxO khóa tài sản. Gồm 3 trường:
+        <ul>
+          <li><code>initiator</code>: Địa chỉ ví của Creator (người bán).</li>
+          <li><code>to_provide</code>: Lượng tài sản Creator khóa vào hợp đồng (ví dụ: 1,000 <code>C2VN_coin</code>).</li>
+          <li><code>to_receive</code>: Lượng tài sản Creator yêu cầu nhận lại (ví dụ: 50 ADA).</li>
+        </ul>
+      </li>
+      <li><code>SwapRedeemer</code>: Định nghĩa 2 hành động tương tác với hợp đồng:
+        <ul>
+          <li><code>Swap</code>: Khớp lệnh hoán đổi.</li>
+          <li><code>Cancel</code>: Creator rút lại tài sản.</li>
+        </ul>
+      </li>
+    </ol>
+    <hr>
+    <h2 id="sec3">3. Phân tích Chi tiết Validator <code>swap</code></h2>
+    <p>Validator được định nghĩa bằng từ khóa <code>validator swap</code> chứa hàm <code>spend</code>:</p>
+    <pre><code class="language-rust">validator swap {
+  spend(
+    datum_opt: Option&lt;SwapDatum&gt;,
+    redeemer: SwapRedeemer,
+    input: OutputReference,
+    tx: Transaction,
+  ) {
+    expect Some(datum) = datum_opt
+    when redeemer is {
+      Swap -&gt; { ... }
+      Cancel -&gt; { ... }
+    }
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+    <ul>
+      <li><code>expect Some(datum) = datum_opt</code>: Ép kiểu để đảm bảo UTxO chi tiêu bắt buộc phải có đính kèm <code>SwapDatum</code>. Nếu không có Datum, giao dịch thất bại ngay lập tức.</li>
+      <li><code>when redeemer is</code>: Phân nhánh logic theo 2 hành động <code>Swap</code> và <code>Cancel</code>.</li>
+    </ul>
+    <h3>3.1. Nhánh Swap (Khớp Lệnh) - 3 Điều Kiện Mấu Chốt</h3>
+    <pre><code class="language-rust">Swap -&gt; {
+  expect Some(own_input) = find_input(tx.inputs, input)
+  let own_address = own_input.output.address
+  let inputs_from_script = inputs_at(tx.inputs, own_address)
+  let is_only_one_input_from_script =
+    when inputs_from_script is {
+      [_] -&gt; True
+      _ -&gt; False
+    }
+
+  let is_proceed_paid =
+    get_all_value_to(tx.outputs, datum.initiator)
+      |&gt; value_geq(datum.to_receive |&gt; from_asset_list())
+  let is_token_unlocked =
+    get_all_value_from(inputs_from_script, own_address)
+      |&gt; value_geq(datum.to_provide |&gt; from_asset_list())
+  is_only_one_input_from_script &amp;&amp; is_token_unlocked &amp;&amp; is_proceed_paid
+}</code></pre>
+    <p>Để giao dịch <code>Swap</code> hợp lệ, hợp đồng bắt buộc phải thỏa mãn đồng thời <strong>3 trụ cột an toàn</strong>:</p>
+    <h4>Trụ cột 1: Chống đòn tấn công Double Satisfaction (<code>is_only_one_input_from_script</code>)</h4>
+    <ul>
+      <li><code>find_input(tx.inputs, input)</code>: Tìm UTxO đang được chi tiêu và lấy ra địa chỉ hợp đồng <code>own_address</code>.</li>
+      <li><code>inputs_at(tx.inputs, own_address)</code>: Lọc toàn bộ danh sách inputs trong giao dịch xem có bao nhiêu input thuộc địa chỉ hợp đồng này.</li>
+      <li>Pattern matching <code>when inputs_from_script is { [_] -&gt; True, _ -&gt; False }</code>: Nếu danh sách chứa <strong>đúng 1 phần tử <code>[_]</code></strong>, biến <code>is_only_one_input_from_script</code> sẽ bằng <code>True</code>.</li>
+    </ul>
+    <h4>Trụ cột 2: Kiểm tra nghĩa vụ thanh toán (<code>is_proceed_paid</code>)</h4>
+    <ul>
+      <li><code>get_all_value_to(tx.outputs, datum.initiator)</code>: Gom toàn bộ tài sản trong danh sách <code>outputs</code> được chuyển về ví của Creator (<code>datum.initiator</code>).</li>
+      <li><code>value_geq(datum.to_receive |&gt; from_asset_list())</code>: Kiểm tra xem tổng tài sản Creator nhận được có <strong>hợp lệ và lớn hơn hoặc bằng</strong> lượng tài sản <code>to_receive</code> hay không.</li>
+    </ul>
+    <h4>Trụ cột 3: Kiểm tra mở khóa tài sản (<code>is_token_unlocked</code>)</h4>
+    <ul>
+      <li><code>get_all_value_from(inputs_from_script, own_address)</code>: Gom tổng tài sản được giải phóng từ UTxO của hợp đồng.</li>
+      <li><code>value_geq(datum.to_provide |&gt; from_asset_list())</code>: Đảm bảo lượng tài sản rút ra khớp với những gì đã niêm phong trong <code>to_provide</code>.</li>
+    </ul>
+    <h3>3.2. Nhánh Cancel (Hủy Lệnh) - Xác Thực Chữ Ký</h3>
+    <pre><code class="language-rust">Cancel -&gt; {
+  expect Some(pub_key) = address_pub_key(datum.initiator)
+  key_signed(tx.extra_signatories, pub_key)
+}</code></pre>
+    <ul>
+      <li><code>address_pub_key(datum.initiator)</code>: Trích xuất Public Key Hash từ địa chỉ ví Creator lưu trong <code>datum.initiator</code>.</li>
+      <li><code>key_signed(tx.extra_signatories, pub_key)</code>: Kiểm tra xem Public Key Hash này có xuất hiện trong danh sách chữ ký <code>tx.extra_signatories</code> của giao dịch hay không.</li>
+    </ul>
+    <hr>
+    <h2 id="sec4">4. Bài Tập Thực Hành &amp; Thử Thách Code On-Chain</h2>
+    <p>Để củng cố kiến thức đã học trong Bài giảng 2, bạn hãy thực hiện 2 bài tập lập trình mở rộng dưới đây trực tiếp trên mã nguồn Aiken <code>validators/swap.ak</code>.</p>
+    <h3>📝 Bài Tập 1: Thêm Phí Nền Tảng (Platform Fee)</h3>
+    <p><strong>Mục tiêu:</strong> Mở rộng hợp đồng để thu phí giao dịch cho Nền tảng (Platform) khi lệnh Swap được khớp.</p>
+    <p><strong>Đề bài:</strong></p>
+    <ol>
+      <li>Cập nhật <code>SwapDatum</code> để thêm 2 trường: <code>fee_address: Address</code> và <code>fee_amount: Int</code> (ví dụ: 2,000,000 Lovelace = 2 ADA).</li>
+      <li>Trong nhánh <code>Swap</code> của Validator, viết thêm điều kiện <code>is_fee_paid</code> bằng cách dùng <code>get_all_value_to(tx.outputs, datum.fee_address)</code> kiểm tra tổng Lovelace gửi tới ví fee_address có <code>&gt;= datum.fee_amount</code> hay không.</li>
+      <li>Cập nhật điều kiện chi tiêu cuối cùng: <code>is_only_one_input_from_script &amp;&amp; is_token_unlocked &amp;&amp; is_proceed_paid &amp;&amp; is_fee_paid</code>.</li>
+      <li>Viết Unit Test <code>test_swap_with_fee_success</code> và <code>test_swap_with_fee_fail</code>.</li>
+    </ol>
+    <pre><code class="language-rust">// Gợi ý Lời Giải (Bài tập 1)
+pub type SwapDatum {
+  SwapDatum {
+    initiator: Address,
+    to_provide: MValue,
+    to_receive: MValue,
+    fee_address: Address,
+    fee_amount: Int,
+  }
+}
+
+let is_fee_paid =
+  get_all_value_to(tx.outputs, datum.fee_address)
+    |&gt; value_geq(from_lovelace(datum.fee_amount))</code></pre>
+    <h3>📝 Bài Tập 2: Thêm Mốc Thời Gian Hết Hạn (Swap Deadline)</h3>
+    <p><strong>Mục tiêu:</strong> Sử dụng <code>tx.validity_range</code> để quy định thời hạn hết hạn của lệnh Swap.</p>
+    <p><strong>Đề bài:</strong></p>
+    <ol>
+      <li>Thêm trường <code>deadline: Int</code> (POSIX Time tính bằng ms) vào <code>SwapDatum</code>.</li>
+      <li>Trong nhánh <code>Swap</code>, bổ sung điều kiện <code>is_before_deadline</code> dùng <code>valid_before(tx.validity_range, datum.deadline)</code> từ <code>vodka_validity_range</code>.</li>
+      <li>Viết 2 Unit Test <code>test_swap_before_deadline</code> (PASS) và <code>test_swap_after_deadline</code> (FAIL).</li>
+    </ol>
+    <pre><code class="language-rust">// Gợi ý Lời Giải (Bài tập 2)
+use vodka_validity_range.{valid_before}
+
+let is_before_deadline = valid_before(tx.validity_range, datum.deadline)</code></pre>
+    <hr>
+    <h2 id="sec5">5. Tổng kết Bài học</h2>
+    <ol>
+      <li>Validator <code>swap</code> bao gồm 2 nhánh hành động rõ ràng: <code>Swap</code> (Khớp lệnh) và <code>Cancel</code> (Hủy lệnh).</li>
+      <li>Sự an toàn của nhánh <code>Swap</code> dựa trên <strong>3 trụ cột</strong>: Chống Double Satisfaction (<code>[_] -&gt; True</code>), Kiểm tra trả đủ tiền cho Creator (<code>is_proceed_paid</code>), và Kiểm tra mở khóa đúng tài sản (<code>is_token_unlocked</code>).</li>
+      <li>Nhánh <code>Cancel</code> bảo vệ quyền tài sản bằng cách bắt buộc xác thực chữ ký của Creator qua <code>key_signed</code>.</li>
+    </ol>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>
