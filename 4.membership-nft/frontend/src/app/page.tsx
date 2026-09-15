@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { BlockfrostProvider } from "@meshsdk/core";
-import { getOracleData, getOracleAddress, getNftMintPolicyId, NETWORK_ID, OracleData } from "@membership-nft/offchain";
+import { getOracleData, getMembershipScripts, OracleData } from "@membership-nft/offchain";
 import WalletConnect from "@/components/WalletConnect";
 import CollectionInfo from "@/components/CollectionInfo";
 import MintSection from "@/components/MintSection";
@@ -11,31 +11,33 @@ import MyNFTs from "@/components/MyNFTs";
 export default function Home() {
   const [oracleData, setOracleData] = useState<OracleData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const collectionPolicyId = oracleData
-    ? getNftMintPolicyId(oracleData.oracleNftPolicyId)
-    : null;
+  const oracleNftPolicyId = process.env.NEXT_PUBLIC_ORACLE_POLICY_ID;
+  const scripts = oracleNftPolicyId ? getMembershipScripts(oracleNftPolicyId) : null;
+  const collectionPolicyId = scripts?.nftPolicyId ?? null;
 
+  // Đọc dữ liệu Oracle
   const fetchOracleData = useCallback(async () => {
     try {
       setLoading(true);
 
       const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY;
-      const oracleNftPolicyId = process.env.NEXT_PUBLIC_ORACLE_POLICY_ID;
 
-      if (!apiKey || !oracleNftPolicyId) {
-        console.error("Missing Environment Variables");
+      if (!apiKey || !oracleNftPolicyId || !scripts) {
+        setError("Thiếu biến môi trường hoặc plutus.json, hãy kiểm tra lại");
         setLoading(false);
         return;
       }
 
       const provider = new BlockfrostProvider(apiKey);
-      const oracleAddress = getOracleAddress(NETWORK_ID);
-
-      const data = await getOracleData(provider, oracleAddress, oracleNftPolicyId, NETWORK_ID);
+      const data = await getOracleData(provider, scripts.oracleAddress, oracleNftPolicyId);
       setOracleData(data);
+      setError(null);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch Oracle Data";
+      setError(message);
       console.error("Failed to fetch Oracle Data:", error);
     } finally {
       setLoading(false);
@@ -43,6 +45,7 @@ export default function Home() {
   }, []);
 
   const handleRefresh = useCallback(() => {
+    setError(null);
     fetchOracleData();
     setRefreshTrigger(prev => prev + 1);
   }, [fetchOracleData]);
@@ -67,6 +70,7 @@ export default function Home() {
             disabled={loading}
             className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-text-secondary disabled:opacity-50 group"
             title="Refresh Data"
+            aria-label="Refresh oracle data"
           >
             <svg
               className={`w-5 h-5 ${loading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}`}
@@ -81,7 +85,12 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Error Alert */}
+      {error && (
+        <div role="alert" className="max-w-4xl mx-auto mb-6 p-4 rounded-lg bg-status-error/10 border border-status-error/30 text-status-error">
+          <p className="text-sm font-medium">⚠️ {error}</p>
+        </div>
+      )}
       <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-8">
         <div className="md:col-span-6 lg:col-span-7 flex flex-col justify-center">
           <CollectionInfo
@@ -102,7 +111,7 @@ export default function Home() {
             {/* Background Image Blurred */}
             <img
               src="/aiken-couse-nft.jpg"
-              alt="Collection Background"
+              alt="Membership NFT Collection Card Preview"
               className="absolute inset-0 w-full h-full object-cover opacity-20 blur-[2px] group-hover:scale-110 transition-transform duration-700"
             />
 
@@ -112,7 +121,7 @@ export default function Home() {
             <div className="absolute inset-0 flex items-center justify-center z-0">
               <div className="w-48 h-48 border-4 border-brand/30 rounded-full animate-[spin_10s_linear_infinite] group-hover:border-brand/80 transition-colors shadow-[0_0_50px_rgba(0,255,0,0.2)] inset-0 absolute m-auto"></div>
               <div className="w-32 h-32 border border-brand/50 rounded-full animate-[spin_7s_linear_infinite_reverse] inset-0 absolute m-auto"></div>
-              <div className="text-6xl font-bold text-brand z-20">#{oracleData?.nftIndex ?? "0"}</div>
+              <div className="text-6xl font-bold text-brand z-20">#{oracleData?.nextNftIndex ?? "1"}</div>
             </div>
 
             <div className="absolute bottom-6 left-6 right-6 z-20">

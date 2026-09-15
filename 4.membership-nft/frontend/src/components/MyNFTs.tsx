@@ -31,34 +31,17 @@ export default function MyNFTs({
           : [];
         setNfts(membershipNfts);
 
-        // Fetch Metadata for images
-        const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY;
-        if (apiKey && membershipNfts.length > 0) {
-          const provider = new BlockfrostProvider(apiKey);
-          const newMetadataMap: Record<string, string> = {};
-
-          // Thực hiện fetch metadata cho từng asset (song song)
-          await Promise.all(membershipNfts.map(async (nft) => {
-            try {
-              const metadata = await provider.fetchAssetMetadata(nft.unit);
-
-              if (metadata && metadata.image) {
-                // Xử lý trường hợp image là mảng (CIP-25 split)
-                let imageUrl = Array.isArray(metadata.image)
-                  ? metadata.image.join("")
-                  : metadata.image;
-
-                if (imageUrl.startsWith("ipfs://")) {
-                  imageUrl = imageUrl.replace("ipfs://", "https://ipfs.io/ipfs/");
-                }
-                newMetadataMap[nft.unit] = imageUrl;
-              }
-            } catch (e) {
-              console.error(`Failed to fetch metadata for ${nft.unit}`, e);
-            }
-          }));
-          setMetadataMap(newMetadataMap);
-        }
+        // =========================================================================
+        // 💡 BÀI TẬP THỰC HÀNH DÀNH CHO HỌC VIÊN:
+        // Nhiệm vụ: Lấy hình ảnh của từng NFT từ On-chain Metadata (CIP-25 Standard)
+        // 
+        // Gợi ý:
+        // 1. Khởi tạo BlockfrostProvider
+        // 2. Duyệt qua mảng `membershipNfts`:
+        //    - Fetch metadata của từng NFT
+        //    - Trích xuất trường `metadata.image` (Lưu ý: Nó có thể ở dạng array hoặc string)
+        //    - Cập nhật kết quả vào state `metadataMap`
+        // =========================================================================
       } catch (error) {
         console.error("Failed to fetch assets", error);
       } finally {
@@ -91,18 +74,21 @@ export default function MyNFTs({
         </div>
       ) : nfts.length > 0 ? (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
-          {nfts.map((nft, index) => {
+          {nfts.map((nft) => {
             const assetNameHex = nft.unit.slice(56);
             let checkName = assetNameHex;
             try {
-              checkName = Buffer.from(assetNameHex, "hex").toString("utf-8");
+              const bytes = new Uint8Array(
+                (assetNameHex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16))
+              );
+              checkName = new TextDecoder().decode(bytes);
             } catch (e) { }
 
             const imageUrl = metadataMap[nft.unit];
 
             return (
               <motion.div
-                key={index}
+                key={nft.unit}
                 whileHover={{ y: -5, scale: 1.02 }}
                 className="glass-card group overflow-hidden cursor-pointer"
               >

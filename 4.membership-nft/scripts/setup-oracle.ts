@@ -6,8 +6,8 @@ import { MeshTxBuilder } from "@meshsdk/transaction";
 import { mConStr0, mPubKeyAddress } from "@meshsdk/common";
 import { deserializeAddress, resolveScriptHash } from "@meshsdk/core";
 import {
+  getMembershipScripts,
   getOneShotCbor,
-  getOracleAddress,
   NETWORK_ID,
   ORACLE_TOKEN_NAME
 } from "@membership-nft/offchain";
@@ -31,7 +31,7 @@ async function main() {
   console.log("🚀 Membership NFT Oracle Setup");
   console.log("================================\n");
 
-  // 1. Khởi tạo provider & wallet
+  // Khởi tạo provider & wallet
   const provider = new BlockfrostProvider(BLOCKFROST_API_KEY!);
   const adminWallet = new MeshWallet({
     networkId: NETWORK_ID,
@@ -53,57 +53,57 @@ async function main() {
   console.log(`📍 Admin Address: ${adminAddress}`);
   console.log(`💰 UTxOs found: ${adminUtxos.length}`);
 
-  // 2. Chọn paramUtxo (UTxO đầu tiên) cho one-shot policy
+  // Chọn paramUtxo (utxo đầu tiên) cho one-shot policy
   const paramUtxo = adminUtxos[0]!;
   console.log(
     `\n🔑 Param UTxO: ${paramUtxo.input.txHash}#${paramUtxo.input.outputIndex}`
   );
 
-  // 3. Tính one-shot policy & oracle NFT policy
+  // Biên dịch one-shot policy & tính địa chỉ Oracle
   const oneShotCbor = getOneShotCbor(paramUtxo.input);
   const oracleNftPolicyId = resolveScriptHash(oneShotCbor, "V3");
-  const oracleAddress = getOracleAddress(NETWORK_ID);
+  const { oracleAddress } = getMembershipScripts(oracleNftPolicyId);
 
   console.log(`📜 Oracle NFT Policy ID: ${oracleNftPolicyId}`);
   console.log(`🏛️  Oracle Address: ${oracleAddress}`);
   console.log(`💵 Mint Price: ${MINT_PRICE_LOVELACE / 1_000_000} ADA`);
 
-  // 4. Build setup transaction
+  // Chuẩn bị Oracle Datum khởi tạo (Số thứ tự bắt đầu từ #1)
   const { pubKeyHash, stakeCredentialHash } = deserializeAddress(adminAddress);
+  const initialDatum = mConStr0([
+    1,                                               // first index = 1
+    MINT_PRICE_LOVELACE,                             // min_price (lovelace)
+    mPubKeyAddress(pubKeyHash, stakeCredentialHash), // admin_address
+  ]);
 
+  // Tạo và gửi giao dịch khởi tạo
   const txBuilder = new MeshTxBuilder({
     fetcher: provider,
-    submitter: provider,
+    evaluator: provider,
     // verbose: true,
   });
 
   const unsignedTx = await txBuilder
-    // Consume paramUtxo (đảm bảo one-shot hoạt động)
+    // Consume paramUtxo (đảm bảo điều kiện của one-shot)
     .txIn(
       paramUtxo.input.txHash,
       paramUtxo.input.outputIndex,
       paramUtxo.output.amount,
       paramUtxo.output.address
     )
-    // Mint Oracle Token bằng one-shot policy
+    // Mint +1 Oracle Token bằng one-shot policy
     .mintPlutusScriptV3()
     .mint("1", oracleNftPolicyId, oracleTokenNameHex)
     .mintingScript(oneShotCbor)
     .mintRedeemerValue(mConStr0([]))  // Action::Minting (index 0)
-    // Gửi Oracle Token đến oracle address với initial datum
+    // Gửi Oracle Token đến oracle address với datum khởi tạo
     .txOut(
       oracleAddress,
       [{
         unit: oracleNftPolicyId + oracleTokenNameHex,
         quantity: "1"
       }])
-    .txOutInlineDatumValue(
-      mConStr0([
-        0,                                              // nft_index = 0
-        MINT_PRICE_LOVELACE,                            // min_price
-        mPubKeyAddress(pubKeyHash, stakeCredentialHash), // admin_address
-      ])
-    )
+    .txOutInlineDatumValue(initialDatum)
     .txInCollateral(
       collateral.input.txHash,
       collateral.input.outputIndex,
@@ -123,7 +123,9 @@ async function main() {
   console.log(`\n✅ Oracle setup thành công!`);
   console.log(`📋 Tx Hash: ${txHash}`);
   console.log(`\n${"=".repeat(60)}`);
-  console.log("🔧 CẤU HÌNH CHO FRONTEND (.env.local):");
+
+  // In ra ORACLE_POLICY_ID để cấu hình cho Frontend
+  console.log("🔧 CẤU HÌNH CHO FRONTEND (.env):");
   console.log(`${"=".repeat(60)}`);
   console.log(
     `NEXT_PUBLIC_ORACLE_POLICY_ID=${oracleNftPolicyId}`

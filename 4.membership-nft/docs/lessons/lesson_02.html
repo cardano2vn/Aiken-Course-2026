@@ -1,0 +1,412 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#one-shot-script">1. Chi tiết One-Shot Minting Policy Script (one_shot.ak)</a></li>
+    <li><a href="#co-che-multi-validator">2. Cơ chế phối hợp Multi-Validator</a></li>
+    <li><a href="#nft-mint-validator">3. Chi tiết NFT Minting Policy (nft_mint.ak)</a></li>
+    <li><a href="#oracle-validator">4. Chi tiết Oracle Validator (oracle.ak)</a></li>
+    <li><a href="#thao-luan-bao-mat">5. Mở rộng: Thảo luận về Bảo mật và Kiến trúc</a></li>
+    <li><a href="#vi-tri-luu-du-lieu">6. Vấn đề chọn lựa vị trí để lưu dữ liệu: Datum hay Tham số Hợp đồng?</a></li>
+  </ul>
+</blockquote>
+
+<hr />
+
+<p>Smart Contract của Membership NFT được thiết kế với 2 hợp đồng chính phối hợp hoạt động (<code>oracle.ak</code>, và <code>nft_mint.ak</code>) và 1 hợp đồng phụ (<code>one_shot.ak</code>) để mint Oracle NFT định danh của Oracle UTxO (State Thread Token). Bây giờ chúng ta sẽ đi vào chi tiết từng validator.</p>
+
+<h2 id="one-shot-script">1. Chi tiết One-Shot Minting Policy Script (<code>one_shot.ak</code>)</h2>
+<p>Hợp đồng này có nhiệm vụ: Cho phép <em><strong>mint</strong></em> Oracle NFT và <em><strong>burn</strong></em> token này khi cần đóng hệ thống.</p>
+
+<p>Hai hành động này được định nghĩa trong kiểu <code>Action</code> của redeemer:</p>
+<pre><code>pub type Action {
+  Minting
+  Burning
+}</code></pre>
+
+<p>Khai báo validator với tham số là mã OutputReference của một param UTxO (<code>utxo_ref</code>). Trong validator triển khai duy nhất handler <code>mint</code>:</p>
+<pre><code>validator one_shot(utxo_ref: OutputReference) {
+  mint(redeemer: Action, policy_id: PolicyId, self: Transaction) {
+    // Logic `mint` handler
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+<h4>Logic <code>mint</code> handler:</h4>
+<p>Dùng <code>expect</code> để đảm bảo rằng có đúng 1 loại token được mint thuộc <code>policy_id</code> và trích xuất ra được số lượng mint <code>quantity</code>.</p>
+<pre><code>    expect [Pair(_asset_name, quantity)] =
+      self.mint
+        |> assets.tokens(policy_id)
+        |> dict.to_pairs()</code></pre>
+<ul>
+  <li>Hàm <code>assets.tokens</code> trích xuất từ trường <code>mint</code> của giao dịch, trả về các token thuộc <code>policy_id</code> dưới dạng một Dictionary ánh xạ giữa tên tài sản và số lượng: <code>Dict&lt;AssetName, Int&gt;</code>.</li>
+  <li>Dictionary này được chuyển đổi sang dạng Pairs (nghĩa là một danh sách <code>List&lt;Pair&lt;AssetName, Int&gt;&gt;</code>).</li>
+  <li>Từ khóa <code>expect</code> đảm bảo rằng danh sách này chỉ có <strong>đúng một phần tử</strong>, đồng thời bóc tách số lượng mint vào biến <code>quantity</code>. Lưu ý rằng policy này hoàn toàn không quan tâm đến tên token (<code>_asset_name</code>), bất kỳ tên token nào cũng được chấp nhận.</li>
+</ul>
+
+<p>Kiểm tra xem UTxO tham số (<code>utxo_ref</code>) có nằm trong danh sách UTxO đầu vào (<code>inputs</code>) sẽ bị tiêu thụ trong giao dịch hay không:</p>
+<pre><code>let is_utxo_consumed = list.any(self.inputs, fn(input) { input.output_reference == utxo_ref })</code></pre>
+
+<p>Pattern matching để phân nhánh hành động theo <code>redeemer</code>:</p>
+<ul>
+  <li><code>Minting</code>: Chỉ cho phép mint đúng 1 token và tiêu thụ UTxO tham số.</li>
+  <li><code>Burning</code>: Chỉ cho phép burn đúng 1 token (quantity bằng <code>-1</code>).</li>
+</ul>
+<pre><code>  when redeemer is {
+    Minting -> is_utxo_consumed? && (quantity == 1)?
+    Burning -> (quantity == -1)?
+  }</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> Tại sao ở nhánh <code>Burning</code> chúng ta chỉ kiểm tra số lượng <strong>-1</strong>, mà có vẻ như bỏ quên việc <strong>kiểm tra quyền của người ký (yêu cầu chữ ký Admin)</strong>? Lý do là vì <strong>Oracle NFT</strong> luôn nằm trong <strong>Oracle UTxO</strong> dưới sự giám sát của Oracle Validator. Bất kỳ ai muốn đốt token này thì trước tiên phải mở khóa được UTxO đó, và chốt chặn chữ ký Admin được đặt tại <code>oracle.ak</code>!</p>
+</blockquote>
+
+<hr />
+
+<h2 id="co-che-multi-validator">2. Cơ chế phối hợp Multi-Validator</h2>
+<p>Trước khi đi vào chi tiết mã nguồn của 2 hợp đồng chính, chúng ta sẽ cùng xem xét cách phối hợp hoạt động của chúng trong cơ chế multi-validators.</p>
+
+<h4>2.1. Cấu trúc Oracle Datum</h4>
+<p>Yêu cầu của dApp là có cơ chế tính phí mint.</p>
+<p>Do đó, <code>OracleDatum</code> ngoài lưu trữ số thứ tự sắp được mint, còn có thêm các thông tin thanh toán bao gồm phí mint và địa chỉ nhận thanh toán. Cụ thể:</p>
+<pre><code>pub type OracleDatum {
+  next_nft_index: Int,      // Số thứ tự của NFT tiếp theo sẽ mint
+  min_price: Int,           // Mức phí mint tối thiểu tính bằng lovelace
+  admin_address: Address,   // Địa chỉ ví Admin nhận phí mint
+}</code></pre>
+
+<h4>2.2. Các điều kiện then chốt</h4>
+<p>Khi người dùng thực hiện mint NFT, cả hai hợp đồng <code>nft_mint.ak</code> và <code>oracle.ak</code> được kích hoạt <strong>đồng thời trong cùng một giao dịch</strong>, cùng kiểm tra 5 chốt chặn:</p>
+
+<p style="text-align: center;"><img src="../resources/lesson-02-mint-logic.png" alt="5 Chốt chặn an toàn trong Giao dịch Mint Membership NFT" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Cầu nối Multi-Validator:</strong><br /> <em><strong>Điều kiện số 1: Oracle UTxO nằm trong <code>tx.inputs</code></strong></em> chính là <strong>cầu nối then chốt</strong> giữa hai validator.<br /> - Bằng việc bắt buộc <strong><code>tx.inputs</code> phải chứa Oracle UTxO</strong> (có một UTxO <em><strong>nằm trên chính xác <code>oracle_address</code></strong></em> và <em><strong>chứa <code>oracle_nft_policy</code></strong></em>), <code>nft_mint.ak</code> <strong>chắc chắn 100% rằng <code>oracle.ak</code> cũng được kích hoạt</strong> trong cùng giao dịch. Nhờ đó, <code>nft_mint.ak</code> an tâm <strong>ủy quyền các tác vụ kiểm tra quan trọng khác</strong> cho <code>oracle.ak</code>.<br /> - Để thiết lập <em>"sợi dây kết nối"</em> này, <code>nft_mint</code> nhận các tham số cấu hình gồm <code>oracle_nft_policy</code> và <code>oracle_address</code>.</p>
+</blockquote>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0"
+  cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th style="width: 8%;">#</th>
+      <th style="width: 20%;">Validator</th>
+      <th style="width: 32%;">Điều kiện kiểm tra</th>
+      <th style="width: 40%;">Ý nghĩa</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1</strong></td>
+      <td><code>nft_mint.ak</code></td>
+      <td>Oracle UTxO nằm trong tx.inputs</td>
+      <td>Đảm bảo Oracle UTxO được chi tiêu trong giao dịch -&gt; kích hoạt <code>oracle.ak</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>2</strong></td>
+      <td><code>nft_mint.ak</code></td>
+      <td>Mint đúng 1 token với tên hợp lệ: [collection_name] #N</td>
+      <td>Đảm bảo token sinh ra là một NFT với tên đúng theo quy định.</td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td><code>oracle.ak</code></td>
+      <td>Output sạch: Chỉ ADA + Oracle Token</td>
+      <td>Đây là bước kiểm tra phụ, đảm bảo Oracle UTxO mới trả về script không bị pha lẫn token rác, gây nhiễu hệ thống.</td>
+    </tr>
+    <tr>
+      <td><strong>4</strong></td>
+      <td><code>oracle.ak</code></td>
+      <td>Datum cập nhật đúng: <code>next_nft_index + 1</code></td>
+      <td>Đảm bảo số thứ tự tăng tuần tự, bảo toàn nguyên vẹn <code>min_price</code> và <code>admin_address</code> trong Oracle Datum mới.</td>
+    </tr>
+    <tr>
+      <td><strong>5</strong></td>
+      <td><code>oracle.ak</code></td>
+      <td>Phí đủ: Admin nhận &gt;= min_price</td>
+      <td>Người dùng trả đủ phí tối thiểu (<code>min_price</code>) vào ví của Admin.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Bây giờ, chúng ta sẽ lần lượt mổ xẻ mã nguồn Aiken chi tiết của từng validator để xem 5 chốt chặn trên được hiện thực hóa như thế nào.</p>
+
+<hr />
+
+<h2 id="nft-mint-validator">3. Chi tiết NFT Minting Policy (<code>nft_mint.ak</code>)</h2>
+<p>Hợp đồng này quy định quy tắc phát hành Membership NFT (hiện thực các chốt chặn <strong>1, 2</strong> của logic mint).</p>
+
+<h4>Khai báo Tham số Validator &amp; Redeemer</h4>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Quyết định Thiết kế:</strong> DApp Membership NFT được thiết kế chỉ với chức năng đúc thẻ thành viên mới mà <strong>không hỗ trợ hành động đốt</strong> để bảo toàn tính liên tục của bộ sưu tập (tránh việc tự do đốt làm khuyết số thứ tự trong bộ sưu tập).<br />Do đó, hợp đồng không cần phân nhánh và sử dụng redeemer (<code>_redeemer: Data</code>).</p>
+</blockquote>
+
+<p>Validator nhận vào 3 tham số:</p>
+<ul>
+  <li><code>collection_name: ByteArray</code>: Tiền tố tên bộ sưu tập (<code>"C2VN Membership"</code>).</li>
+  <li><code>oracle_nft_policy: PolicyId</code>: Policy ID của Oracle Token (dùng để định vị Oracle UTxO).</li>
+  <li><code>oracle_address: Address</code>: Địa chỉ của hợp đồng <code>oracle.ak</code>.</li>
+</ul>
+
+<pre><code>validator nft_mint(
+  collection_name: ByteArray,
+  oracle_nft_policy: PolicyId,
+  oracle_address: Address,
+) {
+  mint(_redeemer: Data, policy_id: PolicyId, tx: Transaction) {
+    let Transaction { inputs, mint, .. } = tx
+
+    // Các logic kiểm tra chi tiết bên dưới...
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+<h4>Logic validator</h4>
+<p><strong>Chốt chặn 1: Đảm bảo sự có mặt của Oracle UTxO</strong></p>
+<pre><code>// Tìm input chứa Oracle Token tại chính xác oracle_address
+expect [oracle_input] =
+  inputs_at_with_policy(inputs, oracle_address, oracle_nft_policy)</code></pre>
+<p>Tìm trong danh sách <code>tx.inputs</code> xem có UTxO nào vừa nằm tại <code>oracle_address</code>, vừa chứa token mang <code>oracle_nft_policy</code> hay không. Kết quả khớp với danh sách đúng 1 phần tử (<code>[oracle_input]</code>), khẳng định giao dịch tiêu thụ chính xác Oracle UTxO duy nhất.</p>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong><br /> 1. <strong>Định danh tài sản với One-Shot Token:</strong> Thông thường trên Cardano, để định danh đầy đủ một tài sản, chúng ta cần cả hai thành phần: <code>PolicyId</code> và <code>AssetName</code>. Tuy nhiên với Oracle Token (STT), chúng ta chỉ cần dựa vào <code>PolicyId</code> là đã đủ để định vị nó. Đây là điểm đặc biệt của One-Shot Policy: nó đảm bảo trên toàn bộ blockchain chỉ có đúng một token duy nhất tồn tại dưới policy ID này.<br /> 2. <strong>Sự đánh đổi về mặt kiến trúc:</strong> Việc kiểm tra đồng thời cả địa chỉ (<code>oracle_address</code>) lẫn Policy ID (<code>oracle_nft_policy</code>) là một phép kiểm tra chặt chẽ. Trên thực tế, nếu Oracle token được khởi tạo đúng cách (gửi vào đúng địa chỉ hợp đồng <code>oracle</code> ngay từ đầu), thì bản thân sự hiện diện của Oracle Token đã đủ để nhận diện Oracle UTxO. Việc kiểm tra thêm cả <code>oracle_address</code> ở đây sẽ tạo nên một sự ràng buộc kiến trúc thú vị mà chúng ta sẽ phân tích thêm ở Mục 5.</p>
+</blockquote>
+
+<p><strong>Đọc số thứ tự từ Oracle Datum:</strong></p>
+<pre><code>expect InlineDatum(input_datum) = oracle_input.output.datum
+expect OracleDatum { next_nft_index, .. }: OracleDatum = input_datum</code></pre>
+<p>Trích xuất <code>InlineDatum</code> từ Oracle UTxO vừa tìm được để đọc giá trị <code>next_nft_index</code> làm số thứ tự cho NFT sắp mint.</p>
+
+<p><strong>Chốt chặn 2: Mint đúng 1 NFT với tên hợp lệ</strong></p>
+<pre><code>let asset_name =
+  collection_name
+    |> concat(" #")
+    |> concat(convert_int_to_bytes(next_nft_index))
+
+only_minted_token(mint, policy_id, asset_name, 1)</code></pre>
+<ul>
+  <li>Ghép chuỗi tên NFT theo quy tắc: <code>&lt;collection_name&gt;</code> + <code>" #"</code> + <code>&lt;next_nft_index&gt;</code> (ví dụ: <code>"C2VN Membership #1"</code>).</li>
+  <li>Hàm tiện ích <code>only_minted_token</code> kiểm tra trường <code>mint</code> của giao dịch có đúng 1 tài sản dưới <code>policy_id</code>, với đúng tên <code>asset_name</code> và đúng số lượng mint bằng 1.</li>
+</ul>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> Nhờ có <strong>Chốt chặn 1</strong>, <code>nft_mint.ak</code> hoàn toàn yên tâm giao phó các kiểm tra trạng thái và thanh toán còn lại cho <code>oracle.ak</code>!</p>
+</blockquote>
+
+<hr />
+
+<h2 id="oracle-validator">4. Chi tiết Oracle Validator (<code>oracle.ak</code>)</h2>
+<p>Đây là trung tâm quản lý trạng thái của dApp, chịu trách nhiệm lưu giữ biến đếm <code>next_nft_index</code>, bảo vệ việc chuyển đổi trạng thái (State Transition) và đảm bảo tiền phí mint được thanh toán cho Admin (hiện thực các chốt chặn <strong>3, 4, 5</strong>).</p>
+
+<p>Hai hành động khi tương tác với validator được định nghĩa trong <code>OracleRedeemer</code>:</p>
+<pre><code>pub type OracleRedeemer {
+  MintNFT    // Hành động mint NFT
+  StopOracle // Hành động đóng hệ thống, hủy Oracle token
+}</code></pre>
+
+<h4>Logic validator</h4>
+<p>Để có thể nhận biết chính xác UTxO đang được chi tiêu là Oracle UTxO, <code>oracle.ak</code> được tham số hóa bởi Policy ID của Oracle NFT <code>oracle_nft_policy</code>. Validator triển khai duy nhất handler <code>spend</code>:</p>
+
+<pre><code>validator oracle(oracle_nft_policy: PolicyId) {
+  spend(
+    datum_opt: Option&lt;OracleDatum&gt;,
+    redeemer: OracleRedeemer,
+    out_ref: OutputReference,
+    tx: Transaction,
+  ) {
+    // Bóc tách dữ liệu giao dịch và tìm target input
+    let Transaction { mint, inputs, outputs, extra_signatories, .. } = tx
+    expect Some(OracleDatum { next_nft_index, min_price, admin_address }) = datum_opt
+    expect Some(own_input) = find_input(inputs, out_ref)
+    
+    // Các logic kiểm tra chi tiết bên dưới...
+  }
+
+  else(_) {
+    fail
+  }
+}</code></pre>
+
+<p><strong>Đảm bảo <code>own_input</code> chứa Oracle Token:</strong> Trích xuất trực tiếp tài sản thuộc <code>oracle_nft_policy</code> từ <code>own_input.output.value</code> và đảm bảo có đúng 1 token trong giá trị được trích ra này:</p>
+<pre><code>expect [Pair(oracle_nft_name, 1)] =
+  own_input.output.value
+    |> assets.tokens(oracle_nft_policy)
+    |> dict.to_pairs()</code></pre>
+
+<p><strong>Bảo vệ State Transition:</strong> Với hành động <code>MintNFT</code>, cần đảm bảo giao dịch có đúng 1 Oracle UTxO đầu ra tại địa chỉ script. Với hành động <code>StopOracle</code>, cần đảm bảo không còn Oracle UTxO đầu ra tại địa chỉ script (Oracle Token sẽ bị đốt trong giao dịch). Gộp biểu thức kiểm tra này với <code>redeemer</code> vào một tuple để khớp mẫu 1 lần:</p>
+<pre><code>let own_address = own_input.output.address
+
+when
+  (
+    redeemer,
+    outputs_at_with_policy(outputs, own_address, oracle_nft_policy),
+  )
+is {
+  (MintNFT, [only_output]) -> {
+    // Có đúng 1 UTxO chứa đầu ra Oracle token tại địa chỉ script
+    // Xác thực 3 chốt chặn 3, 4, 5
+  }
+  (StopOracle, []) -> {
+    // Không còn UTxO đầu ra chứa Oracle token tại địa chỉ script
+    // Xác thực điều kiện dừng hệ thống
+  }
+  _ -> False
+}</code></pre>
+
+<h4>Nhánh <code>MintNFT</code>:</h4>
+<p>Khi người dùng mint NFT, cả 3 điều kiện sau bắt buộc phải đồng thời thỏa mãn:</p>
+
+<ul>
+  <li><strong>Chốt chặn 3: Output value sạch (<code>is_output_value_clean</code>)</strong> <pre><code>let is_output_value_clean = list.length(flatten(only_output.value)) == 2</code></pre> <p>Đây là điều kiện phụ đảm bảo Oracle UTxO mới chỉ chứa đúng 2 loại tài sản: ADA và Oracle Token. Ngăn chặn kẻ xấu gửi kèm nhiều token rác vào Oracle UTxO gây nhiễu hệ thống.</p></li>
+  <li><strong>Chốt chặn 4: Cập nhật Datum chính xác (<code>is_index_updated</code>)</strong> <pre><code>let is_index_updated =
+  only_output.datum == InlineDatum(
+    OracleDatum {
+      next_nft_index: next_nft_index + 1,
+      min_price,
+      admin_address,
+    },
+  )</code></pre> <p>Bắt buộc biến đếm <code>next_nft_index</code> tăng đúng +1, đồng thời giữ nguyên vẹn <code>min_price</code> và <code>admin_address</code>.</p></li>
+  <li><strong>Chốt chặn 5: Admin nhận đủ phí mint (<code>is_fee_paid</code>)</strong> <pre><code>let is_fee_paid =
+  get_all_value_to(outputs, admin_address)
+    |> value_geq(from_lovelace(min_price))</code></pre> <p>Dùng hàm tiện ích <code>get_all_value_to</code> để tính tổng tài sản chuyển tới địa chỉ <code>admin_address</code> trong <code>outputs</code>, đảm bảo ≥ giá trị min_price Lovelace.</p></li>
+</ul>
+
+<p>Ba chốt chặn phải cùng thỏa mãn trong biểu thức kiểm tra cuối cùng:</p>
+<pre><code>is_output_value_clean? && is_index_updated? && is_fee_paid?</code></pre>
+
+<h4>Nhánh <code>StopOracle</code>: Đóng hệ thống &amp; Thu hồi Oracle Token</h4>
+<p>Khi Admin muốn dừng dApp, giao dịch phải thỏa mãn 2 điều kiện:</p>
+<ul>
+  <li>Admin phải ký vào giao dịch (<code>is_admin_signed</code>)</li>
+  <li>Oracle NFT phải bị đốt (<code>is_oracle_nft_burnt</code>)</li>
+</ul>
+
+<pre><code>// outputs_at_with_policy(outputs, own_address, oracle_nft_policy) == []: 
+// -> Không có output tại địa chỉ script chứa Oracle token
+// -> Oracle UTxO không còn tồn tại
+(StopOracle, []) -> {
+  let is_oracle_nft_burnt =
+    only_minted_token(mint, oracle_nft_policy, oracle_nft_name, -1)
+  let admin_key = address_payment_key(admin_address)
+  let is_admin_signed = key_signed(extra_signatories, admin_key)
+
+  is_oracle_nft_burnt? && is_admin_signed?
+}</code></pre>
+
+<hr />
+
+<h2 id="thao-luan-bao-mat">5. Mở rộng: Thảo luận về Bảo mật và Kiến trúc</h2>
+
+<h4>A. Kịch bản khai thác tiềm ẩn: Spam tăng index không mint NFT</h4>
+
+<h5>Giải thích Kịch bản</h5>
+<p>Thiết kế hiện tại của cơ chế multi-validator là tham chiếu 1 chiều: <code>oracle</code> → <code>nft_mint</code>.</p>
+<p><code>nft_mint</code> biết về <code>oracle</code> (thông qua tham số <code>oracle_address</code>). Nó có thể kiểm tra để biết chắc <code>oracle</code> cũng cùng chạy trong giao dịch.</p>
+<p>Tuy nhiên, ở chiều ngược lại, <code>oracle</code> không biết gì về <code>nft_mint</code>. Nó không biết chắc rằng <code>nft_mint</code> có được chạy cùng nó không.</p>
+<p>Một ai đó có thể gửi giao dịch chỉ kích hoạt <code>oracle.ak</code> mà không chạy <code>nft_mint.ak</code>:</p>
+<ul>
+  <li>Tiêu thụ Oracle UTxO, trả đủ 10 ADA cho Admin, trả Oracle UTxO về script với <code>next_nft_index = next_nft_index + 1</code>.</li>
+  <li><strong>Không gọi mint bất kỳ NFT nào từ <code>nft_mint.ak</code></strong> (<code>tx.mint</code> rỗng).</li>
+</ul>
+
+<pre><code>Giao dịch "Spam Tăng Index":
+- Inputs:  Oracle UTxO (index = 2) + 10 ADA của Attacker
+- Outputs: Oracle UTxO mới (index = 3) + Admin nhận 10 ADA
+- Mint:    [RỖNG] (Không có NFT nào được phát hành)</code></pre>
+
+<h5>Đánh giá Mức độ Rủi ro</h5>
+<ul>
+  <li><strong>Kinh tế:</strong> Thấp. Kẻ tấn công tự chịu mất tiền thật (10 ADA/lượt), Admin vẫn nhận đủ 100% doanh thu mà không cần trao lại tài sản nào.</li>
+  <li><strong>Toàn vẹn dữ liệu:</strong> Cao. Bộ sưu tập bị nhảy cóc số thứ tự (<code>#1</code>, <code>#3</code>, <code>#5</code>...), biến đếm <code>next_nft_index</code> không còn phản ánh đúng tổng số NFT đang lưu hành thực tế (số lượng NFT thực tế = <code>next_nft_index - 1</code>).</li>
+</ul>
+
+<h5>Giải pháp khắc phục</h5>
+<ul>
+  <li><strong>Thiết lập cơ chế tham chiếu 2 chiều:</strong> Để khắc phục, <code>oracle.ak</code> cần phải biết <code>nft_mint_policy</code> để kiểm tra giao dịch có mint token thuộc <code>nft_mint_policy</code> không.</li>
+  <li><strong>Vấn đề con gà &amp; quả trứng (Circular Dependency):</strong><br /> Nếu tham số hóa hai chiều: <code>oracle(nft_mint_policy)</code> ⇄ <code>nft_mint(oracle_address/oracle_script_hash)</code>, cả hai Script đều đòi hỏi Script Hash của nhau tạo thành một vòng biến đổi vô tận <em><strong>"con gà - quả trứng"</strong></em>.
+    <p style="text-align: center;"><em>[📸 Chèn ảnh sơ đồ: Vòng lặp phụ thuộc Circular Dependency giữa hai Validator]</em></p>
+    <blockquote style="margin: 16px 0 24px 0;">
+      <p><strong>Mã băm (Script Hash)</strong> được tính toán từ toàn bộ mã bytecode của script (sau khi áp tham số). Bất cứ khi nào tham số thay đổi, Script cũng thay đổi dẫn đến Hash của nó cũng thay đổi theo.</p>
+    </blockquote>
+  </li>
+</ul>
+
+<h5>Một số hướng giải quyết</h5>
+<ul>
+  <li><strong>Giải pháp 1: Lưu <code>nft_mint_policy</code> trong Datum của Oracle</strong><br /> Giữ nguyên chiều tham chiếu hiện tại và thiết lập chiều còn lại qua <strong>Oracle datum</strong>: Thêm <code>nft_mint_policy</code> vào <code>OracleDatum</code>.
+    <pre><code>pub type OracleDatum {
+  next_nft_index: Int,
+  min_price: Int,
+  admin_address: Address,
+  nft_mint_policy: PolicyId,
+}</code></pre>
+    <ul>
+      <li><strong>Ưu điểm:</strong> Triệt tiêu hoàn toàn Circular Dependency, giữ cho mã nguồn độc lập và linh hoạt.</li>
+      <li><strong>Sự đánh đổi:</strong> Tốn thêm một phần chi phí lưu trữ (kích thước Datum tăng làm tăng mức min-UTxO ADA cần khóa) trên Oracle UTxO qua từng giao dịch.</li>
+    </ul>
+  </li>
+  <li><strong>Giải pháp 2: Dựa vào State Thread Token (STT)</strong><br /> Trên thực tế, bản thân Oracle NFT (STT) đã là một đảm bảo cho sự có mặt của Oracle UTxO miễn là nó được khởi tạo đúng cách. Khi đó <code>nft_mint</code> chỉ cần kiểm tra input có chứa Oracle NFT (STT) mà không cần thêm 1 bước khẳng định nó nằm trên <code>oracle_address</code>. Từ đó có thể bỏ qua tham số <code>oracle_address</code> trên <code>nft_mint</code>, giúp <code>oracle</code> có thể nhận <code>nft_mint_policy</code> làm tham số mà không bị vòng lặp 2 chiều.<br /><br /> Tuy nhiên, một điều cần phải đánh đổi là bắt buộc phải tin tưởng vào Admin lúc khởi tạo: Nếu Admin không trung thực, họ có thể gửi Oracle token về ví riêng thay vì địa chỉ Oracle. Khi đó họ có toàn quyền định đoạt dữ liệu trạng thái của hệ thống.<br /><br /> <strong>Đào sâu thêm một chút:</strong> Để loại bỏ sự phụ thuộc này, chúng ta nghĩ đến việc thêm điều kiện ràng buộc vào <code>one_shot</code> bắt buộc đích đến của Oracle token sau khi mint phải là <code>oracle_address</code>. Khi đó, <code>one_shot</code> cần được tham số hóa bởi <code>oracle_address</code> / <code>oracle_script_hash</code>. Và ta lại rơi vào <strong>Vòng lặp tam giác</strong>:
+    <pre><code>one_shot ──► nft_mint(oracle_nft_policy/oneshot policy) ──► oracle(nft_mint_policy) ──► one_shot(oracle_address) ──► ...</code></pre>
+    Do đó, giải pháp dựa vào STT này phải chấp nhận đặt niềm tin vào bước khởi tạo ban đầu của Admin.
+    <blockquote style="margin: 16px 0 24px 0;">
+      <p>💡 Dù vậy, nếu dự án công khai mã nguồn hợp đồng để cộng đồng đối chiếu — hoặc trực tiếp dịch ngược Plutus bytecode từ giao dịch on-chain — người dùng hoàn toàn có thể kiểm tra và xác minh xem Oracle Token có được khóa chuẩn xác trong hợp đồng <code>oracle</code> hay không, từ đó vẫn có thể yên tâm sử dụng giải pháp này.</p>
+    </blockquote>
+  </li>
+  <li><strong>Giải pháp 3: Multi-purpose Validator</strong><br /> Gộp cả 2 handlers <code>spend</code> (Oracle) và <code>mint</code> (NFT Mint) vào chung <strong>1 validator duy nhất</strong> → Cả hai dùng chung <code>script_hash</code> → Tạo nên một tham chiếu 2 chiều tự nhiên chỉ có ở PlutusV3. Chúng ta sẽ sử dụng giải pháp này trong các module tiếp theo.</li>
+</ul>
+
+<hr />
+
+<h2 id="vi-tri-luu-du-lieu">6. Vấn đề chọn lựa vị trí để lưu dữ liệu: Datum hay Tham số Hợp đồng?</h2>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0"
+  cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th style="width: 25%;">Tiêu chí</th>
+      <th style="width: 37%;">Tham số Hợp đồng (Script Parameter)</th>
+      <th style="width: 38%;">Trạng thái Động (UTxO Datum)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Bản chất</strong></td>
+      <td>Nhúng trực tiếp vào bytecode Plutus → Là 1 phần của script</td>
+      <td>Đính kèm vào từng UTxO khóa tại script → Độc lập với script</td>
+    </tr>
+    <tr>
+      <td><strong>Tính linh hoạt</strong></td>
+      <td>Dữ liệu tĩnh, bất biến. Thay đổi dữ liệu sẽ đổi toàn bộ Script</td>
+      <td>Linh hoạt. Có thể thay đổi khi cần</td>
+    </tr>
+    <tr>
+      <td><strong>Khi nào dùng</strong></td>
+      <td>Các thông số cấu hình bất biến của hệ thống: tên của bộ sưu tập, Policy ID của State Thread Token, script hash của Oracle, ...</td>
+      <td>Trạng thái biến đổi theo thời gian: biến đếm số thứ tự, thông tin của 1 khoản vay, số dư tài khoản, ...</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Cụ thể với Membership NFT</h4>
+<ul>
+  <li><strong>Với dApp trong bài:</strong> <code>min_price</code> và <code>admin_address</code> là hoàn toàn cố định trong bài toán hiện tại → có thể đưa vào làm tham số hợp đồng.</li>
+  <li><strong>Trên thực tế:</strong> Giá ADA luôn biến động dẫn đến nhu cầu thay đổi giá mint → việc cố định nó trong tham số hợp đồng trở nên bất tiện, đưa vào Datum giúp Admin có thể cập nhật linh hoạt.</li>
+</ul>
+
+<h4>Bài tập Mở rộng:</h4>
+<p><strong>Bài 1:</strong> Chuyển <code>admin_address</code> thành tham số hợp đồng và bổ sung nhánh <code>UpdatePrice</code> vào Oracle validator cho phép Admin cập nhật giá mint.</p>
+<ul>
+  <li>Yêu cầu chữ ký của Admin.</li>
+  <li><code>min_price</code> mới &gt; 0 &amp; khác <code>min_price</code> cũ.</li>
+  <li><strong>Bắt buộc giữ nguyên <code>next_nft_index</code></strong> để bảo toàn tính liên tục của bộ sưu tập.</li>
+</ul>
+
+<p><strong>Bài 2:</strong> Hãy lựa chọn một giải pháp và giải quyết lỗ hổng <strong>Spam tăng index</strong> đã chỉ ra ở trên.</p>
+
+<hr />
+
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ bước sang lớp Off-chain và Frontend Next.js để lắp ráp giao dịch tương tác thực tế và đưa dApp lên môi trường Cardano Preprod. Hẹn gặp lại các bạn!</p>

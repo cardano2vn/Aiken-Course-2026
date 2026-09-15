@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function WalletConnect() {
-  const { connect, disconnect, connected, name, connecting, address } = useWallet();
+  const { connect, disconnect, connected, connecting, address } = useWallet();
   const [wallets, setWallets] = useState<{ id: string; name: string; icon: string; version: string }[]>([]);
 
   useEffect(() => {

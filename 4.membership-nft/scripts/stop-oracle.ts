@@ -24,9 +24,10 @@ if (!PARAM_TX_HASH || !PARAM_INDEX) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-  // TODO: Implement stop oracle
   console.log("🛑 Dừng Oracle Contract (Stop Oracle)");
   console.log("========================================\n");
+
+  // TODO: Implement stop oracle
 
 
 }

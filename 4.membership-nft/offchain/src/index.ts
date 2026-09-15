@@ -4,13 +4,13 @@ export {
   COLLECTION_NAME,
   ORACLE_TOKEN_NAME,
   IMAGE_CID,
-  getOracleCbor,
   getOneShotCbor,
-  getNftMintCbor,
-  getOracleNftPolicyId,
-  getNftMintPolicyId,
+  getOracleCbor,
   getOracleAddress,
+  getNftMintCbor,
+  getMembershipScripts,
 } from "./config";
+export type { MembershipScripts } from "./config";
 
 // Types
 export type { OracleDatum } from "./types";

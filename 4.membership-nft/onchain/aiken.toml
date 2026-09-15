@@ -1,18 +1,18 @@
-name = "membership-nft/onchain"
-version = "0.0.1"
-compiler = "v1.1.21"
+name = "c2vn/membership-nft"
+version = "1.0.0"
+compiler = "v1.1.23"
 plutus = "v3"
 license = "Apache-2.0"
 description = "Membership NFT Minting Smart Contracts"
 
 [repository]
-user = "membership-nft"
-project = "onchain"
+user = "c2vn"
+project = "membership-nft"
 platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "v2.2.0"
+version = "v3.1.0"
 source = "github"
 
 [[dependencies]]

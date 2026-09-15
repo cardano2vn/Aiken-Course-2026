@@ -52,7 +52,7 @@ export default function TxStatus({
       exit={{ opacity: 0, height: 0 }}
       className={`p-4 rounded-lg mt-4 border border-white/10 bg-white/5 backdrop-blur flex flex-col gap-2 relative group`}
     >
-      {onClose && (
+      {onClose && (status === "success" || status === "failed" || status === "submitted") && (
         <button
           onClick={onClose}
           className="absolute top-3 right-3 p-1 rounded-md hover:bg-white/10 text-text-muted hover:text-white transition-all opacity-0 group-hover:opacity-100"
