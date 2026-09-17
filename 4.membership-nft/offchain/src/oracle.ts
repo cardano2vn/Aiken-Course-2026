@@ -1,16 +1,14 @@
 import type { IFetcher, UTxO } from "@meshsdk/core";
-import { serializeAddressObj } from "@meshsdk/core";
-import { parseDatumCbor } from "@meshsdk/core-cst";
+import { serializeAddressObj, deserializeDatum } from "@meshsdk/core";
 import type { OracleDatum } from "./types";
 import { NETWORK_ID } from "./config";
 
 export interface OracleData {
-  nftIndex: number;
+  nextNftIndex: number;
   minPrice: number;
   oracleUtxo: UTxO;
   oracleNftPolicyId: string;
   adminAddress: string;
-  adminAddressObj: OracleDatum["fields"][2];
 }
 
 /**
@@ -19,8 +17,7 @@ export interface OracleData {
 export const getOracleData = async (
   provider: IFetcher,
   oracleAddress: string,
-  oracleNftPolicyId: string,
-  networkId: number = NETWORK_ID
+  oracleNftPolicyId: string
 ): Promise<OracleData> => {
   // Tìm UTxO chứa Oracle Token
   const utxos = await provider.fetchAddressUTxOs(oracleAddress);
@@ -33,21 +30,23 @@ export const getOracleData = async (
   }
 
   // Parse inline datum
-  const oracleDatum: OracleDatum = parseDatumCbor(
-    oracleUtxo.output.plutusData!
-  );
+  const rawDatum = oracleUtxo.output.plutusData;
+  if (!rawDatum) {
+    throw new Error(
+      "Oracle UTxO missing plutusData — possible spam UTxO or datum was not attached during setup"
+    );
+  }
+  const oracleDatum: OracleDatum = deserializeDatum(rawDatum);
 
-  const nftIndex = Number(oracleDatum.fields[0].int);
+  const nextNftIndex = Number(oracleDatum.fields[0].int);
   const minPrice = Number(oracleDatum.fields[1].int);
-  const adminAddressObj = oracleDatum.fields[2];
-  const adminAddress = serializeAddressObj(adminAddressObj, networkId);
+  const adminAddress = serializeAddressObj(oracleDatum.fields[2], NETWORK_ID);
 
   return {
-    nftIndex,
+    nextNftIndex,
     minPrice,
     oracleUtxo,
     oracleNftPolicyId,
     adminAddress,
-    adminAddressObj,
   };
 };

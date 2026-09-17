@@ -37,7 +37,7 @@ export default function CollectionInfo({
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-neutral-bg2/50 rounded-lg p-4 border border-border-subtle">
               <span className="text-text-muted text-xs uppercase tracking-wider block mb-1">Minted</span>
-              <span className="text-xl font-bold text-brand">{oracleData.nftIndex}</span>
+              <span className="text-xl font-bold text-brand">{Math.max(0, Number(oracleData.nextNftIndex) - 1)}</span>
             </div>
             <div className="bg-neutral-bg2/50 rounded-lg p-4 border border-border-subtle">
               <span className="text-text-muted text-xs uppercase tracking-wider block mb-1">Mint Price</span>
@@ -60,7 +60,10 @@ export default function CollectionInfo({
                   </svg>
                 </a>
               </div>
-              <span className="text-xs font-mono text-text-secondary truncate block">
+              <span
+                className="text-xs font-mono text-text-secondary truncate block"
+                title={collectionPolicyId || "Not available"}
+              >
                 {collectionPolicyId || "Not available"}
               </span>
             </div>

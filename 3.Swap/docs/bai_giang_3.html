@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 3: Phân Tích Mã Nguồn Off-Chain (MeshJS) &amp; Xây Dựng Giao Diện dApp (Next.js)</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --primary-hover: #0f766e;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 950px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      padding: 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border-color);
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      color: var(--accent-color);
+      margin-bottom: 1.5rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 2px solid var(--border-color);
+    }
+
+    h2 {
+      font-size: 1.6rem;
+      color: #2dd4bf;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+    }
+
+    h3 {
+      font-size: 1.25rem;
+      color: #67e8f9;
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    h4 {
+      font-size: 1.05rem;
+      color: #a5f3fc;
+      margin-top: 1.2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      margin-bottom: 1.2rem;
+      color: #e2e8f0;
+    }
+
+    blockquote {
+      background: rgba(2, 132, 199, 0.1);
+      border-left: 4px solid var(--accent-color);
+      padding: 1rem 1.2rem;
+      margin-bottom: 1.5rem;
+      border-radius: 0 8px 8px 0;
+      color: #7dd3fc;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border-color);
+      margin: 2rem 0;
+    }
+
+    ul, ol {
+      margin-left: 1.8rem;
+      margin-bottom: 1.5rem;
+      color: #e2e8f0;
+    }
+
+    li {
+      margin-bottom: 0.4rem;
+    }
+
+    code {
+      font-family: "Fira Code", Monaco, Consolas, "Courier New", monospace;
+      background: rgba(15, 23, 42, 0.8);
+      color: #f472b6;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+      border: 1px solid #334155;
+    }
+
+    pre {
+      margin-bottom: 1.5rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      border: 1px solid var(--border-color);
+      background: var(--code-bg);
+    }
+
+    pre code {
+      background: transparent;
+      padding: 1.2rem;
+      border: none;
+      display: block;
+      color: #f8fafc;
+      font-size: 0.92em;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #0f172a;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    th, td {
+      padding: 0.8rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+      background: #1e293b;
+      color: var(--accent-color);
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    a {
+      color: var(--accent-color);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 3: Phân Tích Mã Nguồn Off-Chain (MeshJS) &amp; Xây Dựng Giao Diện dApp (Next.js)</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br>
+      <strong>Module 3:</strong> Atomic Swap Smart Contract (Hoán đổi nguyên tử / Limit Order P2P)
+    </blockquote>
+    <hr>
+    <h2>📋 Mục lục</h2>
+    <ol>
+      <li><a href="#sec1">Tổng quan Kiến trúc Off-chain trong dApp Cardano</a></li>
+      <li><a href="#sec2">Chi tiết Lớp Hạ Tầng <code>MeshTxInitiator</code> (<code>lib/common.ts</code>)</a>
+        <ul>
+          <li><a href="#sec2-1">2.1. Mô tả Chi tiết Các Hàm trong <code>MeshTxInitiator</code></a></li>
+          <li><a href="#sec2-2">2.2. Vai trò Hạ tầng &amp; Quản lý Collateral</a></li>
+        </ul>
+      </li>
+      <li><a href="#sec3">Phân tích Chi tiết Class <code>MeshSwapContract</code> (<code>lib/offchain.ts</code>)</a>
+        <ul>
+          <li><a href="#sec3-1">3.1. Bảng Tổng quan Chức năng Các Hàm trong <code>MeshSwapContract</code></a></li>
+          <li><a href="#sec3-2">3.2. Hàm <code>initiateSwap</code>: Khởi tạo Lệnh &amp; Gắn Inline Datum</a></li>
+          <li><a href="#sec3-3">3.3. Hàm <code>acceptSwap</code>: Khớp Lệnh &amp; Lưu Ý Ví Nhận Creator</a></li>
+          <li><a href="#sec3-4">3.4. Hàm <code>cancelSwap</code>: Hủy Lệnh &amp; Thêm Chữ Ký Bắt Buộc</a></li>
+        </ul>
+      </li>
+      <li><a href="#sec4">Tích hợp Giao diện Next.js App Router (<code>app/page.tsx</code>)</a>
+        <ul>
+          <li><a href="#sec4-1">4.1. Chi tiết Các Hàm Helper &amp; Handler trong UI</a></li>
+          <li><a href="#sec4-2">4.2. Quản lý Số lượng &amp; Quy đổi Đơn vị Lovelace</a></li>
+          <li><a href="#sec4-3">4.3. Quản lý Marketplace &amp; Phân Quyền Nút Cancel theo Ví</a></li>
+        </ul>
+      </li>
+      <li><a href="#sec5">Checklist Triển khai Production &amp; Tổng kết Module 3</a></li>
+    </ol>
+    <hr>
+
+    <h2 id="sec1">1. Tổng quan Kiến trúc Off-chain trong dApp Cardano</h2>
+    <p>Mô hình EUTxO của Cardano đòi hỏi sự phối hợp chặt chẽ giữa hai thành phần:</p>
+    <ul>
+      <li><strong>On-chain (Aiken Smart Contract):</strong> Đóng vai trò là "người gác cổng" (Validator) thẩm định xem giao dịch có hợp lệ hay không dựa trên các quy tắc bảo mật.</li>
+      <li><strong>Off-chain (TypeScript / MeshJS SDK):</strong> Đóng vai trò là "người xây dựng" (Transaction Builder) thu thập UTxO từ ví người dùng, cấu trúc Datum/Redeemer, tạo các Transaction Output và yêu cầu ví người dùng ký tên gửi lên mạng lưới.</li>
+    </ul>
+    <pre><code>+-----------------------------------------------------------------------------------------------+
+|                                    GIAO DIỆN NGƯỜI DÙNG (NEXT.JS)                             |
++-----------------------------------------------------------------------------------------------+
+                                                |
+                                                v  (Gọi hàm giao dịch Off-chain)
++-----------------------------------------------------------------------------------------------+
+|                                 OFF-CHAIN SDK (MESHJS / TYPESCRIPT)                           |
+|  1. Lấy UTxOs ví &amp; Collateral                                                                |
+|  2. Đọc plutus.json -&gt; Derive Script Address                                                  |
+|  3. Construct Plutus Data (conStr0 Datum, mConStr1 Redeemer)                                  |
+|  4. Build Tx (txOut, txInScript, requiredSignerHash) -&gt; Trả về Tx Hex                         |
++-----------------------------------------------------------------------------------------------+
+                                                |
+                                                v  (Ký &amp; Submit Tx qua Cardano Wallet CIP-30)
++-----------------------------------------------------------------------------------------------+
+|                                   CARDANO BLOCKCHAIN &amp; AIKEN VALIDATOR                        |
+|  1. Phase 1 Check: Cấu trúc Tx, Phí, Chữ ký, Collateral.                                      |
+|  2. Phase 2 Check: Chạy Aiken Validator (is_only_one_input_from_script, is_proceed_paid,...) |
++-----------------------------------------------------------------------------------------------+</code></pre>
+    <p>Mã nguồn Off-chain của dApp Swap nằm trong thư mục <code>frontend_app/lib/</code> được chia làm 2 lớp:</p>
+    <ul>
+      <li><code>lib/common.ts</code>: Lớp cơ sở <code>MeshTxInitiator</code> xử lý hạ tầng (Kết nối ví CIP-30, cấu hình mạng Preprod/Mainnet, tìm UTxO Collateral, truy vấn UTxOs ví).</li>
+      <li><code>lib/offchain.ts</code>: Class <code>MeshSwapContract</code> kế thừa từ <code>MeshTxInitiator</code>, trực tiếp xây dựng 3 giao dịch chính: <code>initiateSwap</code> (tạo lệnh), <code>acceptSwap</code> (khớp lệnh) và <code>cancelSwap</code> (hủy lệnh).</li>
+    </ul>
+    <hr>
+
+    <h2 id="sec2">2. Chi tiết Lớp Hạ Tầng <code>MeshTxInitiator</code> (<code>lib/common.ts</code>)</h2>
+    <p>Class <code>MeshTxInitiator</code> cung cấp bộ khung hạ tầng dùng chung cho mọi Smart Contract trong dApp:</p>
+    <pre><code class="language-typescript">export class MeshTxInitiator {
+  mesh: MeshTxBuilder;
+  fetcher?: IFetcher;
+  wallet?: IWallet;
+  networkId = 0; // 0: Preprod Testnet, 1: Mainnet
+  languageVersion: LanguageVersion = "V2";
+
+  constructor({ mesh, fetcher, wallet, networkId = 0, version = 2 }: MeshTxInitiatorInput) {
+    this.mesh = mesh;
+    this.fetcher = fetcher;
+    this.wallet = wallet;
+    this.networkId = networkId;
+    this.mesh.setNetwork(this.networkId === 1 ? "mainnet" : "preprod");
+    this.languageVersion = version === 1 ? "V2" : "V3";
+  }
+
+  // Tự động tìm UTxO Collateral từ ví người dùng
+  protected getWalletCollateral = async (): Promise&lt;UTxO | undefined&gt; =&gt; {
+    if (this.wallet) {
+      const utxos = await this.wallet.getCollateral();
+      return utxos[0];
+    }
+    return undefined;
+  };
+
+  // Lấy địa chỉ ví dApp hiện tại
+  protected getWalletDappAddress = async (): Promise&lt;string&gt; =&gt; {
+    if (this.wallet) {
+      const addresses = await this.wallet.getUsedAddresses();
+      if (addresses.length &gt; 0) return addresses[0];
+      const unusedAddresses = await this.wallet.getUnusedAddresses();
+      if (unusedAddresses.length &gt; 0) return unusedAddresses[0];
+    }
+    return "";
+  };
+
+  // Gom toàn bộ thông tin cần thiết cho 1 Giao dịch Plutus
+  protected getWalletInfoForTx = async () =&gt; {
+    const utxos = await this.wallet?.getUtxos();
+    const collateral = await this.getWalletCollateral();
+    const walletAddress = await this.getWalletDappAddress();
+    if (!utxos || utxos.length === 0) throw new Error("No utxos found in wallet.");
+    if (!collateral) throw new Error("No collateral found. Please set collateral in your wallet.");
+    if (!walletAddress) throw new Error("No wallet address found. Please connect wallet.");
+    return { utxos, collateral, walletAddress };
+  };
+}</code></pre>
+
+    <h3 id="sec2-1">2.1. Mô tả Chi tiết Các Hàm trong <code>MeshTxInitiator</code></h3>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Tên Hàm</th>
+            <th>Tham Số Đầu Vào</th>
+            <th>Kiểu Trả Về</th>
+            <th>Chức Năng Chính &amp; Ý Nghĩa Kỹ Thuật</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><code>constructor</code></strong></td>
+            <td><code>{ mesh, fetcher, wallet, networkId, version }</code></td>
+            <td><code>void</code></td>
+            <td>Khởi tạo cấu hình môi trường giao dịch. Gọi <code>setNetwork</code> (Preprod/Mainnet) và xác định phiên bản Plutus (<code>V2</code>/<code>V3</code>) cho bộ dựng <code>MeshTxBuilder</code>.</td>
+          </tr>
+          <tr>
+            <td><strong><code>getWalletCollateral</code></strong></td>
+            <td>Không (<code>void</code>)</td>
+            <td><code>Promise&lt;UTxO \| undefined&gt;</code></td>
+            <td>Truy vấn ví qua chuẩn CIP-30 <code>wallet.getCollateral()</code> để tìm UTxO thế chấp (ADA thuần, &ge; 5 ADA). Bắt buộc cho mọi giao dịch gọi Smart Contract.</td>
+          </tr>
+          <tr>
+            <td><strong><code>getWalletDappAddress</code></strong></td>
+            <td>Không (<code>void</code>)</td>
+            <td><code>Promise&lt;string&gt;</code></td>
+            <td>Lấy địa chỉ ví dApp hiện tại của người dùng kết nối (lấy địa chỉ đã dùng hoặc địa chỉ chưa dùng). Dùng làm địa chỉ <code>changeAddress</code> và làm thông tin ví Creator.</td>
+          </tr>
+          <tr>
+            <td><strong><code>getWalletInfoForTx</code></strong></td>
+            <td>Không (<code>void</code>)</td>
+            <td><code>Promise&lt;{ utxos, collateral, walletAddress }&gt;</code></td>
+            <td>Gom 3 thông số mấu chốt của ví. Chủ động kiểm tra lỗi và bắn ngoại lệ (<code>throw Error</code>) nếu ví thiếu UTxO, chưa có Collateral hoặc chưa kết nối.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="sec2-2">2.2. Vai trò Hạ tầng &amp; Quản lý Collateral</h3>
+    <ol>
+      <li><strong>Thiết lập Mạng &amp; Plutus Version:</strong> Đảm bảo <code>MeshTxBuilder</code> biết đang làm việc trên testnet (<code>preprod</code>) hay <code>mainnet</code>, tương thích với mã CBOR Plutus V2 hay V3 biên dịch từ Aiken.</li>
+      <li><strong>Quản lý Collateral (Thế chấp):</strong> Trên Cardano, nếu một giao dịch Plutus bị Phase 2 Validation thất bại tại node, tài sản trong UTxO Collateral sẽ bị trích thu phí chạy node. Do đó, hàm <code>getWalletCollateral</code> đảm bảo luôn tìm thấy 1 UTxO thế chấp hợp lệ để đính kèm vào phương thức <code>.txInCollateral(...)</code>.</li>
+    </ol>
+    <hr>
+
+    <h2 id="sec3">3. Phân tích Chi tiết Class <code>MeshSwapContract</code> (<code>lib/offchain.ts</code>)</h2>
+    <p>Class <code>MeshSwapContract</code> kế thừa từ <code>MeshTxInitiator</code> và cài đặt 3 hàm giao dịch kinh doanh chính của dApp Swap.</p>
+
+    <h3 id="sec3-1">3.1. Bảng Tổng quan Chức năng Các Hàm trong <code>MeshSwapContract</code></h3>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Tên Hàm</th>
+            <th>Tham Số Đầu Vào</th>
+            <th>Kết Quả Trả Về</th>
+            <th>Ý Nghĩa &amp; Vai Trò Trong dApp Atomic Swap</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><code>initiateSwap</code></strong></td>
+            <td><code>toProvide: Asset[]</code>, <code>toReceive: Asset[]</code></td>
+            <td><code>Promise&lt;string&gt;</code> (<code>txHex</code>)</td>
+            <td><strong>Tạo Lệnh Swap:</strong> Khóa tài sản bán vào địa chỉ Script, giải mã địa chỉ ví Creator thành <code>pubKeyHash</code>, đóng gói <code>SwapDatum</code> (<code>conStr0</code>) đính kèm Inline Datum (CIP-31).</td>
+          </tr>
+          <tr>
+            <td><strong><code>acceptSwap</code></strong></td>
+            <td><code>swapUtxo: UTxO</code></td>
+            <td><code>Promise&lt;string&gt;</code> (<code>txHex</code>)</td>
+            <td><strong>Khớp Lệnh BUY:</strong> Giải mã Inline Datum từ <code>swapUtxo</code>, xác định ví Creator &amp; số tiền yêu cầu. Tạo Output gửi tiền cho Creator, dùng Redeemer <code>mConStr1</code> (<code>Swap</code>), rút token về ví Buyer.</td>
+          </tr>
+          <tr>
+            <td><strong><code>cancelSwap</code></strong></td>
+            <td><code>swapUtxo: UTxO</code></td>
+            <td><code>Promise&lt;string&gt;</code> (<code>txHex</code>)</td>
+            <td><strong>Hủy Lệnh CANCEL:</strong> Đọc Datum lấy địa chỉ Creator, nạp Redeemer <code>mConStr0</code> (<code>Cancel</code>), bổ sung chữ ký Creator qua <code>.requiredSignerHash(...)</code>, rút tài sản khóa về ví Creator.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="sec3-2">3.2. Hàm <code>initiateSwap</code>: Khởi tạo Lệnh &amp; Gắn Inline Datum</h3>
+    <pre><code class="language-typescript">export type SwapDatum = ConStr0&lt;[PubKeyAddress, Value, Value]&gt;;
+
+initiateSwap = async (
+    toProvide: Asset[],
+    toReceive: Asset[],
+): Promise&lt;string&gt; =&gt; {
+    const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+    const { pubKeyHash, stakeCredentialHash } = deserializeAddress(walletAddress);
+
+    // 1. Tạo Datum Plutus Data (conStr0)
+    const swapDatum: SwapDatum = conStr0([
+        pubKeyAddress(pubKeyHash, stakeCredentialHash),
+        value(toProvide),
+        value(toReceive),
+    ]);
+
+    // 2. Dựng Giao dịch gửi Token vào Script + Đính kèm Inline Datum
+    await this.mesh
+        .txOut(this.scriptAddress, toProvide)
+        .txOutInlineDatumValue(swapDatum, "JSON")
+        .changeAddress(walletAddress)
+        .txInCollateral(
+            collateral.input.txHash,
+            collateral.input.outputIndex,
+            collateral.output.amount,
+            collateral.output.address,
+        )
+        .selectUtxosFrom(utxos)
+        .complete();
+
+    return this.mesh.txHex;
+};</code></pre>
+    <h4>Phân tích Chi tiết Luồng Thực Thi &amp; Các Hàm Liên Quan:</h4>
+    <ol>
+      <li><strong><code>getWalletInfoForTx()</code>:</strong> Lấy toàn bộ danh sách UTxO khả dụng, UTxO thế chấp <code>collateral</code>, và <code>walletAddress</code> của người tạo lệnh (Creator).</li>
+      <li><strong><code>deserializeAddress(walletAddress)</code>:</strong> Hàm giải mã địa chỉ ví dạng chuỗi (Bech32) thành đối tượng chứa 2 khóa băm: <code>pubKeyHash</code> (Public Key Hash) và <code>stakeCredentialHash</code> (Stake Key Hash).</li>
+      <li><strong><code>conStr0([...])</code>:</strong> Hàm tạo Plutus Data Constructor Index 0 trong MeshJS. Cấu trúc này khớp 100% với kiểu <code>SwapDatum</code> trong Aiken On-chain:
+        <ul>
+          <li><em>Trường 0:</em> <code>pubKeyAddress(pubKeyHash, stakeCredentialHash)</code> - Lưu thông tin địa chỉ người tạo lệnh.</li>
+          <li><em>Trường 1:</em> <code>value(toProvide)</code> - Danh sách tài sản Creator nạp vào kho khóa của Hợp đồng.</li>
+          <li><em>Trường 2:</em> <code>value(toReceive)</code> - Danh sách tài sản Creator yêu cầu người mua phải thanh toán lại.</li>
+        </ul>
+      </li>
+      <li><strong><code>.txOut(this.scriptAddress, toProvide)</code>:</strong> Tạo một Output chuyển đúng số lượng tài sản <code>toProvide</code> vào địa chỉ Hợp đồng Smart Contract (<code>scriptAddress</code>).</li>
+      <li><strong><code>.txOutInlineDatumValue(swapDatum, "JSON")</code>:</strong> Ghi trực tiếp <code>swapDatum</code> dưới dạng <strong>Inline Datum</strong> (chuẩn CIP-31) lên UTxO vừa tạo.</li>
+    </ol>
+
+    <h3 id="sec3-3">3.3. Hàm <code>acceptSwap</code>: Khớp Lệnh &amp; Lưu Ý Ví Nhận Creator</h3>
+    <pre><code class="language-typescript">acceptSwap = async (swapUtxo: UTxO): Promise&lt;string&gt; =&gt; {
+    const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+
+    // 1. Đọc &amp; Giải mã Datum từ UTxO của Script
+    const inlineDatum = deserializeDatum&lt;SwapDatum&gt;(swapUtxo.output.plutusData!);
+    const initiatorAddress = serializeAddressObj(inlineDatum.fields[0], this.networkId);
+    const initiatorToReceive = inlineDatum.fields[2];
+
+    // 2. Dựng Giao dịch Chi tiêu UTxO của Script
+    await this.mesh
+        .spendingPlutusScript(this.languageVersion)
+        .txIn(
+            swapUtxo.input.txHash,
+            swapUtxo.input.outputIndex,
+            swapUtxo.output.amount,
+            swapUtxo.output.address,
+        )
+        .spendingReferenceTxInInlineDatumPresent()
+        .spendingReferenceTxInRedeemerValue(mConStr1([])) // Swap Redeemer (Index 1)
+        .txInScript(this.scriptCbor)
+        .txOut(
+            initiatorAddress, // ĐỊA CHỈ VÍ CREATOR (CỐT LÕI BẢO VỆ)
+            MeshValue.fromValue(initiatorToReceive).toAssets(), // SỐ TIỀN YÊU CẦU (CỐT LÕI BẢO VỆ)
+        )
+        .changeAddress(walletAddress) // Token unlock từ Script sẽ tự động về ví Buyer
+        .txInCollateral(
+            collateral.input.txHash,
+            collateral.input.outputIndex,
+            collateral.output.amount,
+            collateral.output.address,
+        )
+        .selectUtxosFrom(utxos)
+        .complete();
+
+    return this.mesh.txHex;
+};</code></pre>
+    <h4>⚠️ ĐẶC BIỆT LƯU Ý HÀM <code>acceptSwap</code>:</h4>
+    <ol>
+      <li><strong><code>deserializeDatum&lt;SwapDatum&gt;()</code>:</strong> Giải mã dữ liệu Plutus Data raw lưu trong <code>swapUtxo.output.plutusData</code> để lấy lại đối tượng <code>SwapDatum</code>.</li>
+      <li><strong><code>serializeAddressObj(inlineDatum.fields[0], networkId)</code>:</strong> Chuyển đổi dữ liệu <code>PubKeyAddress</code> trong Datum trở lại thành chuỗi địa chỉ ví Cardano chuẩn Bech32 (<code>initiatorAddress</code>).</li>
+      <li><strong><code>mConStr1([])</code>:</strong> Khai báo Redeemer Constructor Index 1, tương ứng với enum variant <code>Swap</code> trong Aiken On-chain.</li>
+      <li><strong>Output Thanh toán Bắt buộc:</strong> Phương thức <code>.txOut(initiatorAddress, MeshValue.fromValue(initiatorToReceive).toAssets())</code> tạo một Output giao dịch gửi chính xác số tài sản Creator yêu cầu về địa chỉ ví <code>initiatorAddress</code>.
+        <br><em>Cảnh báo bảo mật:</em> Nếu Off-chain gửi thiếu 1 Lovelace hoặc truyền sai địa chỉ nhận, Validator Aiken On-chain tại hàm <code>is_proceed_paid</code> sẽ trả về <code>False</code> và giao dịch lập tức bị hủy!
+      </li>
+      <li><strong>Nhận Token cho Buyer:</strong> Số token nằm trong UTxO của Script sau khi giải phóng sẽ tự động đổ về ví của người mua (Buyer) thông qua địa chỉ tiền thừa <code>.changeAddress(walletAddress)</code>.</li>
+    </ol>
+
+    <h3 id="sec3-4">3.4. Hàm <code>cancelSwap</code>: Hủy Lệnh &amp; Thêm Chữ Ký Bắt Buộc</h3>
+    <pre><code class="language-typescript">cancelSwap = async (swapUtxo: UTxO): Promise&lt;string&gt; =&gt; {
+    const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
+    const inlineDatum = deserializeDatum&lt;SwapDatum&gt;(swapUtxo.output.plutusData!);
+    const initiatorAddress = serializeAddressObj(inlineDatum.fields[0], this.networkId);
+
+    await this.mesh
+        .spendingPlutusScript(this.languageVersion)
+        .txIn(
+            swapUtxo.input.txHash,
+            swapUtxo.input.outputIndex,
+            swapUtxo.output.amount,
+            swapUtxo.output.address,
+        )
+        .spendingReferenceTxInInlineDatumPresent()
+        .spendingReferenceTxInRedeemerValue(mConStr0([])) // Cancel Redeemer (Index 0)
+        .txInScript(this.scriptCbor)
+        .requiredSignerHash(deserializeAddress(initiatorAddress).pubKeyHash) // BẮT BUỘC CHỮ KÝ!
+        .changeAddress(walletAddress)
+        .txInCollateral(
+            collateral.input.txHash,
+            collateral.input.outputIndex,
+            collateral.output.amount,
+            collateral.output.address,
+        )
+        .selectUtxosFrom(utxos)
+        .complete();
+
+    return this.mesh.txHex;
+};</code></pre>
+    <h4>⚠️ ĐẶC BIỆT LƯU Ý HÀM <code>cancelSwap</code>:</h4>
+    <ol>
+      <li><strong><code>mConStr0([])</code>:</strong> Khai báo Redeemer Constructor Index 0, tương ứng với enum variant <code>Cancel</code> trong Aiken.</li>
+      <li><strong><code>requiredSignerHash(...)</code>:</strong> Đính kèm Public Key Hash của Creator vào danh sách chữ ký bắt buộc (<code>extra_signatories</code>) của Giao dịch.
+        <br><em>Cảnh báo bảo mật:</em> Nếu thiếu dòng <code>.requiredSignerHash(...)</code>, On-chain Validator tại hàm <code>key_signed</code> sẽ từ chối chi tiêu UTxO vì không thấy chứng thực quyền sở hữu từ Creator. Điều này bảo đảm không ai ngoại trừ chính chủ tạo lệnh có thể hủy lệnh và lấy lại tài sản.
+      </li>
+    </ol>
+    <hr>
+
+    <h2 id="sec4">4. Tích hợp Giao diện Next.js App Router (<code>app/page.tsx</code>)</h2>
+    <h3 id="sec4-1">4.1. Chi tiết Các Hàm Helper &amp; Handler trong UI</h3>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Tên Hàm / Handler</th>
+            <th>Vị Trí / File</th>
+            <th>Chức Năng Chi Tiết</th>
+            <th>Ý Nghĩa Kỹ Thuật</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong><code>parseRawAmount</code></strong></td>
+            <td><code>app/page.tsx</code></td>
+            <td>Đổi số ADA hiển thị (ví dụ <code>"2.5"</code>) thành số Lovelace thô (<code>"2500000"</code>).</td>
+            <td>Chuyển đổi chính xác sang kiểu số nguyên Lovelace cho Datum &amp; MeshJS SDK.</td>
+          </tr>
+          <tr>
+            <td><strong><code>formatDisplayAmount</code></strong></td>
+            <td><code>app/page.tsx</code></td>
+            <td>Đổi số Lovelace thô (<code>"2500000"</code>) thành chuỗi hiển thị UI ADA (<code>"2.5"</code>).</td>
+            <td>Giúp số dư và thông số lệnh hiển thị thân thiện trên giao diện người dùng.</td>
+          </tr>
+          <tr>
+            <td><strong><code>handleCreateOffer</code></strong></td>
+            <td><code>app/page.tsx</code></td>
+            <td>Đọc Form dữ liệu UI &rarr; gọi <code>initiateSwap</code> &rarr; ký ví &rarr; submit Tx.</td>
+            <td>Xử lý sự kiện tạo lệnh đặt hàng Swap từ Form giao diện.</td>
+          </tr>
+          <tr>
+            <td><strong><code>handleBuy</code></strong></td>
+            <td><code>app/page.tsx</code></td>
+            <td>Đọc Item được chọn &rarr; gọi <code>acceptSwap</code> &rarr; ký ví &rarr; submit Tx.</td>
+            <td>Xử lý sự kiện khớp lệnh mua tài sản cho Buyer.</td>
+          </tr>
+          <tr>
+            <td><strong><code>handleCancel</code></strong></td>
+            <td><code>app/page.tsx</code></td>
+            <td>Kiểm tra <code>isOwner</code> &rarr; gọi <code>cancelSwap</code> &rarr; ký ví &rarr; submit Tx.</td>
+            <td>Xử lý sự kiện hủy lệnh và rút lại tài sản cho Creator.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="sec4-2">4.2. Quản lý Số lượng &amp; Quy đổi Đơn vị Lovelace</h3>
+    <p>Trên mạng Cardano, đơn vị cơ sở nhỏ nhất là <strong>Lovelace</strong> ($1 \text{ ADA} = 1,000,000 \text{ Lovelace}$).</p>
+    <p>Để tránh sai lệch số dư thập phân trong Javascript/Typescript, ứng dụng định nghĩa 2 hàm helper quy đổi:</p>
+    <pre><code class="language-typescript">// Chuyển 1 ADA (Hiển thị UI) -> 1,000,000 Lovelace (Dữ liệu thô gửi lên chain)
+const parseRawAmount = (amount: string): string => {
+  const val = Number(amount);
+  if (isNaN(val)) return "0";
+  return Math.floor(val * 1_000_000).toString();
+};
+
+// Chuyển 1,000,000 Lovelace (Dữ liệu thô) -> 1 ADA (Hiển thị UI)
+const formatDisplayAmount = (quantity: string): string => {
+  const amount = Number(quantity);
+  if (isNaN(amount)) return "0";
+  return (amount / 1_000_000).toString();
+};</code></pre>
+    <ul>
+      <li>Khi Creator nhập <code>50</code> ADA trên Form tạo lệnh, UI gọi <code>parseRawAmount("50")</code> để chuyển thành <code>"50000000"</code> Lovelace nạp vào Datum.</li>
+      <li>Khi lấy Datum từ chain về hiển thị danh sách Marketplace, UI gọi <code>formatDisplayAmount("50000000")</code> để chia lại cho $1,000,000$, hiển thị con số <code>50</code> ADA trên Swap Card.</li>
+    </ul>
+
+    <h3 id="sec4-3">4.3. Quản lý Marketplace &amp; Phân Quyền Nút Cancel theo Ví</h3>
+    <p>Trong giao diện <code>app/page.tsx</code>, ứng dụng quét tất cả UTxO đang nằm tại địa chỉ Script và giải mã Datum để hiển thị danh sách Marketplace:</p>
+    <pre><code class="language-typescript">// 1. Quét danh sách UTxO tại địa chỉ Script qua Provider (Blockfrost)
+const utxos = await realProvider.fetchAddressUTxOs(contract.scriptAddress);
+
+const parsedSwaps = utxos.map((utxo) => {
+  try {
+    if (!utxo.output.plutusData) return null;
+    const datum = deserializeDatum&lt;SwapDatum&gt;(utxo.output.plutusData);
+    return { utxo, datum };
+  } catch (e) {
+    return null;
+  }
+}).filter((s) => s !== null);
+
+// 2. Phân quyền nút Cancel dựa vào ví đang kết nối (isOwner Check)
+{swaps.map((swap, i) => {
+  let isOwner = false;
+  try {
+    if (userAddress &amp;&amp; swap.datum.fields[0]) {
+      const initiatorAddr = serializeAddressObj(swap.datum.fields[0], 0);
+      if (initiatorAddr === userAddress) {
+        isOwner = true;
+      }
+    }
+  } catch (e) { console.error(e); }
+
+  return (
+    &lt;div key={i} className="flex gap-2 p-4 border rounded-lg bg-slate-800"&gt;
+      {/* Nút BUY: Sẵn sàng cho tất cả ví mua khác Creator */}
+      &lt;button 
+        onClick={() => handleBuy(swap)} 
+        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded"
+      &gt;
+        BUY
+      &lt;/button&gt;
+
+      {/* Nút CANCEL: Chỉ kích hoạt khi ví kết nối hiện tại chính là Creator (isOwner = true) */}
+      &lt;button
+        onClick={() => {
+          if (!isOwner) {
+            alert("You can only cancel swaps you created.");
+            return;
+          }
+          handleCancel(swap);
+        }}
+        disabled={!isOwner}
+        className={
+          isOwner 
+            ? "px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded" 
+            : "px-4 py-2 bg-red-900/50 text-gray-400 font-bold rounded cursor-not-allowed opacity-50"
+        }
+      &gt;
+        CANCEL
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+})}</code></pre>
+    <hr>
+
+    <h2 id="sec5">5. Checklist Triển khai Production &amp; Tổng kết Module 3</h2>
+    <h3>Checklist kiểm tra dApp trước khi lên Mainnet:</h3>
+    <ul>
+      <li><strong>Chuẩn hóa Datum Constructor:</strong> Đảm bảo <code>conStr0</code> Off-chain khớp 100% với <code>SwapDatum</code> On-chain.</li>
+      <li><strong>Đúng Ví &amp; Số lượng Thanh toán:</strong> Kiểm tra kĩ Output <code>.txOut(initiatorAddress, initiatorToReceive)</code> trong <code>acceptSwap</code>.</li>
+      <li><strong>Yêu cầu Chữ ký Creator:</strong> Luôn đính kèm <code>.requiredSignerHash(...)</code> trong <code>cancelSwap</code>.</li>
+      <li><strong>Xử lý Collateral:</strong> Đảm bảo hàm <code>getWalletCollateral</code> hoạt động mượt mà với các ví Cardano CIP-30.</li>
+      <li><strong>Chuyển đổi Đơn vị:</strong> Đảm bảo nhân/chia $1,000,000$ đối với Lovelace/ADA.</li>
+      <li><strong>Phân quyền UI:</strong> Khóa nút Cancel đối với những người dùng không phải là chủ nhân tạo lệnh (<code>isOwner</code>).</li>
+    </ul>
+
+    <h3>Tổng kết Module 3:</h3>
+    <p>Chúc mừng các bạn đã hoàn thành bài giảng 3 và khép lại <strong>Module 3: Atomic Swap Smart Contract</strong>! Qua 3 bài giảng, bạn đã nắm trọn vẹn tư tưởng Atomic Swap, phân tích 3 trụ cột an toàn chống lỗ hổng Double Satisfaction On-chain, làm chủ MeshJS SDK dựng giao dịch Off-chain và xây dựng một giao diện Web3 hoàn chỉnh với Next.js.</p>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

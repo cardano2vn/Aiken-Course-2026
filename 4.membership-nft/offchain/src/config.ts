@@ -1,9 +1,9 @@
 import {
-  applyCborEncoding,
   applyParamsToScript,
+  mOutputReference,
+  mScriptAddress,
   resolveScriptHash,
   serializePlutusScript,
-  mOutputReference,
   stringToHex,
 } from "@meshsdk/core";
 import type { UTxO } from "@meshsdk/core";
@@ -15,76 +15,107 @@ import blueprint from "../../onchain/plutus.json" with { type: "json" };
 export const NETWORK_ID = 0; // 0 = testnet/preprod, 1 = mainnet
 export const COLLECTION_NAME = "C2VN Membership";
 export const IMAGE_CID = "ipfs://bafkreiam22pzm6cfvppdeixfhhbelznaicgxk34pqoybq27frp7d3d54oa";
-
 export const ORACLE_TOKEN_NAME = "C2VN Oracle";
 
 // ---------------------------------------------------------------------------
-// Validator CBORs
+// Helper: Tìm validator theo title trong plutus.json
+// ---------------------------------------------------------------------------
+const findCompiledCode = (title: string): string => {
+  const validator = blueprint.validators.find((v) => v.title === title);
+  if (!validator) {
+    throw new Error(`Validator with title "${title}" not found in plutus.json`);
+  }
+  return validator.compiledCode;
+};
+
+// ---------------------------------------------------------------------------
+// 1. One-Shot Minting Policy
 // ---------------------------------------------------------------------------
 
 /**
- * Oracle Spend Validator CBOR — không có parameter.
- * Index 4 trong plutus.json: oracle.oracle.spend
- */
-export const getOracleCbor = (): string => {
-  return applyCborEncoding(blueprint.validators[4]!.compiledCode);
-};
-
-/**
  * One-Shot Minting Policy CBOR — parameter: OutputReference (paramUtxo).
- * Index 2 trong plutus.json: one_shot.one_shot.mint
  */
 export const getOneShotCbor = (paramUtxo: UTxO["input"]): string => {
-  return applyParamsToScript(blueprint.validators[2]!.compiledCode, [
+  return applyParamsToScript(findCompiledCode("one_shot.one_shot.mint"), [
     mOutputReference(paramUtxo.txHash, paramUtxo.outputIndex),
   ]);
 };
 
+// ---------------------------------------------------------------------------
+// 2. Oracle Spending Validator
+// ---------------------------------------------------------------------------
+
 /**
- * NFT Minting Policy CBOR — parameters: collection_name (ByteArray), oracle_nft (PolicyId).
- * Index 0 trong plutus.json: nft_mint.nft_mint.mint
+ * Oracle Validator CBOR — parameter: oracle_nft_policy (PolicyId).
  */
-export const getNftMintCbor = (
-  collectionName: string,
-  oracleNftPolicyId: string
-): string => {
-  return applyParamsToScript(blueprint.validators[0]!.compiledCode, [
-    stringToHex(collectionName),
+export const getOracleCbor = (oracleNftPolicyId: string): string => {
+  return applyParamsToScript(findCompiledCode("oracle.oracle.spend"), [
     oracleNftPolicyId,
   ]);
 };
 
-// ---------------------------------------------------------------------------
-// Derived PolicyIds & Addresses
-// ---------------------------------------------------------------------------
-
 /**
- * Tính Oracle NFT Policy ID từ one-shot policy.
+ * Tính Oracle Script Address (dạng Enterprise Address) từ Oracle CBOR.
  */
-export const getOracleNftPolicyId = (paramUtxo: UTxO["input"]): string => {
-  return resolveScriptHash(getOneShotCbor(paramUtxo), "V3");
-};
-
-/**
- * Tính NFT Minting Policy ID.
- */
-export const getNftMintPolicyId = (oracleNftPolicyId: string): string => {
-  return resolveScriptHash(
-    getNftMintCbor(COLLECTION_NAME, oracleNftPolicyId),
-    "V3"
-  );
-};
-
-/**
- * Tính Oracle script address.
- */
-export const getOracleAddress = (
-  networkId: number = NETWORK_ID,
-  stakeCredential?: string
-): string => {
+export const getOracleAddress = (oracleCbor: string): string => {
   return serializePlutusScript(
-    { code: getOracleCbor(), version: "V3" },
-    stakeCredential,
-    networkId
+    { code: oracleCbor, version: "V3" },
+    undefined,
+    NETWORK_ID
   ).address;
+};
+
+// ---------------------------------------------------------------------------
+// 3. NFT Minting Policy
+// ---------------------------------------------------------------------------
+
+/**
+ * NFT Minting Policy CBOR — parameters: collection_name, oracle_nft_policy, oracle_address.
+ */
+export const getNftMintCbor = (
+  oracleNftPolicyId: string,
+  oracleScriptHash: string
+): string => {
+  return applyParamsToScript(findCompiledCode("nft_mint.nft_mint.mint"), [
+    stringToHex(COLLECTION_NAME),
+    oracleNftPolicyId,
+    mScriptAddress(oracleScriptHash),
+  ]);
+};
+
+// ---------------------------------------------------------------------------
+// 4. Khởi tạo toàn bộ Scripts cho Membership NFT
+// ---------------------------------------------------------------------------
+
+export interface MembershipScripts {
+  oracleCbor: string;
+  oracleScriptHash: string;
+  oracleAddress: string;
+  nftMintCbor: string;
+  nftPolicyId: string;
+}
+
+/**
+ * Khởi tạo toàn bộ CBOR, Script Hash, Address và Policy ID
+ * cho toàn bộ hệ thống Membership NFT từ oracleNftPolicyId.
+ */
+export const getMembershipScripts = (
+  oracleNftPolicyId: string
+): MembershipScripts => {
+  // 1. Oracle spending script
+  const oracleCbor = getOracleCbor(oracleNftPolicyId);
+  const oracleScriptHash = resolveScriptHash(oracleCbor, "V3");
+  const oracleAddress = getOracleAddress(oracleCbor);
+
+  // 2. NFT minting policy
+  const nftMintCbor = getNftMintCbor(oracleNftPolicyId, oracleScriptHash);
+  const nftPolicyId = resolveScriptHash(nftMintCbor, "V3");
+
+  return {
+    oracleCbor,
+    oracleScriptHash,
+    oracleAddress,
+    nftMintCbor,
+    nftPolicyId,
+  };
 };

@@ -1,0 +1,63 @@
+# ============================================================
+# Node / Dependencies
+# ============================================================
+node_modules/
+.next/
+out/
+dist/
+
+# ============================================================
+# Aiken Build Artifacts
+# ============================================================
+build/
+
+# ============================================================
+# Environment Files & Secrets
+# ============================================================
+.env
+.env*.local
+.env.production
+.env.development
+
+# ============================================================
+# Logs & Debug
+# ============================================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+log.md
+
+# ============================================================
+# OS / Editor Files
+# ============================================================
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# ============================================================
+# AI Agent System (Antigravity / Claude Code)
+# ============================================================
+# Agent config, workflows, skills — chỉ dùng nội bộ
+.agent/
+
+# Agent shared state & context
+context.json
+
+# Agent memory & knowledge base
+memory/
+memory.md
+knowledge/
+
+# ============================================================
+# Internal Documentation (không public)
+# ============================================================
+# Spec, plan, tasks — tài liệu thiết kế nội bộ
+specs/
+
+# Tài liệu nội bộ đặc thù dự án
+HADA_CORE_SOP.md
+AUCTION_ONCHAIN_ANALYSIS.md

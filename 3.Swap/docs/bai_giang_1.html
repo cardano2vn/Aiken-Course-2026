@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 1: Tổng Quan dApp Atomic Swap & Lý Thuyết Cardano EUTxO Nền Tảng</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <style>
+    :root {
+      --primary-color: #0d9488;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      padding: 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border-color);
+    }
+    h1 { font-size: 2rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); }
+    h2 { font-size: 1.5rem; color: #2dd4bf; margin-top: 2rem; margin-bottom: 1rem; }
+    h3 { font-size: 1.25rem; color: #67e8f9; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+    p { margin-bottom: 1.2rem; color: #e2e8f0; }
+    blockquote { background: rgba(2, 132, 199, 0.1); border-left: 4px solid var(--accent-color); padding: 1rem 1.2rem; margin-bottom: 1.5rem; border-radius: 0 8px 8px 0; color: #7dd3fc; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+    ul, ol { margin-left: 1.8rem; margin-bottom: 1.5rem; color: #e2e8f0; }
+    li { margin-bottom: 0.4rem; }
+    code { font-family: "Fira Code", Monaco, Consolas, monospace; background: rgba(15, 23, 42, 0.8); color: #f472b6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.5rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.2rem; border: none; display: block; color: #f8fafc; font-size: 0.92em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
+    th, td { padding: 0.8rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: rgba(30, 41, 59, 0.5); }
+    a { color: var(--accent-color); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 1: Tổng Quan dApp Atomic Swap &amp; Lý Thuyết Cardano EUTxO Nền Tảng</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken<br>
+      <strong>Module 3:</strong> Atomic Swap Smart Contract (Hoán đổi nguyên tử / Limit Order P2P)
+    </blockquote>
+    <hr>
+    <h2>📋 Mục lục</h2>
+    <ol>
+      <li><a href="#sec1">Giới thiệu Bài toán Atomic Swap trong Web3</a></li>
+      <li><a href="#sec2">Phân tích Thiết kế dApp Swap (Roles &amp; Actions)</a></li>
+      <li><a href="#sec3">Mô hình Multi-asset UTxO &amp; Value Flattening trong Aiken</a></li>
+      <li><a href="#sec4">Xác thực Chữ ký (Verification) &amp; Output Validation</a></li>
+      <li><a href="#sec5">Cấu trúc Hệ thống Cardano: Collateral, Plutus Blueprint &amp; Reference Scripts</a></li>
+      <li><a href="#sec6">Lỗ Hổng Bảo Mật Double Satisfaction &amp; Common Design Patterns</a></li>
+      <li><a href="#sec7">Tổng kết &amp; Câu hỏi tư duy</a></li>
+    </ol>
+    <hr>
+    <h2 id="sec1">1. Giới thiệu Bài toán Atomic Swap trong Web3</h2>
+    <p>Trong thị trường tài chính phi tập trung (DeFi), nhu cầu hoán đổi (swap) tài sản giữa hai người dùng là một trong những ứng dụng cơ bản và quan trọng nhất.</p>
+    <h3>Bài toán niềm tin P2P thực tế</h3>
+    <p>Hãy tưởng tượng một kịch bản giao dịch thực tế:</p>
+    <ul>
+      <li><strong>Alice (Creator):</strong> Sở hữu 1,000 token <code>C2VN_coin</code> và muốn bán để lấy 50 ADA.</li>
+      <li><strong>Bob (Buyer):</strong> Sở hữu 50 ADA và muốn sở hữu 1,000 token <code>C2VN_coin</code>.</li>
+      <li><strong>Thách thức:</strong> Token <code>C2VN_coin</code> vừa được tạo ra, chưa được niêm yết trên bất kỳ sàn DEX AMM nào (như Minswap, SundaeSwap).</li>
+    </ul>
+    <p>Nếu Alice và Bob tự thỏa thuận giao dịch P2P truyền thống:</p>
+    <ul>
+      <li>Nếu Alice chuyển 1,000 <code>C2VN_coin</code> cho Bob trước &rarr; Bob có thể ôm token bỏ chạy mà không chuyển 50 ADA.</li>
+      <li>Nếu Bob chuyển 50 ADA cho Alice trước &rarr; Alice có thể không gửi token cho Bob.</li>
+    </ul>
+    <pre><code>Giao dịch P2P Truyền Thống (Rủi ro bùng tiền):
+Alice  ------------------ (1,000 C2VN_coin) ----------------->  Bob  (Có thể quỵt ADA!)
+Bob    --------------------- (50 ADA) ----------------------->  Alice (Có thể quỵt Token!)</code></pre>
+    <h3>Giải pháp Atomic Swap (Két Sắt Thông Minh)</h3>
+    <p><strong>Atomic Swap</strong> (Hoán đổi nguyên tử) dựa trên nguyên lý <strong>"All-or-Nothing"</strong> (Được ăn cả, ngã về không): Giao dịch chỉ có thể diễn ra thành công trọn vẹn cả 2 chiều, hoặc hoàn toàn không có gì thay đổi.</p>
+    <p>Smart Contract đóng vai trò như một <strong>Két sắt thông minh</strong>:</p>
+    <ol>
+      <li>Alice khóa 1,000 token <code>C2VN_coin</code> vào Smart Contract kèm theo tờ giấy quy định (Datum): <em>"Giao 1,000 C2VN_coin cho bất kỳ ai gửi đúng 50 ADA vào địa chỉ ví của Alice"</em>.</li>
+      <li>Bob nhìn thấy lệnh Swap này, tạo một giao dịch nạp 50 ADA vào ví của Alice.</li>
+      <li>Smart Contract thẩm định giao dịch: Nếu 50 ADA được chuyển đúng ví Alice, hợp đồng sẽ giải phóng 1,000 <code>C2VN_coin</code> gửi về ví Bob.</li>
+      <li>Nếu Bob trả thiếu tiền hoặc sai địa chỉ, giao dịch bị từ chối hoàn toàn, 1,000 <code>C2VN_coin</code> vẫn nằm an toàn trong két.</li>
+    </ol>
+    <pre><code>Atomic Swap Smart Contract:
++----------------+        1. Khóa Token + Datum (Cần 50 ADA)      +-----------------------------+
+| Alice (Creator)|  -------------------------------------------->  | Atomic Swap Smart Contract  |
++----------------+                                                 +-----------------------------+
+        ^                                                                         |
+        | 3. Nhận 50 ADA                                                          | 2. Nhận 1,000 C2VN_coin
+        |                                                                         v
++-----------------------------------------------------------------------------------------------+
+|                                    Bob (Buyer) - Nạp 50 ADA                                   |
++-----------------------------------------------------------------------------------------------+</code></pre>
+    <hr>
+    <h2 id="sec2">2. Phân tích Thiết kế dApp Swap (Roles &amp; Actions)</h2>
+    <h3>2.1. Các Vai Trò (Roles)</h3>
+    <ul>
+      <li><strong>Initiator / Creator:</strong> Người tạo lệnh Swap, nạp tài sản muốn bán vào Smart Contract và quy định tài sản cần thu về.</li>
+      <li><strong>Buyer / Fulfiller:</strong> Người duyệt danh sách Marketplace, nạp đủ tài sản theo yêu cầu để khớp lệnh và lấy tài sản bị khóa ra.</li>
+    </ul>
+    <h3>2.2. Các Hành Động (Actions / Redeemers)</h3>
+    <p>Hợp đồng Swap của chúng ta hỗ trợ 2 kịch bản tương tác (Redeemers):</p>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Hành động</th>
+            <th>Người thực hiện</th>
+            <th>Điều kiện kiểm tra chính</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Swap (Khớp lệnh)</strong></td>
+            <td><code>Buyer</code></td>
+            <td>1. Chống đòn tấn công Double Satisfaction (Chỉ 1 script input).<br>2. Người bán (<code>initiator</code>) phải nhận đủ số tiền yêu cầu trong Outputs.<br>3. UTxO script phải giải phóng đủ số lượng token đã cam kết.</td>
+          </tr>
+          <tr>
+            <td><strong>Cancel (Hủy lệnh)</strong></td>
+            <td><code>Creator</code></td>
+            <td>Phải có chữ ký hợp lệ của <code>initiator</code> trong <code>tx.extra_signatories</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <hr>
+    <h2 id="sec3">3. Mô hình Multi-asset UTxO &amp; Value Flattening trong Aiken</h2>
+    <h3>3.1. Cardano Multi-asset UTxO</h3>
+    <p>Khác với Ethereum lưu trữ token ERC-20 ở các hợp đồng riêng biệt, Cardano hỗ trợ <strong>Native Assets</strong>. Một UTxO duy nhất trên Cardano có thể chứa đồng thời Lovelace (ADA) và nhiều loại token khác.</p>
+    <p>Mỗi Native Token trên Cardano được định danh duy nhất bởi 2 thành phần:</p>
+    <ul>
+      <li><strong>Policy ID:</strong> Mã băm định danh chính sách đúc token (Hex String 28 bytes).</li>
+      <li><strong>Asset Name:</strong> Tên token dưới dạng chuỗi byte (Bytearray).</li>
+      <li>Lovelace (ADA) được biểu diễn bằng Policy ID rỗng <code>""</code> và Asset Name rỗng <code>""</code>.</li>
+    </ul>
+    <h3>3.2. Value Flattening trong Aiken</h3>
+    <p>Trong ngôn ngữ Aiken, cấu trúc <code>Value</code> biểu diễn danh sách lồng nhau của các tài sản. Để tiện so sánh và xử lý dữ liệu từ Datum, chúng ta định nghĩa kiểu <code>MValue</code>:</p>
+    <pre><code class="language-rust">pub type MValue =
+  Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;</code></pre>
+    <p>Aiken cung cấp các hàm hỗ trợ trong module <code>cardano/assets</code> và thư viện helper <code>vodka_value</code>:</p>
+    <ul>
+      <li><code>from_asset_list(mvalue)</code>: Chuyển đổi từ <code>MValue</code> phẳng về dạng <code>Value</code> chuẩn của Cardano.</li>
+      <li><code>value_geq(val_a, val_b)</code>: Kiểm tra xem <code>val_a</code> có lớn hơn hoặc bằng <code>val_b</code> trên mọi loại token tương ứng hay không.</li>
+    </ul>
+    <pre><code>MValue (Pairs) --------> from_asset_list() --------> Value --------> value_geq(Output_Value, Required_Value)</code></pre>
+    <hr>
+    <h2 id="sec4">4. Xác thực Chữ ký (Verification) &amp; Output Validation</h2>
+    <h3>4.1. Verification (Xác thực chữ ký)</h3>
+    <p>Khi Creator thực hiện <strong>Cancel</strong>, hợp đồng cần xác minh xem người gửi giao dịch có đúng là Creator hay không.</p>
+    <p>Trong Cardano Script Context, danh sách các Public Key Hash đã ký vào giao dịch nằm trong trường <code>tx.extra_signatories</code>. Aiken trích xuất Public Key Hash từ địa chỉ của Creator bằng hàm <code>address_pub_key(datum.initiator)</code>, sau đó kiểm tra:</p>
+    <pre><code class="language-rust">expect Some(pub_key) = address_pub_key(datum.initiator)
+key_signed(tx.extra_signatories, pub_key)</code></pre>
+    <h3>4.2. Output Validation (Duyệt Output kiểm tra thanh toán)</h3>
+    <p>Khi Buyer thực hiện <strong>Swap</strong>, Validator bắt buộc phải duyệt qua toàn bộ danh sách <code>tx.outputs</code> của giao dịch để tính tổng số tài sản được gửi đến địa chỉ ví của Creator (<code>datum.initiator</code>).</p>
+    <p>Chúng ta sử dụng hàm <code>get_all_value_to(tx.outputs, datum.initiator)</code> để gom toàn bộ <code>Value</code> hướng về ví Creator, sau đó kiểm tra điều kiện:</p>
+    <p><code>Tổng Value gửi tới Creator &gt;= Số tài sản yêu cầu trong Datum (to_receive)</code></p>
+    <hr>
+    <h2 id="sec5">5. Cấu trúc Hệ thống Cardano: Collateral, Plutus Blueprint &amp; Reference Scripts</h2>
+    <h3>5.1. Collateral (Tài sản thế chấp)</h3>
+    <ul>
+      <li><strong>Bản chất:</strong> Khi tương tác với Smart Contract trên Cardano, giao dịch phải ký kèm một UTxO chứa ADA thuần (thường là 5 ADA) làm <strong>Collateral</strong>.</li>
+      <li><strong>Mục đích:</strong> Ngăn ngừa các đợt tấn công DoS gây nghẽn Cardano Node. Nếu giao dịch thất bại ở Phase 2 Validation (lỗi logic Smart Contract), khoản Collateral này sẽ bị mạng lưới tịch thu. Nếu giao dịch thành công, Collateral vẫn nguyên vẹn trong ví người dùng.</li>
+    </ul>
+    <h3>5.2. Plutus Blueprint (<code>plutus.json</code> - CIP-0057)</h3>
+    <p>Khi biên dịch dự án Aiken bằng lệnh <code>aiken build</code>, hệ thống xuất ra file <code>plutus.json</code>. File này tuân theo chuẩn CIP-0057, đóng vai trò <strong>cầu nối giao tiếp</strong> giữa On-chain và Off-chain:</p>
+    <ul>
+      <li>Chứa đoạn mã <code>cborCompiled</code> đã được biên dịch thành bytecode Plutus Core.</li>
+      <li>Khai báo lược đồ Datum và Redeemer giúp SDK Off-chain (như MeshJS) serialize/deserialize dữ liệu chuẩn xác.</li>
+    </ul>
+    <h3>5.3. Reference Scripts (CIP-33) &amp; Inline Datum (CIP-31)</h3>
+    <p>Đây là hai cải tiến quan trọng giúp tối ưu hóa dApp trên Cardano:</p>
+    <ul>
+      <li><strong>Trước CIP-33:</strong> Mỗi giao dịch chi tiêu từ Script phải đính kèm lại toàn bộ đoạn mã biên dịch CBOR cồng kềnh (vài KB) vào giao dịch. Điều này khiến kích thước giao dịch phình to, dễ vượt ngưỡng giới hạn Tx Size (16 KB) và tốn phí giao dịch rất cao.</li>
+      <li><strong>Giải pháp Reference Scripts (CIP-33):</strong> Mã CBOR của Smart Contract chỉ cần deploy (khóa) 1 lần duy nhất tại một Reference UTxO trên chain. Các giao dịch sau này chỉ cần trỏ tới <code>reference_inputs</code> chứa UTxO đó.</li>
+      <li><strong>Lợi ích:</strong> Giảm tới 90% kích thước giao dịch (Tx Size) và tiết kiệm chi phí transaction fee đáng kể cho người dùng.</li>
+    </ul>
+    <hr>
+    <h2 id="sec6">6. Lỗ Hổng Bảo Mật Double Satisfaction &amp; Common Design Patterns</h2>
+    <h3>6.1. Kịch bản Tấn công Double Satisfaction</h3>
+    <p><strong>Double Satisfaction</strong> là một lỗ hổng bảo mật phổ biến trên các hệ thống EUTxO nếu lập trình viên không cẩn trọng.</p>
+    <p><strong>Kịch bản:</strong></p>
+    <ol>
+      <li>Alice tạo lệnh Swap #1: Bán 1,000 Token A lấy 50 ADA.</li>
+      <li>Alice lại tạo lệnh Swap #2: Bán 1,000 Token B cũng lấy 50 ADA.</li>
+      <li>Kẻ tấn công (Hacker) gom CẢ HAI UTxO Swap #1 và Swap #2 vào cùng một Transaction.</li>
+      <li>Trong phần Output, Hacker chỉ tạo <strong>DUY NHẤT 1 Output 50 ADA</strong> gửi cho Alice.</li>
+    </ol>
+    <p><strong>Hậu quả:</strong></p>
+    <ul>
+      <li>Validator của Swap #1 soi giao dịch, thấy Alice nhận được 50 ADA &rarr; Cho qua!</li>
+      <li>Validator của Swap #2 cũng soi cùng giao dịch đó, thấy Alice nhận được 50 ADA &rarr; Cho qua luôn!</li>
+      <li><strong>Kết quả:</strong> Hacker cuỗm mất cả 2 khoản Token A và Token B, nhưng Alice chỉ nhận được 50 ADA thay vì 100 ADA!</li>
+    </ul>
+    <pre><code>Cuộc tấn công Double Satisfaction (1 khoản thanh toán thỏa mãn 2 lệnh):
+Input 1 (Swap #1: Bán Token A lấy 50 ADA) \                                +-------------------+
+                                           ===> Transaction (Chỉ trả 50 ADA) ==> Output 1: 50 ADA cho Alice (Thỏa mãn cả 2!)
+Input 2 (Swap #2: Bán Token B lấy 50 ADA) /                                +-------------------+
+                                                                             ===> Output 2: Token A & B cho Hacker!</code></pre>
+    <h3>6.2. Các Giải Pháp Phòng Chống (Aiken Design Patterns)</h3>
+    <h4>Giải pháp 1: Single Script Input Check (Áp dụng trong dApp Swap)</h4>
+    <p>Đảm bảo mỗi giao dịch chỉ được phép chi tiêu <strong>duy nhất 1 Script UTxO</strong> đến từ hợp đồng này:</p>
+    <pre><code class="language-rust">let inputs_from_script = inputs_at(tx.inputs, own_address)
+let is_only_one_input_from_script =
+  when inputs_from_script is {
+    [_] -> True
+    _ -> False
+  }</code></pre>
+    <p>Nếu giao dịch có từ 2 script inputs trở lên, Validator lập tức trả về <code>False</code>.</p>
+    <h4>Giải pháp 2: Tagged Outputs / Datum Tagging (Mở rộng)</h4>
+    <p>Yêu cầu Output thanh toán phải đính kèm một nhãn Datum chỉ định rõ ràng ID của Input UTxO đang được thanh toán.</p>
+    <hr>
+    <h2 id="sec7">7. Tổng kết &amp; Câu hỏi tư duy</h2>
+    <h3>Tóm tắt bài học:</h3>
+    <ol>
+      <li>Atomic Swap hoạt động theo cơ chế "All-or-Nothing" giúp hoán đổi P2P an toàn không cần trung gian.</li>
+      <li>Tài sản trên Cardano được lưu dưới dạng Multi-asset UTxO và so sánh trong Aiken qua <code>value_geq</code>.</li>
+      <li>Reference Scripts (CIP-33) và Plutus Blueprint (CIP-0057) là hai chuẩn quan trọng tối ưu hạ tầng giao dịch.</li>
+      <li>Lỗ hổng Double Satisfaction được triệt hạ bằng điều kiện <code>is_only_one_input_from_script</code>.</li>
+    </ol>
+    <h3>Câu hỏi tư duy:</h3>
+    <ol>
+      <li><em>Tại sao việc dùng <code>is_only_one_input_from_script</code> lại giải quyết triệt để đòn tấn công Double Satisfaction? Nhược điểm của cách này đối với trải nghiệm người dùng là gì?</em></li>
+      <li><em>Nếu người mua gửi 51 ADA thay vì 50 ADA theo yêu cầu của Creator thì giao dịch Swap có thành công không? Tại sao?</em></li>
+      <li><em>Sự khác biệt chính giữa Inline Datum (CIP-31) và Datum Hash truyền thống là gì?</em></li>
+    </ol>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

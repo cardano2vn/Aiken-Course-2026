@@ -29,5 +29,7 @@ onchain/build/
 # Debug
 npm-debug.log*
 
+# Homework Solutions
+*_solution.*
 
-scripts/stop-oracle-implemented.ts
+docs/video_resources/

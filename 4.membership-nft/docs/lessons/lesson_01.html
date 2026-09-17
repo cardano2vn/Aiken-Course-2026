@@ -1,0 +1,165 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#ung-dung-thuc-te">1. Ứng dụng Thực tế của Membership NFT</a></li>
+    <li><a href="#trai-nghiem-dapp">2. Trải nghiệm dApp</a></li>
+    <li><a href="#kien-truc-3-lop">3. Kiến trúc 3 Lớp của dApp</a></li>
+    <li><a href="#vi-sao-can-oracle">4. Tại sao cần Oracle Validator đi kèm?</a></li>
+    <li><a href="#state-thread-token">5. State Thread Token (STT) - "Sợi chỉ" liên kết trạng thái</a></li>
+    <li><a href="#parameterized-script">6. Parameterized Script (Script Tham số hóa)</a></li>
+    <li><a href="#one-shot-policy">7. One-Time (One-Shot) Minting Policy</a></li>
+  </ul>
+</blockquote>
+
+<hr />
+
+<h2 id="ung-dung-thuc-te">1. Ứng dụng Thực tế của Membership NFT</h2>
+<p>Trong thế giới Web3 và blockchain, <strong>NFT (Non-Fungible Token)</strong> không chỉ đơn thuần là các tác phẩm nghệ thuật kỹ thuật số để sưu tầm hay đầu tư. Một trong những ứng dụng thực tế và mạnh mẽ của NFT là làm <strong>Thẻ thành viên số (Membership NFT)</strong> hoặc <strong>Vé điện tử (Event Pass / Token-Gated Access)</strong>.</p>
+
+<h4>Các bài toán thực tế giải quyết bằng Membership NFT:</h4>
+<ol>
+  <li><strong>Chương trình Khách hàng Thân thiết (Loyalty Program / VIP Membership):</strong> Doanh nghiệp phát hành thẻ khách hàng thân thiết/thẻ VIP số hóa. Khách hàng nắm giữ sẽ được hưởng các quyền lợi tùy theo cấp độ như ưu đãi giảm giá, tích điểm, quà tặng...</li>
+  <li><strong>Quyền truy cập Độc quyền (Token-Gated Access):</strong> Người dùng sở hữu NFT có thể truy cập vào nội dung, sản phẩm, dịch vụ hoặc cộng đồng độc quyền.</li>
+  <li><strong>Vé tham dự Sự kiện (Event Pass):</strong> Phát hành vé ca nhạc, xem phim, hội thảo, ...</li>
+  <li><strong>Chứng chỉ On-chain (Certificate):</strong> NFT có thể đại diện cho chứng chỉ hoàn thành khóa học, đạt thành tích hoặc tham gia một chương trình. Chứng chỉ được lưu trên blockchain, minh bạch và dễ dàng xác minh.</li>
+</ol>
+
+<h4>Điểm đặc biệt của dApp Membership NFT:</h4>
+<ul>
+  <li><strong>Số thứ tự tự động tăng:</strong> Tên của mỗi NFT khi mint sẽ được tự động gán số thứ tự kế tiếp một cách tuần tự (ví dụ: <code>C2VN Membership #1</code>, <code>C2VN Membership #2</code>, <code>C2VN Membership #3</code>, ...).</li>
+  <li><strong>Không thể trùng lặp, không thể tự ý lựa chọn:</strong> Không ai có thể mint trùng số thứ tự của người khác hoặc tự ý <em>lựa chọn</em> số thứ tự.</li>
+  <li><strong>Cơ chế phi tập trung (Trustless):</strong> Admin không thể can thiệp vào số thứ tự hay phát hành NFT "chui". Mọi quy tắc đều được thực thi và kiểm tra bởi Smart Contract.</li>
+</ul>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Trong thế giới thực, các số thứ tự đặc biệt hoặc thấp thường được ưa chuộng và có thể có giá trị cao hơn. DApp Membership NFT đảm bảo phân bổ công bằng: không ai có quyền lựa chọn số thứ tự cho riêng mình.</p>
+</blockquote>
+
+<hr />
+
+<h2 id="trai-nghiem-dapp">2. Trải nghiệm dApp</h2>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> Chi tiết các bước cài đặt và chạy dApp có trong tài liệu <a href="https://github.com/cardano2vn/Aiken-Course-2026/blob/main/4.membership-nft/README.md" target="_blank" rel="noopener">README.md</a>.</p>
+</blockquote>
+
+<ol>
+  <li>Mở dApp, kết nối ví</li>
+  <li>Nhấn Mint → Ký giao dịch</li>
+  <li>Nhận C2VN Membership NFT</li>
+  <li>Kiểm tra trên ví</li>
+</ol>
+
+<hr />
+
+<h2 id="kien-truc-3-lop">3. Kiến trúc 3 Lớp của dApp</h2>
+<p style="text-align: center;"><img src="../resources/lesson-01-architecture.png" alt="Kiến trúc 3 lớp của dApp Membership NFT" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>DApp Membership NFT tuân thủ kiến trúc <strong>3 lớp</strong> (Front-end, Off-chain, On-chain) giống các dApp trước đây. Tuy nhiên, lớp On-chain có sự tham gia của <strong>3 validators</strong>: trong đó có <strong>1 Spending Script</strong> (<code>oracle.ak</code>) và <strong>2 Minting Policy Scripts</strong> (<code>one_shot.ak</code>, <code>nft_mint.ak</code>).</p>
+
+<h4>Minting Policy Script là gì?</h4>
+<p><strong>Minting Policy Script</strong> là loại script sử dụng để kiểm soát việc <strong>Đúc (Mint)</strong> hoặc <strong>Đốt (Burn)</strong> các Native Tokens. Nó định nghĩa các quy tắc tạo nên <strong>chính sách đúc tiền</strong>.</p>
+
+<ul>
+  <li><strong>Policy ID (Mã định danh chính sách):</strong> Chính là <strong>mã băm (Hash)</strong> của Minting Script.<br />Đây là thành phần quan trọng để định danh tài sản, đại diện cho "họ" tài sản được tạo bởi chính sách đó. Thành phần còn lại là <code>Asset Name</code>, đại diện cho từng loại tài sản trong "họ" tài sản đó. Hai thành phần này tạo nên 1 định danh đầy đủ của tài sản (<code>PolicyId</code> + <code>AssetName</code>).<br />Bất cứ khi nào một giao dịch muốn đúc hoặc đốt token, node Cardano sẽ bắt buộc phải chạy Minting Policy Script tương ứng với policy ID của token đó để verify giao dịch.</li>
+  <li><strong>Điều kiện kích hoạt:</strong> Kích hoạt khi trường <strong>Mint (<code>tx.mint</code>)</strong> của giao dịch có số lượng token khác 0 (&gt; 0 là đúc, &lt; 0 là đốt với số lượng tương ứng).</li>
+  <li><strong>Không có Datum:</strong> Minting Policy Script chỉ nhận <code>Redeemer</code>, <code>PolicyId</code> và <code>Transaction</code> làm tham số. Vì không quản lý việc chi tiêu UTxO, nó <strong>hoàn toàn không có tham số Datum</strong>.</li>
+</ul>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Trong mô hình eUTxO, trạng thái (state) được lưu giữ cục bộ tại UTxO (thông qua Datum). Trong các loại script, chỉ có Spending validator quản lý UTxO, nên chỉ có nó mới có khả năng quản lý trạng thái.</p>
+</blockquote>
+
+<hr />
+
+<h2 id="vi-sao-can-oracle">4. Tại sao cần Oracle Validator đi kèm?</h2>
+
+<h4>Vấn đề: Minting Policy không thể tự nhớ số thứ tự</h4>
+<p>Yêu cầu của dApp là mỗi Membership NFT đúc ra phải mang số thứ tự tăng dần (<code>#1</code>, <code>#2</code>, <code>#3</code>...) và nhiệm vụ này phải được giải quyết ở on-chain 1 cách tin cậy và minh bạch. Tuy nhiên, vì Minting Policy là một hợp đồng <strong>phi trạng thái</strong>, nếu sử dụng nó một cách đơn lẻ thì không giải quyết được yêu cầu này.</p>
+
+<h4>Giải pháp: Dùng thêm một Spending Validator để lưu trữ và quản lý trạng thái</h4>
+<p>Với vai trò là "nguồn sự thật" chúng ta gọi nó là <strong>Oracle Validator</strong>. Validator này sẽ khóa một <strong>Oracle UTxO</strong> với Datum lưu giữ số thứ tự tiếp theo cần mint, cùng với các thông tin thanh toán.</p>
+
+<pre><code>pub type OracleDatum {
+  next_nft_index: Int,    // Số thứ tự tiếp theo cần mint (1, 2, 3, ...)
+  min_price: Int,         // Phí mint cố định trả cho Admin (Lovelace)
+  admin_address: Address, // Địa chỉ nhận phí của Admin
+}</code></pre>
+
+<h4>Cơ chế phối hợp trong cùng một giao dịch:</h4>
+<ol>
+  <li><strong>Spending Validator (<code>oracle.ak</code>):</strong> Cho phép chi tiêu Oracle UTxO cũ (Datum <code>next_nft_index = N</code>) và bắt buộc tạo ra Oracle UTxO mới với số thứ tự được cập nhật <code>next_nft_index = N + 1</code>.</li>
+  <li><strong>Minting Validator (<code>nft_mint.ak</code>):</strong> Đọc số N từ Oracle UTxO đầu vào và chỉ cho phép mint đúng 1 NFT mang tên <code>"C2VN Membership #N"</code>.</li>
+</ol>
+
+<p>Sự kết hợp này cho phép dApp sở hữu một bộ đếm tuần tự hoàn toàn phi tập trung và minh bạch!</p>
+
+<p>Chúng ta tiếp tục đến với 1 vấn đề quan trọng khác đã được chỉ ra ở module 1: Làm thế nào để chống giả mạo Oracle UTXO? Làm sao để định danh nó một cách chính xác?</p>
+<p>Trên Cardano, một mẫu thiết kế phổ biến để giải quyết vấn đề này là sử dụng <strong>State Thread Token</strong>.</p>
+
+<hr />
+
+<h2 id="state-thread-token">5. State Thread Token (STT) - "Sợi chỉ" liên kết trạng thái</h2>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Tham khảo thêm: <a href="https://aiken-lang.org/fundamentals/common-design-patterns#state-thread-tokens-aka-stt" target="_blank" rel="noopener">Aiken Design Patterns - State Thread Tokens</a></p>
+</blockquote>
+
+<p>Để đảm bảo <strong>State UTxO</strong> không bị "giả mạo", chúng ta gắn một <strong>NFT</strong> vào nó để đánh dấu, NFT này chính là <strong>State Thread Token (STT)</strong>. Chỉ có UTxO nào chứa STT thì mới được coi là State UTxO chính thức, nắm giữ trạng thái hợp lệ của dApp.</p>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 Để dễ hình dung, hãy tưởng tượng STT như một <em><strong>"chiếc gậy tiếp sức"</strong></em> trong một cuộc thi chạy tiếp sức. Chỉ người đang cầm chiếc gậy mới có quyền tiếp tục cuộc đua. Và khi hoàn thành lượt chạy, họ phải trao gậy cho người tiếp theo.</p>
+</blockquote>
+
+<p>Trong dApp này, <strong>State UTxO</strong> là UTxO chứa dữ liệu Oracle (<strong>Oracle UTxO</strong>), và chúng ta gọi State Thread Token là <strong>Oracle NFT</strong> hay <strong>Oracle Token</strong>.</p>
+
+<p>Làm thế nào để tạo ra được NFT định danh độc nhất mà không ai có thể mint thêm token thứ hai y hệt?</p>
+<p>Chúng ta đến với một mẫu thiết kế phổ biến tiếp theo trên Cardano: <strong>One-time (One-shot) minting policy</strong>. Nhưng trước khi đến với mẫu thiết kế này, hãy cùng tìm hiểu một kỹ thuật nền tảng trong Plutus: <strong>Parameterized Script</strong>.</p>
+
+<hr />
+
+<h2 id="parameterized-script">6. Parameterized Script (Script Tham số hóa)</h2>
+<p>Trong mô hình smart contract của Cardano, một validator có thể được định nghĩa để nhận các tham số khởi tạo. Điều này tạo ra sự linh hoạt và khả năng tái sử dụng chỉ với một lần code. Với mỗi bộ tham số khác nhau, chúng ta sẽ có một phiên bản script khác nhau, và do đó script hash (hay policy Id) và địa chỉ script cũng sẽ khác nhau.</p>
+
+<p>Trong Aiken, một parameterized script được định nghĩa như sau:</p>
+<pre><code>// one_shot là 1 parameterized script, nhận vào 1 tham số
+validator one_shot(utxo_ref: OutputReference) {
+  // logic của one-shot minting policy
+}</code></pre>
+
+<p><strong>Sử dụng:</strong> Parameterized script sau khi biên dịch sẽ được <em>apply</em> tham số ở off-chain code, thu được script cbor đầy đủ để truyền vào giao dịch.</p>
+<pre><code>// apply tham số utxo_ref vào one_shot script
+const oneShotCbor = applyParamsToScript(compiledOneShotCode, [
+  mOutputReference(paramUtxo.txHash, paramUtxo.outputIndex),
+]);</code></pre>
+
+<hr />
+
+<h2 id="one-shot-policy">7. One-Time (One-Shot) Minting Policy</h2>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Tham khảo thêm: <a href="https://aiken-lang.org/fundamentals/common-design-patterns#one-shot-minting-policies" target="_blank" rel="noopener">Aiken Design Patterns - One-Shot Minting Policies</a></p>
+</blockquote>
+
+<h4>Vấn đề đặt ra:</h4>
+<p>Trên Cardano, chúng ta có các chuẩn NFT như CIP-25, CIP-68, ... Tuy nhiên, đây chủ yếu là các quy ước về cách tạo và quản lý NFT, mà không có rào cản kỹ thuật nào ngăn nhà phát hành âm thầm mint thêm token thứ 2 giống hệt. Vậy có giải pháp kỹ thuật nào để tạo ra token độc nhất trên Cardano mà không phụ thuộc vào bất kỳ ai không?</p>
+
+<h4>One-Shot Policy: Cơ chế tạo NFT thực sự</h4>
+<p>One-shot Minting Policy được <strong>tham số hóa bằng một UTxO</strong> (thông qua mã tham chiếu của nó <code>utxo_ref: OutputReference</code>). Chúng ta gọi UTxO này là <strong>param UTxO</strong>. Trong giao dịch mint token, script cần đảm bảo 2 điều kiện:</p>
+<ol>
+  <li>Chỉ có 1 token dưới policy ID này được mint ra.</li>
+  <li>Param UTxO phải được tiêu thụ trong giao dịch.</li>
+</ol>
+
+<p>Với thiết kế này, sau lần mint đầu tiên, <strong>param UTxO bị tiêu thụ</strong>, không còn tồn tại trên blockchain. Do đó điều kiện 2 của phiên bản script này sẽ không thể thỏa mãn thêm bất kỳ 1 lần nào nữa.</p>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>💡 Param UTxO như một chiếc “vé dùng một lần”. Sau khi sử dụng, nó sẽ bị tiêu hủy và không dùng lại được nữa.</p>
+</blockquote>
+
+<p>Nếu nhà phát hành cố gắng mint thêm, họ sẽ phải tiêu thụ một UTxO khác có <code>OutputReference</code> khác. Khi đó, họ đang sử dụng <strong>một parameter khác</strong> -&gt; tạo ra <strong>một phiên bản minting policy khác</strong> và do đó có <strong>policy ID khác</strong>.</p>
+
+<p>Kết quả là, minting policy với <code>param UTxO</code> ban đầu chỉ có thể mint <strong>đúng 1 lần duy nhất</strong> trong toàn bộ lịch sử blockchain.</p>
+
+<p>Đó chính là lý do nó được gọi là <strong>One-Shot (One-Time) Minting Policy</strong>. Và đây là giải pháp để tạo ra <strong>NFT thực sự</strong> trên Cardano, được <strong>đảm bảo bởi chính mã nguồn Minting Script!</strong></p>
+
+<hr />
+
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ đi vào chi tiết mã nguồn Aiken của cả 3 validators và phân tích cơ chế Multi-Validator với 5 chốt chặn an toàn. Hẹn gặp lại các bạn!</p>

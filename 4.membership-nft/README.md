@@ -1,6 +1,6 @@
 # 🎯 Membership NFT dApp
 
-Hệ thống Membership NFT được xây dựng hoàn toàn trên Cardano (Preprod Testnet) dành cho khóa học **Building with Aiken**. Dự án cho phép tạo ra các thẻ hội viên NFT có số thứ tự duy nhất, được quản lý chuyên nghiệp thông qua một Oracle Smart Contract để đảm bảo tính minh bạch và bảo mật.
+Hệ thống Membership NFT được xây dựng trên Cardano (Preprod Testnet) dành cho khóa học **Building with Aiken**. Dự án cho phép tạo ra các thẻ hội viên NFT có số thứ tự duy nhất tăng dần, được quản lý thông qua một Oracle Smart Contract để đảm bảo tính minh bạch và bảo mật.
 
 ## 🏗 Kiến trúc Dự án
 
@@ -10,6 +10,17 @@ Dự án này là một monorepo bao gồm 4 thành phần chính:
 - `offchain/`: Thư viện offchain TypeScript sử dụng **[MeshJS](https://meshjs.dev/)**. Đảm nhiệm việc xây dựng các giao dịch tương tác với Oracle, NFT Minting contract và truy vấn dữ liệu từ blockchain.
 - `frontend/`: Giao diện người dùng Web3 hiện đại được xây dựng bằng **Next.js**, **Tailwind CSS**, và **Framer Motion**.
 - `scripts/`: Chứa các script quản trị (`setup-oracle.ts`, `stop-oracle.ts`) để khởi tạo hoặc thu hồi Oracle Contract trên mạng.
+
+## 📚 Tài liệu & Giáo trình Bài giảng
+
+Chi tiết bài giảng được biên soạn đầy đủ tại thư mục [`docs/lessons/`](./docs/lessons/):
+
+- **[Giáo trình Toàn diện (lecture.md)](./docs/lessons/lecture.md)**: Tổng hợp nội dung 3 bài giảng dạng Markdown.
+
+Các bài giảng chi tiết dạng HTML:
+- **[Bài 1: Kiến trúc Membership NFT & Các Pattern Cốt lõi](./docs/lessons/lesson_01.html)**
+- **[Bài 2: On-chain Code & Cơ chế Multi-Validator](./docs/lessons/lesson_02.html)**
+- **[Bài 3: Off-Chain, Frontend & DApp Lifecycle](./docs/lessons/lesson_03.html)**
 
 ## 🚀 Hướng dẫn Cài đặt & Chạy dApp
 
@@ -43,7 +54,6 @@ MNEMONIC="word1 word2 ... word24"
 
 Sau đó, chạy lệnh setup để nhận **Oracle Policy ID**:
 ```bash
-cd scripts
 npm run setup
 ```
 Sau khi lệnh chạy thành công, bạn sẽ nhận được output sau:
@@ -64,16 +74,29 @@ NEXT_PUBLIC_ORACLE_POLICY_ID="mã policy id nhận được từ bước 4"
 ### 6. Chạy Giao diện Front-end
 Khởi động máy chủ phát triển để bắt đầu Mint NFT:
 ```bash
-cd frontend
 npm run dev
 ```
+
 Mở trình duyệt và truy cập: `http://localhost:3000`
 
 ## 💡 Bài tập Thực hành (Dành cho học viên)
-- **Gallery IPFS**: Implement hàm trích xuất `imageUrl` từ Metadata CIP-25 trong `MyNFTs.tsx` để hiển thị.
-- **Stop Oracle**: Implement script stop oracle để thu hồi Oracle Token, ngừng việc mint NFT trong bộ sưu tập.
+
+### 1. On-chain: Cập nhật giá mint linh hoạt (`UpdatePrice`)
+- Chuyển `admin_address` thành tham số hợp đồng của `oracle.ak`.
+- Bổ sung nhánh `UpdatePrice` vào `OracleRedeemer`: yêu cầu chữ ký Admin, giá mới `min_price > 0` và khác giá cũ, **bắt buộc giữ nguyên `next_nft_index`**.
+
+### 2. On-chain: Vá lỗ hổng Spam tăng Index không mint NFT
+- Khắc phục kịch bản kẻ tấn công kích hoạt riêng lẻ `oracle.ak` mà không gọi `nft_mint.ak`.
+- Một số giải pháp gợi ý trong bài học số 2: (1) Lưu `nft_mint_policy` trong Oracle Datum, (2) Dựa vào State Thread Token, hoặc (3) Sử dụng Multi-purpose Validator.
+
+### 3. Off-chain: Hoàn thiện kịch bản đóng hệ thống (`stop-oracle.ts`)
+- Implement script `scripts/stop-oracle.ts` để hủy Oracle Token và đóng bộ sưu tập.
+
+### 4. Frontend: Tích hợp hiển thị ảnh NFT từ IPFS (`MyNFTs.tsx`)
+- Hoàn thiện logic trích xuất `imageUrl` từ Metadata CIP-25 trong component `frontend/src/components/MyNFTs.tsx` để hiển thị hình ảnh thẻ thành viên lên thư viện cá nhân.
 
 ---
-*Dự án này được xây dựng như một bản demo phục vụ cho khóa học lập trình Cardano. Vui lòng cân nhắc kỹ trước khi sử dụng trong môi trường production.*
+> [!WARNING]
+> Đây là phiên bản học tập phục vụ việc thực hành Cardano và Aiken, với một số giới hạn và lỗ hổng có chủ đích để phục vụ bài học. Hãy đọc phần phân tích bảo mật trong tài liệu bài giảng trước khi sử dụng thiết kế này cho ứng dụng thực tế.
 
 *Happy Coding! 🚀*

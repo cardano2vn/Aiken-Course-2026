@@ -2,5 +2,18 @@
   "name": "membership-nft",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["offchain", "frontend", "scripts"]
+  "workspaces": ["offchain", "frontend", "scripts"],
+  "scripts": {
+    "dev": "npm -w frontend run dev",
+    "build": "npm -w frontend run build",
+    "setup": "npm -w scripts run setup",
+    "stop": "npm -w scripts run stop"
+  },
+  "dependencies": {
+    "@meshsdk/core": "^1.9.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
 }

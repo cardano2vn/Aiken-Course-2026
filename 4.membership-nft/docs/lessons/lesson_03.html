@@ -1,0 +1,317 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#luong-tuong-tac">1. Luồng Tương tác Front-end &amp; Off-chain</a></li>
+    <li><a href="#vong-doi-dapp">2. Vòng đời DApp</a></li>
+    <li><a href="#trien-khai-chi-tiet">3. Triển khai Chi tiết</a></li>
+    <li><a href="#bai-tap-thuc-hanh">4. Bài tập Thực hành</a></li>
+    <li><a href="#tai-lieu-tham-khao">5. Tài liệu Tham khảo &amp; Đọc thêm</a></li>
+  </ul>
+</blockquote>
+
+<hr />
+
+<h2 id="luong-tuong-tac">1. Luồng Tương tác Front-end &amp; Off-chain</h2>
+<p>Sơ đồ dưới đây mô tả chi tiết luồng tương tác giữa các component trên giao diện (Front-end Next.js) và lớp Off-chain trong quá trình kết nối ví, đọc trạng thái Oracle và điều phối giao dịch:</p>
+
+<p style="text-align: center;"><img src="../resources/lesson-03-frontend-offchain.png" alt="Kiến trúc tương tác Frontend &amp; Off-chain" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<h4>1.1. Các Component Giao diện</h4>
+<p>Kiến trúc giao diện dApp được module hóa thành các component chuyên biệt:</p>
+
+<ol>
+  <li><strong><code>WalletConnect</code> (Kết nối ví &amp; Quản trị tài khoản):</strong>
+    <ul>
+      <li><strong>Tương tác Ví:</strong> Kết nối hai chiều với các ví Web3 trên trình duyệt (Eternl, Lace, ...).</li>
+      <li><strong>Cung cấp Context:</strong> Lưu giữ các trạng thái ví vào React Context, cung cấp trực tiếp cho:
+        <ul>
+          <li><code>MintSection</code>: Cung cấp đối tượng ví để ký (<code>wallet.signTx</code>) và phát tán giao dịch (<code>wallet.submitTx</code>).</li>
+          <li><code>MyNFTs</code>: Cung cấp kết nối để quét danh mục tài sản phục vụ cho việc lọc và hiển thị các thẻ thành viên người dùng sở hữu.</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><strong><code>CollectionInfo</code> (Bảng thông tin Bộ sưu tập):</strong>
+    <ul>
+      <li>Nhận dữ liệu trạng thái từ hàm off-chain <code>getOracleData</code> để hiển thị các thông tin của bộ sưu tập:
+        <ul>
+          <li><strong>Số lượng đã phát hành (Minted)</strong></li>
+          <li><strong>Giá mint tối thiểu (Min Price tính theo ADA)</strong></li>
+          <li><strong>Policy ID của bộ sưu tập</strong></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><strong><code>MintSection</code> (Điều phối Mint NFT &amp; Ký gửi Giao dịch):</strong>
+    <ul>
+      <li><strong>Kiểm tra số dư:</strong> Đảm bảo ví có đủ ≥ minPrice + 2 ADA (bao gồm giá mint, phí mạng dự tính và lượng ADA khóa kèm Oracle UTxO để đáp ứng điều kiện min-UTxO).</li>
+      <li><strong>Khởi tạo Giao dịch:</strong> Khi người dùng nhấn nút <em>"MINT NOW"</em>, component kích hoạt hàm <code>buildMintNftTx</code> từ tầng Off-chain để tạo giao dịch thô.</li>
+      <li><strong>Ký và Phát tán:</strong> Yêu cầu ví mở cửa sổ xác nhận ký và phát tán giao dịch lên blockchain Cardano.</li>
+      <li><strong>Cập nhật Tiến trình:</strong> Liên tục truyền trạng thái giao dịch (<code>status</code>) sang component <code>TxStatus</code> để hiển thị tiến độ cho người dùng.</li>
+    </ul>
+  </li>
+  <li><strong><code>TxStatus</code> (Hiển thị trạng thái giao dịch):</strong><br /> Đóng vai trò như một lớp phủ giao
+    diện tương tác (modal overlay), phản hồi trực quan 8 trạng thái xuyên suốt vòng đời giao dịch, từ lúc bắt đầu cho
+    đến khi giao dịch hoàn tất hoặc thất bại.
+    <ul>
+      <li><strong>Bảo vệ thao tác:</strong> Khi giao dịch đang được xử lý, overlay sẽ vô hiệu hóa các nút bấm trên màn hình nhằm ngăn chặn hành vi nhấp đúp hoặc gửi trùng lặp giao dịch ngoài ý muốn.</li>
+    </ul>
+  </li>
+  <li><strong><code>MyNFTs</code> (Thư viện cá nhân):</strong><br /> Tự động quét danh mục tài sản từ ví, lọc đúng Policy ID của dự án và hiển thị các thẻ thành viên mà người dùng đang sở hữu.</li>
+</ol>
+
+<hr />
+
+<h4>1.2. Lớp Off-chain</h4>
+<p>Lớp off-chain đóng vai trò cầu nối giữa giao diện người dùng và hợp đồng thông minh on-chain, thực hiện 2 nhiệm vụ cốt lõi:</p>
+<ul>
+  <li><strong><code>getOracleData</code>:</strong> Quét và giải mã Oracle Datum từ Oracle UTxO đang hoạt động trên mạng lưới → Cung cấp State cho <code>CollectionInfo</code> hiển thị và cho <code>MintSection</code> kiểm tra điều kiện mint. Dữ liệu này đồng thời là đầu vào bắt buộc của hàm dựng giao dịch <code>buildMintNftTx</code>.</li>
+  <li><strong><code>buildMintNftTx</code>:</strong> Nhận yêu cầu từ <code>MintSection</code> để lắp ráp giao dịch mint NFT tuân thủ chặt chẽ các quy tắc ràng buộc của cả hai validator <code>oracle.ak</code> và <code>nft_mint.ak</code>.</li>
+</ul>
+
+<hr />
+
+<h2 id="vong-doi-dapp">2. Vòng đời DApp</h2>
+<p>Hệ thống Membership NFT vận hành tuần tự qua <strong>3 giai đoạn</strong>, mỗi giai đoạn được đại diện bởi một loại giao dịch đặc thù:</p>
+<ul>
+  <li><strong>Giai đoạn 1: Khởi tạo:</strong> Admin chạy 1 giao dịch duy nhất để tạo State Thread Token (Oracle NFT), sau đó nạp token này vào địa chỉ hợp đồng <code>oracle.ak</code> kèm dữ liệu Datum với số thứ tự khởi đầu bằng 1 → <strong>Oracle UTxO đầu tiên</strong>.</li>
+  <li><strong>Giai đoạn 2: Vận hành:</strong> Người dùng mint Membership NFT theo chuẩn CIP-25. Mỗi lượt mint thành công sẽ tiêu thụ Oracle UTxO hiện tại và chuyển dịch trạng thái sang một Oracle UTxO mới mang số thứ tự tăng dần (<code>#N + 1</code>).</li>
+  <li><strong>Giai đoạn 3: Đóng hệ thống:</strong> Khi muốn dừng phát hành vĩnh viễn, Admin thực hiện giao dịch đóng hệ thống, tiêu thụ Oracle UTxO cuối cùng và đốt vĩnh viễn Oracle Token.</li>
+</ul>
+
+<hr />
+
+<h2 id="trien-khai-chi-tiet">3. Triển khai Chi tiết</h2>
+
+<h4>3.1. Giao dịch Khởi tạo (<code>setup-oracle.ts</code>)</h4>
+<p>Trước khi dApp có thể hoạt động, Admin phải chạy script <code>setup-oracle.ts</code> một lần duy nhất để mint Oracle NFT và khởi tạo Oracle UTxO.</p>
+
+<p><strong>Bước 1: Chọn Param UTxO</strong><br /> Truy vấn danh sách UTxO trong ví admin và chọn UTxO đầu tiên làm <code>paramUtxo</code>:</p>
+<pre><code>const adminUtxos = await adminWallet.getUtxos();
+const paramUtxo = adminUtxos[0]!;</code></pre>
+
+<p><strong>Bước 2: Apply Parameters cho Scripts &amp; Tính địa chỉ</strong><br /> Sử dụng các hàm trợ giúp để tính toán mã CBOR, Policy ID của One-shot, và địa chỉ Oracle.</p>
+<pre><code>const oneShotCbor = getOneShotCbor(paramUtxo.input);
+const oracleNftPolicyId = resolveScriptHash(oneShotCbor, "V3");
+const { oracleAddress } = getMembershipScripts(oracleNftPolicyId);</code></pre>
+
+<p><strong>Bước 3: Chuẩn bị Oracle Datum khởi tạo</strong><br /> Khởi tạo trạng thái ban đầu cho Oracle theo đúng cấu trúc <code>OracleDatum</code> của Aiken, gồm 3 dữ liệu: Số thứ tự (bắt đầu từ <code>#1</code>), mức giá mint cơ sở (<code>MINT_PRICE_LOVELACE</code> khai báo trong file <code>.env</code>), và địa chỉ Admin nhận tiền:</p>
+<pre><code>const { pubKeyHash, stakeCredentialHash } = deserializeAddress(adminAddress);
+const initialDatum = mConStr0([
+  1,                                               // first index = 1
+  MINT_PRICE_LOVELACE,                             // min_price (lovelace)
+  mPubKeyAddress(pubKeyHash, stakeCredentialHash), // admin_address
+]);</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Cơ chế đóng gói kiểu <code>Address</code> sang Plutus Data:</strong><br /> Trên hợp đồng Aiken, <code>Address</code> không phải là chuỗi địa chỉ Bech32 (<code>addr_test1...</code>) mà là cấu trúc dữ liệu gồm <code>payment_credential</code> và <code>stake_credential</code>. Khi chuyển sang biểu diễn Plutus, nó là một loạt các constructor lồng nhau. Để đơn giản hóa việc tạo giá trị Address dạng Plutus Data, chúng ta sử dụng các hàm trợ giúp của Mesh:<br /> - <strong><code>deserializeAddress</code>:</strong> Bóc tách chuỗi địa chỉ Bech32 thành cặp mã băm 28-byte (<code>pubKeyHash</code> và <code>stakeCredentialHash</code>).<br /> - <strong><code>mPubKeyAddress</code>:</strong> Đóng gói 2 mã băm trên thành biểu diễn Plutus Data của <code>Address</code>, giúp hợp đồng on-chain nhận diện chính xác địa chỉ ví.</p>
+</blockquote>
+
+<p><strong>Bước 4: Xây dựng, Ký và Gửi Setup Transaction</strong><br /> Sử dụng <code>MeshTxBuilder</code> để xây dựng giao dịch: tiêu thụ đúng <code>paramUtxo</code> đã cam kết, mint đúng 1 Oracle Token (STT), chuyển token này vào địa chỉ script <code>oracleAddress</code> kèm <code>initialDatum</code>. Sau đó ký và submit giao dịch lên mạng lưới:</p>
+<pre><code>const unsignedTx = await txBuilder
+  // Tiêu thụ paramUtxo (đảm bảo điều kiện của one-shot)
+  .txIn(
+    paramUtxo.input.txHash,
+    paramUtxo.input.outputIndex,
+    paramUtxo.output.amount,
+    paramUtxo.output.address
+  )
+  // Mint +1 Oracle Token bằng one-shot policy
+  .mintPlutusScriptV3()
+  .mint("1", oracleNftPolicyId, oracleTokenNameHex)
+  .mintingScript(oneShotCbor)
+  .mintRedeemerValue(mConStr0([])) // Action::Minting (index 0)
+  // Gửi Oracle Token đến oracle address với datum khởi tạo
+  .txOut(oracleAddress, [{ unit: oracleNftPolicyId + oracleTokenNameHex, quantity: "1" }])
+  .txOutInlineDatumValue(initialDatum)
+
+  .txInCollateral(
+    collateral.input.txHash,
+    collateral.input.outputIndex,
+    collateral.output.amount,
+    collateral.output.address
+  )
+  .changeAddress(adminAddress)
+  .selectUtxosFrom(adminUtxos)
+  .complete();
+
+const signedTx = await adminWallet.signTx(unsignedTx);
+const txHash = await adminWallet.submitTx(signedTx);</code></pre>
+
+<p><strong>Bước 5: In ra ORACLE_POLICY_ID để cấu hình Frontend</strong><br /> Sau khi giao dịch được gửi thành công, script sẽ in ra <code>oracleNftPolicyId</code> để đưa vào cấu hình biến môi trường <code>NEXT_PUBLIC_ORACLE_POLICY_ID</code> của Frontend:</p>
+<pre><code>console.log(`NEXT_PUBLIC_ORACLE_POLICY_ID=${oracleNftPolicyId}`);</code></pre>
+
+<h4>Hướng dẫn Thực thi qua Giao diện Dòng lệnh (CLI):</h4>
+<p>Để khởi chạy toàn bộ quy trình trên, thực thi lệnh sau tại thư mục gốc của dự án:</p>
+<pre><code>npm run setup</code></pre>
+
+<p>Lệnh này sẽ kích hoạt script <code>tsx scripts/setup-oracle.ts</code>. Sau khi giao dịch được gửi thành công, script sẽ in ra <code>oracleNftPolicyId</code>:</p>
+<pre><code>NEXT_PUBLIC_ORACLE_POLICY_ID=&lt;oracle_policy_id&gt;</code></pre>
+
+<p>Sao chép mã Policy ID này và dán vào file cấu hình <code>.env</code> của ứng dụng Frontend để các component giao diện có thể nhận diện đúng Oracle khi chạy dApp.</p>
+
+<hr />
+
+<h4>3.2. Truy vấn &amp; Parse Oracle Datum (<code>oracle.ts</code>)</h4>
+<p>Hàm <code>getOracleData</code> trong <code>oracle.ts</code> chịu trách nhiệm tìm kiếm Oracle UTxO trên mạng lưới thông qua Blockfrost và giải mã trạng thái on-chain hiện tại của dApp:</p>
+
+<p><strong>Truy vấn danh sách UTxO tại địa chỉ Oracle:</strong><br /> Sử dụng provider để quét toàn bộ UTxO đang nằm tại địa chỉ script <code>oracleAddress</code>:</p>
+<pre><code>const utxos = await provider.fetchAddressUTxOs(oracleAddress);</code></pre>
+
+<p><strong>Lọc tìm Oracle UTxO chính chủ (chứa State Thread Token):</strong><br /> Trong Cardano, định danh <code>unit</code> của tài sản là chuỗi ghép <code>policyId + assetNameHex</code>. Vì vậy, dùng <code>.startsWith(oracleNftPolicyId)</code> sẽ xác định chính xác token thuộc policy này. Kết hợp với tính độc bản của One-Shot policy, trên toàn blockchain chỉ có duy nhất một UTxO thỏa mãn:</p>
+<pre><code>const oracleUtxo = utxos.find((u) =>
+  u.output.amount.some((a) => a.unit.startsWith(oracleNftPolicyId))
+);</code></pre>
+
+<p><strong>Giải mã Plutus Data (Inline Datum):</strong><br /> Trích xuất dữ liệu Plutus thô từ output của UTxO và giải mã thành đối tượng <code>OracleDatum</code> để đọc số thứ tự NFT kế tiếp (<code>nextNftIndex</code>), mức giá mint tối thiểu (<code>minPrice</code>) và địa chỉ ví Admin (<code>adminAddress</code>):</p>
+<pre><code>const rawDatum = oracleUtxo.output.plutusData;
+if (!rawDatum) throw new Error("Oracle UTxO missing plutusData");
+
+const oracleDatum: OracleDatum = deserializeDatum(rawDatum);
+const nextNftIndex = Number(oracleDatum.fields[0].int);
+const minPrice = Number(oracleDatum.fields[1].int);
+const adminAddress = serializeAddressObj(oracleDatum.fields[2], NETWORK_ID);</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Chuyển đổi address object (Plutus Data) thành địa chỉ Bech32:</strong><br /> - <strong><code>oracleDatum.fields[2]</code>:</strong> Dữ liệu địa chỉ lưu trong Datum ở dạng cấu trúc Plutus Data (gồm các constructor lồng nhau chứa <code>pubKeyHash</code> và <code>stakeCredentialHash</code>), chưa phải là chuỗi địa chỉ Bech32 thông thường.<br /> - <strong>Hàm <code>serializeAddressObj</code>:</strong> Thực hiện quá trình ngược lại với {<code>deserializeAddress</code> + <code>mPubKeyAddress</code>}. Hàm này đọc các mã băm từ cấu trúc Plutus Data, kết hợp với <code>NETWORK_ID</code> (0: Testnet/Preprod, 1: Mainnet) để mã hóa thành chuỗi địa chỉ Bech32 chuẩn (<code>addr_test1...</code>). Chuỗi này là bắt buộc để truyền vào lệnh trả tiền <code>.txOut(adminAddress, ...)</code> khi người dùng mint NFT.</p>
+</blockquote>
+
+<hr />
+
+<h4>3.3. Giao dịch Mint Membership NFT (<code>mint.ts</code>)</h4>
+<p>Hàm <code>buildMintNftTx</code> trong <code>mint.ts</code> là phần cốt lõi của lớp Off-chain, xây dựng giao dịch mint NFT tương tác đồng thời với cả hai validator (<code>oracle.ak</code> và <code>nft_mint.ak</code>).</p>
+
+<h4>Khởi tạo các dữ liệu cần thiết</h4>
+<p>- Mã định danh Oracle token và tên Membership NFT sắp mint (theo cấu trúc chuẩn <code>[COLLECTION_NAME] #[nextNftIndex]</code>):</p>
+<pre><code>const { oracleCbor, oracleAddress, nftMintCbor, nftPolicyId } =
+  getMembershipScripts(oracleNftPolicyId);
+
+const oracleTokenNameHex = stringToHex(ORACLE_TOKEN_NAME);
+const oracleUnit = oracleNftPolicyId + oracleTokenNameHex;
+const tokenName = `${COLLECTION_NAME} #${nextNftIndex}`;
+const tokenNameHex = stringToHex(tokenName);</code></pre>
+
+<p>- Oracle Datum mới:</p>
+<pre><code>const { pubKeyHash, stakeCredentialHash } = deserializeAddress(adminAddress);
+const updatedOracleDatum = mConStr0([
+  nextNftIndex + 1,
+  minPrice,
+  mPubKeyAddress(pubKeyHash, stakeCredentialHash),
+]);</code></pre>
+
+<p>- Metadata CIP-25:</p>
+<pre><code>const metadata = {
+  [nftPolicyId]: {
+    [tokenName]: { ...assetMetadata },
+  },
+};</code></pre>
+
+<p>Trong đó, đối tượng <code>assetMetadata</code> được chuẩn bị trước đó tại component <code>MintSection.tsx</code>:</p>
+<pre><code>// Tách chuỗi CID/URL nếu vượt quá 64 ký tự (Giới hạn Cardano Metadata)
+const splitImageCid = (cid: string): string | string[] => {
+  if (cid.length &lt;= 64) return cid;
+  const result = [];
+  for (let i = 0; i &lt; cid.length; i += 64) {
+    result.push(cid.substring(i, i + 64));
+  }
+  return result;
+};
+
+const assetMetadata = {
+  name: `C2VN Membership #${oracleData.nextNftIndex}`,
+  image: splitImageCid(IMAGE_CID),
+  mediaType: "image/png",
+  description: "Exclusive Membership NFT on Cardano",
+};</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Tại sao cần hàm <code>splitImageCid</code>?</strong><br /> Trong giao thức Cardano, <strong>mỗi giá trị chuỗi (string) trong transaction metadata tối đa chỉ dài 64 ký tự</strong>. Các đường dẫn IPFS thường dài vượt quá giới hạn này và giao dịch sẽ bị từ chối nếu để nguyên một chuỗi dài.<br /> Theo chuẩn <strong>CIP-25</strong>, trường <code>image</code> hỗ trợ định dạng <code>string[]</code> (mỗi phần tử ≤ 64 ký tự). Khi hiển thị, các ví Web3 và sàn giao dịch sẽ tự động nối các phần tử này lại thành đường dẫn gốc hoàn chỉnh.</p>
+</blockquote>
+
+<h4>Xây dựng giao dịch</h4>
+<p>Giao dịch mint NFT sẽ tương tác đồng thời với cả hai validator (<code>oracle.ak</code> và <code>nft_mint.ak</code>). Nó cần đảm bảo các hành động sau:</p>
+
+<p><strong>Chi tiêu Oracle UTxO (Kích hoạt Spending Validator <code>oracle.ak</code>):</strong><br /> Đưa Oracle UTxO vào input, nạp script CBOR của <code>oracle.ak</code>, khai báo Inline Datum đi kèm và truyền Redeemer <code>MintNFT</code> (index 0):</p>
+<pre><code>const txHex = txBuilder
+  // 1. Spend Oracle UTxO
+  .spendingPlutusScriptV3()
+  .txIn(
+    oracleUtxo.input.txHash,
+    oracleUtxo.input.outputIndex,
+    oracleUtxo.output.amount,
+    oracleUtxo.output.address
+  )
+  .txInRedeemerValue(mConStr0([]))
+  .txInInlineDatumPresent()
+  .txInScript(oracleCbor)</code></pre>
+
+<p><strong>Trả Oracle Token về hợp đồng với Datum mới (Continuing Output - Oracle UTxO mới):</strong><br /> Tạo output gửi đúng Oracle Token trở lại địa chỉ <code>oracleAddress</code> kèm <code>updatedOracleDatum</code>:</p>
+<pre><code>  // Continuing output: Oracle Token trở về oracle address
+  .txOut(oracleAddress, [{ unit: oracleUnit, quantity: "1" }])
+  .txOutInlineDatumValue(updatedOracleDatum)</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Cơ chế tự động tính toán ADA tối thiểu (min-UTxO) của MeshTxBuilder:</strong><br /> Khi khai báo output value, chúng ta chỉ khai báo duy nhất Oracle token mà <strong>không khai báo lượng ADA đi kèm</strong> vì <code>MeshTxBuilder</code> có tính năng tự động đánh giá kích thước UTxO để tính toán và bổ sung chính xác lượng Lovelace tối thiểu (min-UTxO) cho UTxO này.</p>
+</blockquote>
+
+<p><strong>Mint Membership NFT chuẩn CIP-25 (Kích hoạt Minting Policy <code>nft_mint.ak</code>):</strong><br /> Khai báo hành động mint đúng 1 NFT thuộc <code>nftPolicyId</code> với tên đã tạo, nạp script <code>nftMintCbor</code>, redeemer rỗng và gắn Metadata nhãn <code>721</code>.</p>
+<pre><code>  // 2. Mint NFT
+  .mintPlutusScriptV3()
+  .mint("1", nftPolicyId, tokenNameHex)
+  .mintingScript(nftMintCbor)
+  .mintRedeemerValue(mConStr0([]))
+  .metadataValue(721, metadata)     // Gắn Metadata CIP-25 (Label 721)</code></pre>
+
+<p><strong>Trả phí mint cho Admin:</strong><br /> Tạo output chuyển đúng số lượng Lovelace tối thiểu (<code>minPrice</code>) về địa chỉ ví Admin:</p>
+<pre><code>  // 3. Trả phí cho admin
+  .txOut(adminAddress, [{ unit: "lovelace", quantity: minPrice.toString() }])</code></pre>
+
+<p><strong>Thiết lập Collateral, Change Address, Coin Selection và Hoàn tất:</strong><br /> Cung cấp UTxO thế chấp (<code>collateral</code>) bắt buộc khi tương tác với Plutus V3 Script, trả tiền thừa về ví người dùng, chỉ định danh sách UTxO nguồn cho thuật toán Coin Selection và gọi <code>.complete()</code> để xuất ra chuỗi giao dịch (<code>txHex</code>):</p>
+<pre><code>  // Collateral UTxO
+  .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
+  .changeAddress(walletAddress)
+  .selectUtxosFrom(utxos)
+  .complete();</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><code>changeAddress(walletAddress)</code> đảm bảo NFT mới tạo, cùng toàn bộ tiền thừa của giao dịch sẽ được hoàn về ví người dùng <code>walletAddress</code>.</p>
+</blockquote>
+
+<hr />
+
+<h4>3.4. Giao dịch Đóng Hệ thống (<code>stop-oracle.ts</code>)</h4>
+<p>Giao dịch đóng hệ thống cũng tương tác đồng thời với 2 hợp đồng:</p>
+<ul>
+  <li>Oracle validator nhánh <code>StopOracle</code>: chi tiêu Oracle UTxO cuối cùng.</li>
+  <li>One-Shot policy nhánh <code>Burning</code>: đốt vĩnh viễn Oracle Token.</li>
+</ul>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Việc hoàn thiện mã nguồn <code>scripts/stop-oracle.ts</code> sẽ dành cho học viên thực hiện trong <strong>Bài tập thực hành 1</strong>.</p>
+</blockquote>
+
+<hr />
+
+<h2 id="bai-tap-thuc-hanh">4. Bài tập Thực hành</h2>
+<p>Để làm chủ các kiến thức đã học, các bạn hãy thực hiện 2 bài tập sau:</p>
+
+<h4>Bài tập 1:</h4>
+<p>Implement script <code>stop-oracle.ts</code> để thu hồi Oracle Token, ngừng việc mint NFT trong bộ sưu tập.</p>
+<blockquote style="margin: 16px 0 24px 0;">
+  <p>Lưu ý: Vì One-Shot là script tham số hóa, có thể các bạn cần lưu lại thông tin param UTxO hoặc script CBOR từ giao dịch khởi tạo, để có thể tái tạo lại đúng script này khi thực hiện đốt token.</p>
+</blockquote>
+
+<h4>Bài tập 2:</h4>
+<p>Hoàn thiện logic trích xuất đường dẫn hình ảnh <code>imageUrl</code> từ NFT Metadata trong component <code>MyNFTs</code> để hiển thị hình ảnh thẻ thành viên lên thư viện cá nhân.</p>
+
+<hr />
+
+<h2 id="tai-lieu-tham-khao">5. Tài liệu Tham khảo &amp; Đọc thêm</h2>
+<ul>
+  <li><a href="https://cips.cardano.org/cips/cip25/" target="_blank" rel="noopener">CIP-0025: Media Token Metadata Standard</a></li>
+  <li><a href="https://meshjs.dev/apis/transaction" target="_blank" rel="noopener">MeshJS Documentation: Cardano Transaction Builder</a></li>
+</ul>
+
+<hr />
+
+<p><strong>Chúc mừng bạn đã hoàn thành Module 04: Membership NFT!</strong> Bạn đã làm chủ các kỹ thuật cốt lõi: State Thread Token (STT), One-Shot Minting Policy, kiến trúc Multi-Validator và điều phối giao dịch nguyên tử bằng MeshTxBuilder. Hẹn gặp lại các bạn trong module tiếp theo!</p>
