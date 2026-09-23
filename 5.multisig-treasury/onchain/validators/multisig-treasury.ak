@@ -1,116 +1,157 @@
 use aiken/collection/list
-use cardano/assets.{lovelace_of, without_lovelace}
-use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
-use cardano/tx.{verify_signature}
-use cocktail/vodka_address.{address_pub_key}
-use contract/types.{Datum, Deposit, Execute, Signature, Spend}
-use validation/find.{output_by_addr, output_by_addr_value}
+use cardano/address.{Address}
+use cardano/assets.{
+  AssetName, PolicyId, flatten, lovelace_of, quantity_of, without_lovelace,
+}
+use cardano/transaction.{
+  InlineDatum, Output, OutputReference, Transaction, find_input,
+}
+use contract/types.{
+  Datum, Deposit, Execute, Proposal, Propose, Signature, Spend,
+}
 
-/// ─────────────────────────────────────────────────────────────────────────────
 /// Multisig Treasury – Spend Validator
 ///
-/// This validator manages a shared treasury controlled by multiple owners.
+/// Luồng: Propose -> Signature (lặp) -> Execute
+///   • Deposit   – nạp tiền, datum giữ nguyên
+///   • Propose   – một owner tạo đề xuất (receiver, amount <= allowance)
+///   • Signature – owner ký đề xuất, thêm đúng signer mới vào datum
+///   • Execute   – đủ threshold thì chi `amount` cho receiver, reset trạng thái
 ///
-/// Parameters:
-///   • threshold: minimum number of collected signatures required to execute
-///   • allowance: maximum amount of ADA that can be released per execution
-///
-/// Supported actions:
-///   • Deposit   – add funds without changing the treasury state
-///   • Signature – collect valid owner signatures
-///   • Execute   – release funds to the receiver once threshold is met
-/// ─────────────────────────────────────────────────────────────────────────────
-validator multisig_treasury( threshold: Int, allowance: Int) {
+/// Bảo vệ:
+///   • UTxO treasury phải chứa đúng 1 identity token (qty 1)
+///   • Chỉ 1 input tại script_address trong tx (chống double satisfaction)
+///   • Output kế tiếp là output duy nhất tại script_address và giữ token
+///   • Rút cạn (balance == amount) thì bắt buộc burn token
+validator multisig_treasury(threshold: Int, allowance: Int) {
   spend(
     datum_option: Option<Datum>,
     redeemer: Spend,
     output_reference: OutputReference,
     transaction: Transaction,
   ) {
-    expect Some(datum_input) = datum_option
-    let Transaction { inputs, outputs, extra_signatories, .. } = transaction
+    expect Some(datum_in) = datum_option
+    let Transaction { inputs, outputs, extra_signatories, mint, .. } =
+      transaction
     expect Some(input) = find_input(inputs, output_reference)
     let script_address = input.output.address
-    let token =
+    let balance = lovelace_of(input.output.value)
+
+    expect [(policy_id, asset_name, 1)] =
       input.output.value
         |> without_lovelace()
+        |> flatten()
+
+    expect list.count(inputs, fn(i) { i.output.address == script_address }) == 1
 
     when redeemer is {
       Deposit -> {
-        let output = output_by_addr_value(outputs, script_address, token)
-        expect InlineDatum(datum_output_raw) = output.datum
-        expect datum_output: Datum = datum_output_raw
-
+        let next =
+          continuing_output(outputs, script_address, policy_id, asset_name)
+        let datum_out = read_datum(next)
         and {
-          datum_input.owners == datum_output.owners,
-          datum_input.signers == datum_output.signers,
-          datum_input.receiver == datum_output.receiver,
-          lovelace_of(output.value) >= lovelace_of(input.output.value),
+          datum_out == datum_in,
+          lovelace_of(next.value) >= balance,
         }
       }
-      Execute ->
-        when list.length(datum_input.signers) >= threshold is {
-          True -> {
-            let output_receiver = output_by_addr(outputs, datum_input.receiver)
-            when lovelace_of(input.output.value) >= allowance is {
-              True ->
-                if lovelace_of(input.output.value) == allowance {
-                  lovelace_of(output_receiver.value) == allowance
-                } else {
-                  let output = output_by_addr(outputs, script_address)
-                  expect InlineDatum(datum_output_raw) = output.datum
-                  expect datum_output: Datum = datum_output_raw
 
-                  and {
-                    lovelace_of(output_receiver.value) == allowance,
-                    lovelace_of(output.value) + allowance >= lovelace_of(
-                      input.output.value,
-                    ),
-                    datum_input.receiver == datum_output.receiver,
-                    datum_input.owners == datum_output.owners,
-                    list.length(datum_output.signers) == 0,
-                  }
-                }
-              False -> False
-            }
-          }
-          False -> False
+      Propose -> {
+        let next =
+          continuing_output(outputs, script_address, policy_id, asset_name)
+        let datum_out = read_datum(next)
+        expect Some(Proposal { amount, .. }) = datum_out.proposal
+        and {
+          datum_in.proposal == None,
+          list.any(extra_signatories, fn(s) { list.has(datum_in.owners, s) }),
+          datum_out.owners == datum_in.owners,
+          list.is_empty(datum_out.signers),
+          amount > 0,
+          amount <= allowance,
+          lovelace_of(next.value) >= balance,
         }
-      Signature -> {
-        let output = output_by_addr_value(outputs, script_address, token)
-        let owners = list.filter_map(datum_input.owners, address_pub_key)
-        let signers = list.filter_map(datum_input.signers, address_pub_key)
+      }
 
+      Signature -> {
+        let next =
+          continuing_output(outputs, script_address, policy_id, asset_name)
+        let datum_out = read_datum(next)
         let new_signers =
           list.filter(
             extra_signatories,
-            fn(extra_signatory) {
-              verify_signature(owners, extra_signatory) && !verify_signature(
-                signers,
-                extra_signatory,
-              )
+            fn(s) {
+              list.has(datum_in.owners, s) && !list.has(datum_in.signers, s)
             },
           )
-        expect InlineDatum(inline_datum_output) = output.datum
-        expect datum_output: Datum = inline_datum_output
         and {
-          list.length(new_signers) > 0,
-          datum_input.owners == datum_output.owners,
-          datum_input.receiver == datum_output.receiver,
-          list.all(
-            datum_input.signers,
-            fn(signer) { list.has(datum_output.signers, signer) },
-          ),
-          lovelace_of(output.value) >= lovelace_of(input.output.value),
+          datum_in.proposal != None,
+          !list.is_empty(new_signers),
+          datum_out.owners == datum_in.owners,
+          datum_out.proposal == datum_in.proposal,
+          // đúng bằng signer cũ + signer mới: không thể nhét signer giả
+          datum_out.signers == list.concat(datum_in.signers, new_signers),
+          lovelace_of(next.value) >= balance,
+        }
+      }
+
+      Execute -> {
+        expect Some(Proposal { receiver, amount }) = datum_in.proposal
+        and {
+          list.length(datum_in.signers) >= threshold,
+          amount > 0,
+          amount <= allowance,
+          balance >= amount,
+          paid_to(outputs, receiver) >= amount,
+          if balance == amount {
+            // rút cạn: burn identity token
+            quantity_of(mint, policy_id, asset_name) == -1
+          } else {
+            let next =
+              continuing_output(outputs, script_address, policy_id, asset_name)
+            let datum_out = read_datum(next)
+            and {
+              lovelace_of(next.value) >= balance - amount,
+              datum_out.owners == datum_in.owners,
+              list.is_empty(datum_out.signers),
+              datum_out.proposal == None,
+            }
+          },
         }
       }
     }
   }
 
-  /// ───────────────────────────────────────────────────────────────────────
-  /// Reject all other purposes (mint, withdraw, certificates, etc.)
-  /// ───────────────────────────────────────────────────────────────────────
   else(_) {
     fail
   }
+}
+
+fn continuing_output(
+  outputs: List<Output>,
+  script_address: Address,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> Output {
+  expect [next] = list.filter(outputs, fn(o) { o.address == script_address })
+  expect quantity_of(next.value, policy_id, asset_name) == 1
+  next
+}
+
+fn read_datum(output: Output) -> Datum {
+  expect InlineDatum(raw) = output.datum
+  expect datum: Datum = raw
+  datum
+}
+
+fn paid_to(outputs: List<Output>, address: Address) -> Int {
+  list.foldl(
+    outputs,
+    0,
+    fn(o, acc) {
+      if o.address == address {
+        acc + lovelace_of(o.value)
+      } else {
+        acc
+      }
+    },
+  )
 }
