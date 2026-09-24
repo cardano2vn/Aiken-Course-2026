@@ -63,6 +63,7 @@ test test_init_mints_one_token_at_treasury() {
   identity_factory.identity_factory.mint(
     utxo_ref,
     2,
+    5_000_000,
     treasury_hash,
     token_name,
     Init,
@@ -97,6 +98,7 @@ test test_init_rejects_wrong_amount() {
   !identity_factory.identity_factory.mint(
     utxo_ref,
     2,
+    5_000_000,
     treasury_hash,
     token_name,
     Init,
@@ -126,6 +128,7 @@ test test_end_burns_token_from_treasury() {
   identity_factory.identity_factory.mint(
     utxo_ref,
     2,
+    5_000_000,
     treasury_hash,
     token_name,
     End,
@@ -154,6 +157,7 @@ test test_end_rejects_without_burn() {
   !identity_factory.identity_factory.mint(
     utxo_ref,
     2,
+    5_000_000,
     treasury_hash,
     token_name,
     End,

@@ -2,11 +2,15 @@ use aiken/collection/dict
 use aiken/collection/list
 use aiken/crypto.{ScriptHash}
 use cardano/address.{from_script}
-use cardano/assets.{AssetName, PolicyId, quantity_of}
+use cardano/assets.{AssetName, PolicyId, lovelace_of, quantity_of}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction}
 use contract/types.{Datum, End, Init, Mint}
 
 /// Identity Factory – Minting Policy
+///
+/// `allowance` là hạn mức ADA được phép nạp vào treasury lúc khởi tạo. Nó
+/// phải được truyền vào script cùng với `threshold`, thay vì để transaction
+/// tự quyết định một hạn mức mới.
 ///
 /// Init:
 ///   • One-shot: tx phải tiêu `utxo_ref` => token là duy nhất
@@ -21,6 +25,7 @@ use contract/types.{Datum, End, Init, Mint}
 validator identity_factory(
   utxo_ref: OutputReference,
   threshold: Int,
+  allowance: Int,
   treasury: ScriptHash,
   token_name: AssetName,
 ) {
@@ -46,7 +51,8 @@ validator identity_factory(
           amount == 1,
           asset_name == token_name,
           token_output.address == treasury_address,
-          // output sạch: chỉ ada + đúng identity token
+          // Output chỉ được chứa ADA và đúng identity token; mọi native asset
+          // khác đều làm transaction khởi tạo thất bại.
           assets.without_lovelace(token_output.value) == assets.from_asset(
             policy_id,
             token_name,
@@ -54,6 +60,9 @@ validator identity_factory(
           ),
           datum.policy_id == policy_id,
           threshold > 0,
+          allowance > 0,
+          // Không cho phép tạo treasury ban đầu vượt hạn mức chi tiêu đã cấu hình.
+          lovelace_of(token_output.value) <= allowance,
           list.length(datum.owners) >= threshold,
           list.length(list.unique(datum.owners)) == list.length(datum.owners),
           list.is_empty(datum.signers),

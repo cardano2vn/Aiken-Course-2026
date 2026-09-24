@@ -80,6 +80,7 @@ test test_deposit_keeps_datum_and_increases_balance() {
 
   multisig_treasury.multisig_treasury.spend(
     2,
+    5_000_000,
     Some(datum_in),
     Deposit,
     mock_utxo_ref(0, 0),
@@ -116,6 +117,7 @@ test test_propose_requires_owner_and_respects_allowance() {
 
   multisig_treasury.multisig_treasury.spend(
     2,
+    5_000_000,
     Some(datum_in),
     Propose {
       proposer: mock_pub_key_hash(1),
@@ -153,6 +155,7 @@ test test_signature_appends_only_new_owner_signers() {
 
   multisig_treasury.multisig_treasury.spend(
     2,
+    5_000_000,
     Some(datum_in),
     Signature { signer: mock_pub_key_hash(2) },
     mock_utxo_ref(0, 0),
@@ -194,6 +197,49 @@ test test_execute_pays_receiver_and_resets_datum() {
 
   multisig_treasury.multisig_treasury.spend(
     2,
+    5_000_000,
+    Some(datum_in),
+    Execute,
+    mock_utxo_ref(0, 0),
+    tx,
+  )
+}
+
+test test_execute_rejects_overpayment_to_receiver() {
+  let policy_id = mock_policy_id(0)
+  let token_name: AssetName = "identity"
+  let address = mock_script_address(0, None)
+  let receiver = mock_pub_key_address(9, None)
+  let proposal = Some(Proposal { recipient: receiver, amount: 5_000_000 })
+  let datum_in =
+    datum(policy_id, proposal, [mock_pub_key_hash(1), mock_pub_key_hash(2)])
+  let datum_out = datum(policy_id, None, [])
+  let tx =
+    mocktail_tx()
+      |> tx_out(True, receiver, from_lovelace(6_000_000))
+      |> tx_out(
+          True,
+          address,
+          from_asset(policy_id, token_name, 1)
+            |> add("", "", 14_000_000),
+        )
+      |> tx_out_inline_datum(True, datum_out)
+      |> complete()
+      |> add_input(
+          True,
+          treasury_input(
+            mock_utxo_ref(0, 0),
+            address,
+            policy_id,
+            token_name,
+            datum_in,
+            20_000_000,
+          ),
+        )
+
+  !multisig_treasury.multisig_treasury.spend(
+    2,
+    5_000_000,
     Some(datum_in),
     Execute,
     mock_utxo_ref(0, 0),
@@ -226,6 +272,7 @@ test test_signature_rejects_signer_who_is_not_owner() {
 
   !multisig_treasury.multisig_treasury.spend(
     2,
+    5_000_000,
     Some(datum_in),
     Signature { signer: mock_pub_key_hash(9) },
     mock_utxo_ref(0, 0),

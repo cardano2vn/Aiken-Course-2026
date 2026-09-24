@@ -4,6 +4,7 @@ use cardano/assets.{PolicyId}
 
 pub type Proposal {
   recipient: Address,
+  // Số ADA dự kiến chi từ treasury; phải nằm trong allowance của validator.
   amount: Int,
 }
 
