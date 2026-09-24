@@ -10,8 +10,9 @@ use mocktail.{
   tx_out_inline_datum,
 }
 
-fn datum() -> Datum {
+fn datum(policy_id: PolicyId) -> Datum {
   Datum {
+    policy_id,
     owners: [mock_pub_key_hash(1), mock_pub_key_hash(2)],
     signers: [],
     proposal: None,
@@ -30,7 +31,7 @@ fn identity_input(
       address: treasury,
       value: from_asset(policy_id, token_name, 1)
         |> add("", "", 5_000_000),
-      datum: InlineDatum(datum()),
+      datum: InlineDatum(datum(policy_id)),
       reference_script: None,
     },
   }
@@ -52,7 +53,7 @@ test test_init_mints_one_token_at_treasury() {
           from_asset(policy_id, token_name, 1)
             |> add("", "", 5_000_000),
         )
-      |> tx_out_inline_datum(True, datum())
+      |> tx_out_inline_datum(True, datum(policy_id))
       |> complete()
       |> add_input(
           True,
@@ -86,7 +87,7 @@ test test_init_rejects_wrong_amount() {
           from_asset(policy_id, token_name, 1)
             |> add("", "", 5_000_000),
         )
-      |> tx_out_inline_datum(True, datum())
+      |> tx_out_inline_datum(True, datum(policy_id))
       |> complete()
       |> add_input(
           True,

@@ -10,13 +10,14 @@ use contract/types.{Datum, End, Init, Mint}
 ///
 /// Init:
 ///   • One-shot: tx phải tiêu `utxo_ref` => token là duy nhất
-///   • Mint đúng 1 token, output chứa token phải nằm ở treasury
-///   • Datum khởi tạo: signers rỗng, proposal = None, owners đủ threshold
+///   • Mint đúng 1 token, output chứa token nằm ở treasury và CHỈ có ada + token
+///   • Datum khởi tạo: policy_id = policy của chính factory, owners đủ threshold
+///     và không trùng, signers rỗng, proposal = None
 ///
 /// End:
 ///   • Burn đúng 1 token đang nằm trong UTxO treasury
-///   • Việc kiểm tra chữ ký / số tiền do treasury (Execute) đảm nhiệm,
-///     vì UTxO treasury bắt buộc phải được spend trong cùng tx.
+///   • Chữ ký / số tiền do treasury (Execute) kiểm tra, vì UTxO treasury
+///     bắt buộc phải được spend trong cùng tx.
 validator identity_factory(
   utxo_ref: OutputReference,
   threshold: Int,
@@ -45,8 +46,16 @@ validator identity_factory(
           amount == 1,
           asset_name == token_name,
           token_output.address == treasury_address,
+          // output sạch: chỉ ada + đúng identity token
+          assets.without_lovelace(token_output.value) == assets.from_asset(
+            policy_id,
+            token_name,
+            1,
+          ),
+          datum.policy_id == policy_id,
           threshold > 0,
           list.length(datum.owners) >= threshold,
+          list.length(list.unique(datum.owners)) == list.length(datum.owners),
           list.is_empty(datum.signers),
           datum.proposal == None,
         }
