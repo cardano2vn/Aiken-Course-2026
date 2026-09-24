@@ -1444,55 +1444,6 @@ test withdraw_fail_fake_datum_injection() {
   )
 }
 
-// sad path: the beneficiary attempts to partially withdraw funds, leaving a remainder at the script instead of consuming it cleanly.
-test withdraw_fail_partial_withdraw() {
-  True
-  // let redeemer: Redeemer = Withdraw
-  // let output_reference: OutputReference = mock_utxo_ref(0, 0)
-
-  // let beneficiary_address: Address = mock_pub_key_address(1, None)
-  // let donor_address: Address = mock_pub_key_address(2, None)
-  // let script_address: Address = mock_script_address(1, None)
-
-  // let goal: Int = 1_000_000_000
-  // let deadline: Int = 100_000
-
-  // let contributions = [Pair(donor_address, 1_000_000_000)]
-  // let datum_input = Datum {
-  //   beneficiary: beneficiary_address,
-  //   goal,
-  //   deadline,
-  //   contributions,
-  // }
-
-  // let tx: Transaction = mocktail_tx()
-  //   |> tx_out(True, beneficiary_address, from_lovelace(500_000_000))
-  //   |> tx_out(True, script_address, from_lovelace(500_000_000))
-  //   |> tx_out_inline_datum(True, datum_input)
-  //   |> required_signer_hash(True, mock_pub_key_hash(1))
-  //   |> complete()
-  //   |> add_input(
-  //       True,
-  //       Input {
-  //         output_reference,
-  //         output: mock_script_output(
-  //           script_address,
-  //           from_lovelace(1_000_000_000),
-  //           InlineDatum(Some(datum_input)),
-  //         ),
-  //       },
-  //     )
-
-  // let valid_tx = Transaction { ..tx, validity_range: interval.between(10, 50) }
-
-  // !crowdfund.crowdfund.spend(
-  //   Some(datum_input),
-  //   redeemer,
-  //   output_reference,
-  //   valid_tx,
-  // )
-}
-
 //! sad path: a completely empty pool with no contributions tries to invoke withdraw to trigger edge-case logic errors.
 test withdraw_fail_empty_pool_withdraw() {
   let redeemer: Redeemer = Withdraw
@@ -1537,49 +1488,4 @@ test withdraw_fail_empty_pool_withdraw() {
     output_reference,
     valid_tx,
   )
-}
-
-//! sad path: the beneficiary signs off on the withdrawal but redirects the funds to an unauthorized external wallet.
-test withdraw_fail_alter_outputs() {
-  True
-  // let redeemer: Redeemer = Withdraw
-  // let output_reference: OutputReference = mock_utxo_ref(0, 0)
-
-  // let beneficiary_address: Address = mock_pub_key_address(1, None)
-  // let stranger_address: Address = mock_pub_key_address(666, None)
-  // let donor_address: Address = mock_pub_key_address(2, None)
-  // let script_address: Address = mock_script_address(1, None)
-
-  // let goal: Int = 1_000_000_000
-  // let deadline: Int = 100_000
-
-  // let contributions = [Pair(donor_address, 1_000_000_000)]
-  // let datum_input =
-  //   Datum { beneficiary: beneficiary_address, goal, deadline, contributions }
-
-  // let tx: Transaction =
-  //   mocktail_tx()
-  //     |> tx_out(True, stranger_address, from_lovelace(1_000_000_000))
-  //     |> required_signer_hash(True, mock_pub_key_hash(1))
-  //     |> complete()
-  //     |> add_input(
-  //         True,
-  //         Input {
-  //           output_reference,
-  //           output: mock_script_output(
-  //             script_address,
-  //             from_lovelace(1_000_000_000),
-  //             InlineDatum(Some(datum_input)),
-  //           ),
-  //         },
-  //       )
-
-  // let valid_tx = Transaction { ..tx, validity_range: interval.between(10, 50) }
-
-  // !crowdfund.crowdfund.spend(
-  //   Some(datum_input),
-  //   redeemer,
-  //   output_reference,
-  //   valid_tx,
-  // )
 }
