@@ -12,7 +12,7 @@ use cardano/tx.{verify_signature}
 use types.{Active, Cancel, Datum, Fund, Liquidate, Pending, Redeemer, Repay}
 use validation/find.{output_by_addr, output_by_addr_value}
 
-validator crowdlend {
+validator p2plending {
   spend(
     datum_option: Option<Datum>,
     redeemer: Redeemer,
