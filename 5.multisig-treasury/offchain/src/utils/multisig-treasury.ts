@@ -1,4 +1,10 @@
-import { MeshTxBuilder, type IFetcher, type IWallet, type UTxO } from "@meshsdk/core";
+import {
+  MeshTxBuilder,
+  deserializeDatum,
+  type IFetcher,
+  type IWallet,
+  type UTxO,
+} from "@meshsdk/core";
 import { getTreasuryScript, getTreasuryAddress, getFactoryScript } from "./helper";
 import {
   datumToPlutusData,
@@ -22,10 +28,8 @@ async function findTreasuryUtxo(
   if (!utxo) throw new Error("Không tìm thấy UTxO treasury giữ identity token.");
   if (!utxo.output.plutusData) throw new Error("UTxO treasury thiếu inline datum.");
 
-  // NOTE: cần parse utxo.output.plutusData (CBOR hex) ra JSON Data trước khi
-  // gọi plutusDataToDatum — dùng lib giải mã CBOR->Data tương ứng Mesh version
-  // (vd `deserializeDatum` nếu Mesh cung cấp), rồi mới đọc field.
-  const rawDatum = /* deserializeDatum(utxo.output.plutusData) */ null;
+  // Parse inline datum CBOR hex -> Plutus Data -> TreasuryDatum.
+  const rawDatum = deserializeDatum(utxo.output.plutusData);
   const datum = plutusDataToDatum(rawDatum);
 
   return { utxo, datum };

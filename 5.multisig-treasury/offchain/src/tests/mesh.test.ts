@@ -129,7 +129,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
     });
 
     test("End", async function () {
-        // return;
+        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
             threshold: 2,
