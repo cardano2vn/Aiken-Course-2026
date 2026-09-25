@@ -2,7 +2,7 @@ use aiken/crypto.{VerificationKeyHash}
 use cardano/address.{Address}
 use cardano/assets.{AssetName, PolicyId, add, from_asset, from_lovelace}
 use cardano/transaction.{InlineDatum, Input, OutputReference}
-use contract/types.{Datum, Deposit, Execute, Proposal, Propose, Signature}
+use contract/types.{Datum, Deposit, Execute, Proposal, Propose, Vote}
 use mocktail.{
   MocktailTx, add_input, complete, mock_policy_id, mock_pub_key_address,
   mock_pub_key_hash, mock_script_address, mock_script_output, mock_utxo_ref,
@@ -18,8 +18,17 @@ fn datum(
   policy_id: PolicyId,
   proposal: Option<Proposal>,
   signers: List<VerificationKeyHash>,
+  no_signers: List<VerificationKeyHash>,
 ) -> Datum {
-  Datum { policy_id, owners: owners(), signers, proposal }
+  Datum {
+    policy_id,
+    owners: owners(),
+    threshold: 2,
+    allowance: 5_000_000,
+    signers,
+    no_signers,
+    proposal,
+  }
 }
 
 fn treasury_input(
@@ -62,7 +71,7 @@ fn base(
 test test_deposit_keeps_datum_and_increases_balance() {
   let policy_id = mock_policy_id(0)
   let token_name: AssetName = "identity"
-  let datum_in = datum(policy_id, None, [])
+  let datum_in = datum(policy_id, None, [], [])
   let tx =
     base(datum_in, policy_id, token_name, 30_000_000)
       |> complete()
@@ -79,8 +88,6 @@ test test_deposit_keeps_datum_and_increases_balance() {
         )
 
   multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
     Deposit,
     mock_utxo_ref(0, 0),
@@ -92,12 +99,13 @@ test test_propose_requires_owner_and_respects_allowance() {
   let policy_id = mock_policy_id(0)
   let token_name: AssetName = "identity"
   let receiver = mock_pub_key_address(9, None)
-  let datum_in = datum(policy_id, None, [])
+  let datum_in = datum(policy_id, None, [], [])
   let datum_out =
     datum(
       policy_id,
       Some(Proposal { recipient: receiver, amount: 5_000_000 }),
       [mock_pub_key_hash(1)],
+      [],
     )
   let tx =
     base(datum_out, policy_id, token_name, 20_000_000)
@@ -116,8 +124,6 @@ test test_propose_requires_owner_and_respects_allowance() {
         )
 
   multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
     Propose {
       proposer: mock_pub_key_hash(1),
@@ -134,9 +140,9 @@ test test_signature_appends_only_new_owner_signers() {
   let token_name: AssetName = "identity"
   let receiver = mock_pub_key_address(9, None)
   let proposal = Some(Proposal { recipient: receiver, amount: 5_000_000 })
-  let datum_in = datum(policy_id, proposal, [mock_pub_key_hash(1)])
+  let datum_in = datum(policy_id, proposal, [mock_pub_key_hash(1)], [])
   let datum_out =
-    datum(policy_id, proposal, [mock_pub_key_hash(2), mock_pub_key_hash(1)])
+    datum(policy_id, proposal, [mock_pub_key_hash(2), mock_pub_key_hash(1)], [])
   let tx =
     base(datum_out, policy_id, token_name, 20_000_000)
       |> required_signer_hash(True, mock_pub_key_hash(2))
@@ -154,10 +160,8 @@ test test_signature_appends_only_new_owner_signers() {
         )
 
   multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
-    Signature { signer: mock_pub_key_hash(2) },
+    Vote { voter: mock_pub_key_hash(2), approve: True },
     mock_utxo_ref(0, 0),
     tx,
   )
@@ -170,8 +174,8 @@ test test_execute_pays_receiver_and_resets_datum() {
   let receiver = mock_pub_key_address(9, None)
   let proposal = Some(Proposal { recipient: receiver, amount: 5_000_000 })
   let datum_in =
-    datum(policy_id, proposal, [mock_pub_key_hash(1), mock_pub_key_hash(2)])
-  let datum_out = datum(policy_id, None, [])
+    datum(policy_id, proposal, [mock_pub_key_hash(1), mock_pub_key_hash(2)], [])
+  let datum_out = datum(policy_id, None, [], [])
   let tx =
     mocktail_tx()
       |> tx_out(True, receiver, from_lovelace(5_000_000))
@@ -196,8 +200,6 @@ test test_execute_pays_receiver_and_resets_datum() {
         )
 
   multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
     Execute,
     mock_utxo_ref(0, 0),
@@ -212,8 +214,8 @@ test test_execute_rejects_overpayment_to_receiver() {
   let receiver = mock_pub_key_address(9, None)
   let proposal = Some(Proposal { recipient: receiver, amount: 5_000_000 })
   let datum_in =
-    datum(policy_id, proposal, [mock_pub_key_hash(1), mock_pub_key_hash(2)])
-  let datum_out = datum(policy_id, None, [])
+    datum(policy_id, proposal, [mock_pub_key_hash(1), mock_pub_key_hash(2)], [])
+  let datum_out = datum(policy_id, None, [], [])
   let tx =
     mocktail_tx()
       |> tx_out(True, receiver, from_lovelace(6_000_000))
@@ -238,8 +240,6 @@ test test_execute_rejects_overpayment_to_receiver() {
         )
 
   !multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
     Execute,
     mock_utxo_ref(0, 0),
@@ -252,8 +252,8 @@ test test_signature_rejects_signer_who_is_not_owner() {
   let token_name: AssetName = "identity"
   let receiver = mock_pub_key_address(9, None)
   let proposal = Some(Proposal { recipient: receiver, amount: 5_000_000 })
-  let datum_in = datum(policy_id, proposal, [])
-  let datum_out = datum(policy_id, proposal, [mock_pub_key_hash(9)])
+  let datum_in = datum(policy_id, proposal, [], [])
+  let datum_out = datum(policy_id, proposal, [mock_pub_key_hash(9)], [])
   let tx =
     base(datum_out, policy_id, token_name, 20_000_000)
       |> required_signer_hash(True, mock_pub_key_hash(9))
@@ -271,10 +271,8 @@ test test_signature_rejects_signer_who_is_not_owner() {
         )
 
   !multisig_treasury.multisig_treasury.spend(
-    2,
-    5_000_000,
     Some(datum_in),
-    Signature { signer: mock_pub_key_hash(9) },
+    Vote { voter: mock_pub_key_hash(9), approve: True },
     mock_utxo_ref(0, 0),
     tx,
   )

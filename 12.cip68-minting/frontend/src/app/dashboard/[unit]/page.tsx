@@ -26,8 +26,7 @@ export default function Page() {
         queryFn: async () =>
             await getAsset({ policyId: String(unit).slice(0, 56), assetName: String(unit).slice(56), walletAddress: address as string }),
         enabled: !!address,
-    });
-
+        
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
     const {
