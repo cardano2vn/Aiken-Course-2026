@@ -12,6 +12,8 @@ import {
     serializeAddressObj,
     serializePlutusScript,
     UTxO,
+    mOutputReference,
+     
 } from "@meshsdk/core";
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import plutus from "../libs/plutus.json";
@@ -31,8 +33,7 @@ export class MeshAdapter {
     public policyId: string;
     public spendAddress: string;
     public name: string;
-    public threshold: number;
-    public allowance: number;
+    public utxoRef: { txHash: string; outputIndex: number };
 
     protected mintCompileCode: string;
     protected mintScriptCbor: string;
@@ -58,23 +59,23 @@ export class MeshAdapter {
      */
     constructor({
         meshWallet = null!,
-        threshold = 1,
-        allowance = 10 * DECIMAL_PLACE,
+        utxoRef,
         name,
     }: {
         meshWallet: MeshWallet;
-        threshold?: number;
-        allowance: number;
+        utxoRef: {
+            txHash: string;
+            outputIndex: number;
+        };
         name: string;
     }) {
         this.meshWallet = meshWallet;
-        this.threshold = threshold;
-        this.allowance = allowance;
         this.name = name;
         this.fetcher = blockfrostProvider;
+        this.utxoRef = utxoRef;
 
         this.spendCompileCode = this.readValidator(plutus as Plutus, title.multisigTreasury);
-        this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, [this.threshold, this.allowance]);
+        this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, []);
         this.spendScript = {
             code: this.spendScriptCbor,
             version: "V3",
@@ -90,8 +91,7 @@ export class MeshAdapter {
 
         this.mintCompileCode = this.readValidator(plutus as Plutus, title.identityFactory);
         this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
-            this.threshold,
-            this.allowance,
+            mOutputReference(utxoRef.txHash, utxoRef.outputIndex),
             deserializeAddress(this.spendAddress).scriptHash,
             this.name,
         ]);
