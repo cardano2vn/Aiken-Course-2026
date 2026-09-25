@@ -2,32 +2,33 @@ use aiken/crypto.{VerificationKeyHash}
 use cardano/address.{Address}
 use cardano/assets.{PolicyId}
 
-pub type Proposal {
-  recipient: Address,
-  // Số ADA dự kiến chi từ treasury; phải nằm trong allowance của validator.
-  amount: Int,
-}
-
-/// Datum của treasury.
-/// `policy_id` là identity policy của quỹ: đây là cách phá vòng
-/// "con gà quả trứng" giữa factory và treasury.
 pub type Datum {
   policy_id: PolicyId,
   owners: List<VerificationKeyHash>,
+  // Số chữ ký YES tối thiểu để Execute một proposal.
+  threshold: Int,
+  // Hạn mức chi tối đa cho MỖI proposal (không liên quan tới số dư ban đầu).
+  allowance: Int,
+  // Danh sách owner đã vote YES cho proposal hiện tại.
   signers: List<VerificationKeyHash>,
+  // Danh sách owner đã vote NO cho proposal hiện tại.
+  no_signers: List<VerificationKeyHash>,
   proposal: Option<Proposal>,
 }
 
-/// Redeemer của identity_factory
+pub type Proposal {
+  recipient: Address,
+  amount: Int,
+}
+
 pub type Mint {
   Init
   End
 }
 
-/// Redeemer của multisig_treasury
 pub type Action {
   Deposit
   Propose { proposer: VerificationKeyHash, recipient: Address, amount: Int }
-  Signature { signer: VerificationKeyHash }
+  Vote { voter: VerificationKeyHash, approve: Bool }
   Execute
 }
