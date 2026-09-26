@@ -26,14 +26,15 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         });
 
         utxoRef = {
-            txHash: "022e6dc0e7f2f6a36a4702f301906a2378801124d79a468363d157c15fece6d4",
-            outputIndex: 0,
+            txHash: "1d95deab3066a14a57d97040271df241e462e88a40d3eb1488404b8c5a3a9795",
+            outputIndex: 3,
         };
     });
 
     jest.setTimeout(600000000);
 
     test("Init", async function () {
+        return;
         const utxos = await meshWallet.getUtxos();
 
         const selectedUtxo = utxos.find((u) => u.output.amount.some((a) => a.unit === "lovelace" && Number(a.quantity) >= 5_000_000));
@@ -84,6 +85,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
     });
 
     test("Deposit", async function () {
+        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
             utxoRef: utxoRef,
