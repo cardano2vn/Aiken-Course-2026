@@ -22,7 +22,7 @@ import {
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import plutus from "../libs/plutus.json";
 import { Plutus } from "../types";
-import { decodedPlutusDataToMeshData } from "../utils/types";
+
 import { DECIMAL_PLACE, title } from "../constants/common";
 import { APP_NETWORK_ID } from "../constants/enviroments";
 
@@ -230,6 +230,26 @@ export class MeshAdapter {
         })[0];
     };
 
+    decodedPlutusDataToMeshData = (value: any): Data => {
+        if (Array.isArray(value)) return value.map(this.decodedPlutusDataToMeshData);
+        if (typeof value !== "object" || value === null) {
+            throw new Error("Invalid decoded Plutus Data node.");
+        }
+        if ("bytes" in value) return String(value.bytes);
+        if ("int" in value) return BigInt(value.int);
+        if ("list" in value) return value.list.map(this.decodedPlutusDataToMeshData);
+        if ("map" in value) {
+            return new Map(value.map.map(({ k, v }: { k: any; v: any }) => [this.decodedPlutusDataToMeshData(k), this.decodedPlutusDataToMeshData(v)]));
+        }
+        if ("constructor" in value) {
+            return {
+                alternative: Number(value.constructor),
+                fields: value.fields.map(this.decodedPlutusDataToMeshData),
+            };
+        }
+        throw new Error("Unsupported decoded Plutus Data node.");
+    };
+
     protected datumToPlutusData = (d: {
         policyId: string;
         owners: string[];
@@ -315,7 +335,7 @@ export class MeshAdapter {
                     ? {
                           recipient: serializeAddressObj(pubKeyAddress(recipientPubKeyHash, stakeCredentialHash), APP_NETWORK_ID),
                           amount: Number(proposal.fields?.[1]?.int || 0),
-                          rawPlutusData: decodedPlutusDataToMeshData(proposalField),
+                          rawPlutusData: this.decodedPlutusDataToMeshData(proposalField),
                       }
                     : null,
             };
