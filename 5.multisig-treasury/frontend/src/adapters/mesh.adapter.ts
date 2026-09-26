@@ -212,7 +212,7 @@ export class MeshAdapter {
         return await this.fetcher.fetchAddressUTxOs(address, unit);
     };
 
-    protected getTreasuryUTXO = async () => {
+    public getTreasuryUTXO = async () => {
         const tokenName = stringToHex(this.name);
         const utxos = await this.fetcher.fetchAddressUTxOs(this.spendAddress);
 

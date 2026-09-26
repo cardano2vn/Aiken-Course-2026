@@ -33,15 +33,12 @@ export async function getTreasuries({ page = 1, limit = 12, owner }: { page?: nu
                 },
             });
             const meshTxBuilder = new MeshTxBuilder({
-                meshWallet: meshWallet,
-                threshold: treasury.threshold,
-                allowance: treasury.allowance,
+                meshWallet,
                 name: treasury.title,
             });
+            await meshTxBuilder.initalize();
 
-            const utxo = (
-                await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress, meshTxBuilder.policyId + stringToHex(treasury.title))
-            )[0];
+            const utxo = await meshTxBuilder.getTreasuryUTXO();
 
             const datum = meshTxBuilder.convertDatum({ plutusData: utxo.output.plutusData as string });
             return {
@@ -106,13 +103,12 @@ export async function getTreasury({ id }: { id: string }) {
         },
     });
     const meshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-        threshold: treasury.threshold,
-        allowance: treasury.allowance,
+        meshWallet,
         name: treasury.title,
     });
+    await meshTxBuilder.initalize();
 
-    const utxo = (await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress, meshTxBuilder.policyId + stringToHex(treasury.title)))[0];
+    const utxo = await meshTxBuilder.getTreasuryUTXO();
     const value = utxo.output.amount.reduce((total, asset) => {
         if (asset.unit === "lovelace") {
             return total + Number(asset.quantity);
@@ -160,10 +156,10 @@ export async function getHistories({
 
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
-        threshold,
-        allowance,
         name,
     });
+    await meshTxBuilder.initalize();
+    await meshTxBuilder.getTreasuryUTXO();
 
     const transactions = await blockfrostFetcher.fetchAssetTransactions(meshTxBuilder.policyId + stringToHex(name));
 

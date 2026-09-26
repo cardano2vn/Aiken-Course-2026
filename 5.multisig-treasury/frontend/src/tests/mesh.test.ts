@@ -1,7 +1,7 @@
-import { BlockfrostProvider, MeshWallet } from "@meshsdk/core";
+import { deserializeAddress, MeshWallet } from "@meshsdk/core";
 import { MeshTxBuilder } from "../txbuilders/mesh.txbuilder";
 import { blockfrostProvider } from "../providers/cardano";
-import { APP_MNEMONIC, APP_NETWORK, APP_NETWORK_ID, BLOCKFROST_API_KEY } from "../constants/enviroments";
+import { APP_MNEMONIC, APP_NETWORK, APP_NETWORK_ID } from "../constants/enviroments";
 import { DECIMAL_PLACE } from "../constants/common.constant";
 import { getHistories } from "@/services/treasury";
 
@@ -32,21 +32,30 @@ describe("A multisig treasury is a shared fund where spending requires approval 
 
     test("Init", async function () {
         // return;
+        const utxo = (await meshWallet.getUtxos()).find((item) => {
+            const amount = item.output.amount;
+            return amount.length === 1 && amount[0].unit === "lovelace" && Number(amount[0].quantity) >= 14 * DECIMAL_PLACE;
+        });
+        if (!utxo) throw new Error("A pure ADA UTxO with at least 14 ADA is required for this integration test.");
+
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
-            threshold: 2,
-            allowance: 20 * DECIMAL_PLACE,
+            utxoRef: { txHash: utxo.input.txHash, outputIndex: utxo.input.outputIndex },
             name: "Aiken Course 2026",
         });
 
         await meshTxBuilder.initalize();
 
         const unsignedTx: string = await meshTxBuilder.init({
-            receiver: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
             owners: [
-                "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
-                "addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew",
+                deserializeAddress("addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g").pubKeyHash,
+                deserializeAddress("addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew").pubKeyHash,
             ],
+            signers: [],
+            noSigners: [],
+            threshold: 2,
+            allowance: 20 * DECIMAL_PLACE,
+            initial: String(11 * DECIMAL_PLACE),
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
@@ -64,8 +73,6 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
-            threshold: 2,
-            allowance: 15 * DECIMAL_PLACE,
             name: "Aiken Course 2026",
         });
 
@@ -88,13 +95,11 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
-            threshold: 2,
-            allowance: 15 * DECIMAL_PLACE,
             name: "Aiken Course 2026",
         });
         await meshTxBuilder.initalize();
 
-        const unsignedTx: string = await meshTxBuilder.signature();
+        const unsignedTx: string = await meshTxBuilder.vote({ approve: true });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
         const txHash = await meshWallet.submitTx(signedTx);
@@ -110,8 +115,6 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
-            threshold: 2,
-            allowance: 15 * DECIMAL_PLACE,
             name: "Aiken Course 2026",
         });
 
@@ -134,8 +137,6 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
-            threshold: 2,
-            allowance: 15 * DECIMAL_PLACE,
             name: "Aiken Course 2026",
         });
 

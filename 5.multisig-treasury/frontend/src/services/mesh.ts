@@ -1,6 +1,6 @@
 "use server";
 
-import { MeshWallet } from "@meshsdk/core";
+import { deserializeAddress, MeshWallet } from "@meshsdk/core";
 import { isNil } from "lodash";
 import { DECIMAL_PLACE } from "@/constants/common.constant";
 import { APP_NETWORK_ID } from "@/constants/enviroments";
@@ -87,15 +87,15 @@ export const init = async function ({
     threshold,
     allowance,
     title,
-    receiver,
     owners,
+    initial,
 }: {
     walletAddress: string;
     threshold: number;
     allowance: number;
     title: string;
-    receiver: string;
     owners: string[];
+    initial: number;
 }) {
     const meshWallet = new MeshWallet({
         networkId: APP_NETWORK_ID,
@@ -107,16 +107,20 @@ export const init = async function ({
         },
     });
 
-    const meshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-        threshold: threshold,
-        allowance: allowance,
-        name: title,
-    });
+    const candidates = await getUTxOOnlyLovelace({ walletAddress, quantity: initial + 3 * DECIMAL_PLACE });
+    const utxoRef = candidates[0];
+    if (!utxoRef) throw new Error("Wallet needs a pure ADA UTxO with enough balance to initialize the treasury.");
+
+    const meshTxBuilder = new MeshTxBuilder({ meshWallet, utxoRef, name: title });
+    await meshTxBuilder.initalize();
 
     const unsignedTx = await meshTxBuilder.init({
-        receiver: receiver,
-        owners: owners,
+        owners: owners.map((owner) => deserializeAddress(owner).pubKeyHash),
+        signers: [],
+        noSigners: [],
+        threshold,
+        allowance,
+        initial: String(initial),
     });
 
     return unsignedTx;
@@ -147,48 +151,14 @@ export const deposit = async function ({
     });
 
     const meshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-        threshold: threshold,
-        allowance: allowance,
+        meshWallet,
         name: title,
     });
+    await meshTxBuilder.initalize();
 
     const unsignedTx = await meshTxBuilder.deposit({
         quantity: String(amount),
     });
-
-    return unsignedTx;
-};
-
-export const signature = async function ({
-    walletAddress,
-    threshold,
-    allowance,
-    title,
-}: {
-    walletAddress: string;
-    threshold: number;
-    allowance: number;
-    title: string;
-}) {
-    const meshWallet = new MeshWallet({
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "address",
-            address: walletAddress,
-        },
-    });
-
-    const meshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-        threshold: threshold,
-        allowance: allowance,
-        name: title,
-    });
-
-    const unsignedTx = await meshTxBuilder.signature();
 
     return unsignedTx;
 };
@@ -245,11 +215,10 @@ export const withdraw = async function ({
     });
 
     const meshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-        threshold: threshold,
-        allowance: allowance,
+        meshWallet,
         name: title,
     });
+    await meshTxBuilder.initalize();
     const unsignedTx = await meshTxBuilder.execute({
         amount: String(amount * DECIMAL_PLACE),
     });

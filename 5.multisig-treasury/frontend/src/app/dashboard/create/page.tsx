@@ -16,7 +16,7 @@ import { images } from "@/public/images";
 import { DECIMAL_PLACE } from "@/constants/common.constant";
 import { createTreasury } from "@/services/treasury";
 
-import { getUTxOOnlyLovelace, init, submitTx } from "@/services/mesh";
+import { init, submitTx } from "@/services/mesh";
 import { TreasurySchema } from "@/lib/schema";
 import {
     AlertDialog,
@@ -49,10 +49,10 @@ export default function Page() {
         defaultValues: {
             title: "",
             description: "",
-            receiver: "",
             image: "",
             threshold: 2,
             allowance: 10,
+            initialAmount: 11,
             owners: "",
         },
     });
@@ -70,21 +70,21 @@ export default function Page() {
                     threshold: data.threshold,
                     allowance: data.allowance * DECIMAL_PLACE,
                     title: data.title,
-                    receiver: data.receiver,
                     owners: owners,
+                    initial: data.initialAmount * DECIMAL_PLACE,
                 });
                 const signedTx = await signTx(unsignedTx);
-                const txHash = await submitTx({ signedTx: signedTx });
-                if (txHash) {
-                    await createTreasury({
-                        name: data.title,
-                        description: data.description,
-                        image: data.image || "",
-                        threshold: data.threshold,
-                        allowance: data.allowance * DECIMAL_PLACE,
-                        owner: address,
-                    });
-                }
+                const result = await submitTx({ signedTx });
+                if (!result.result) throw new Error(result.message);
+
+                await createTreasury({
+                    name: data.title,
+                    description: data.description,
+                    image: data.image || "",
+                    threshold: data.threshold,
+                    allowance: data.allowance * DECIMAL_PLACE,
+                    owner: address,
+                });
                 toast.success("Proposal created successfully!");
                 queryClient.invalidateQueries({ queryKey: ["status", "proposal", "proposals"] });
                 await Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["proposal"] })]);
@@ -101,10 +101,10 @@ export default function Page() {
         () => [
             { id: "title", label: "Title", type: "text", placeholder: "Enter your title" },
             { id: "description", label: "Description", type: "textarea", placeholder: "Enter your description", rows: 4 },
-            { id: "receiver", label: "Receiver", type: "text", placeholder: "Enter receiver address" },
             { id: "image", label: "Image URL", type: "text", placeholder: "Enter your image URL" },
             { id: "threshold", label: "Max threshold", type: "number", placeholder: "Enter max number of threshold", min: 1, max: 1000 },
             { id: "allowance", label: "Allowance (ADA)", type: "number", placeholder: "Enter allowance in ADA", min: 0 },
+            { id: "initialAmount", label: "Initial treasury balance (ADA)", type: "number", placeholder: "Enter initial balance", min: 2 },
             {
                 id: "owners",
                 label: "Owners (comma-separated addresses)",
@@ -241,10 +241,9 @@ export default function Page() {
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
-                                                <AlertDialogTitle>Confirm Proposal Registration</AlertDialogTitle>
+                                                <AlertDialogTitle>Confirm treasury initialization</AlertDialogTitle>
                                                 <AlertDialogDescription>
-                                                    You need to commit more than 10 ADA to register as a proposal. This amount will be refunded when
-                                                    the session ends.
+                                                    Initialize this treasury with {formValues.initialAmount} ADA. The balance stays in the treasury; network fees are additional.
                                                 </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
@@ -270,7 +269,7 @@ export default function Page() {
                             <Treasury
                                 title={formValues.title || "Open source dynamic assets (Token/NFT) generator (CIP68)"}
                                 image={formValues.image || images.logo}
-                                receiver={formValues.receiver || "addr1q9..."}
+                                receiver={address || "Connect a wallet"}
                                 slug=""
                                 description={formValues.description || "A treasury for open source dynamic assets (Token/NFT) generator (CIP68)"}
                                 datetime={new Date().toLocaleString("en-GB", {

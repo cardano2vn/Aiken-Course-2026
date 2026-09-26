@@ -161,7 +161,7 @@ export default function Page() {
                                     <Treasury
                                         image={result.image || images.logo}
                                         title={result.title || "Untitled Proposal"}
-                                        receiver={result.receiver || "Unknown Author"}
+                                        receiver={result.owner || "Unknown owner"}
                                         slug={result.id || ""}
                                         datetime={new Date(Number(result.createdAt || Date.now())).toLocaleString("en-GB", {
                                             day: "2-digit",
