@@ -15,7 +15,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
 
     beforeEach(async function () {
         meshWallet = new MeshWallet({
-            accountIndex: 0,
+            accountIndex: 2,
             networkId: APP_NETWORK_ID,
             fetcher: blockfrostProvider,
             submitter: blockfrostProvider,
@@ -26,7 +26,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         });
 
         utxoRef = {
-            txHash: "1d95deab3066a14a57d97040271df241e462e88a40d3eb1488404b8c5a3a9795",
+            txHash: "28e367caa3a748953db53de106f8838cf22ee6c63ffb7886a122322631fcb896",
             outputIndex: 3,
         };
     });
@@ -108,7 +108,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
     });
 
     test("Propose", async function () {
-        // return;
+        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
             utxoRef: utxoRef,
@@ -164,7 +164,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
 
         await meshTxBuilder.initalize();
         const unsignedTx: string = await meshTxBuilder.execute({
-            amount: String(20 * DECIMAL_PLACE),
+            amount: String(10 * DECIMAL_PLACE),
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
@@ -178,7 +178,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
     });
 
     test("End", async function () {
-        return;
+        // return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
             utxoRef: utxoRef,

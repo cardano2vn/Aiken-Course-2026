@@ -119,7 +119,7 @@ export class MeshTxBuilder extends MeshAdapter {
 
         const newDatum = {
             ...datum,
-            signers: [walletAddress],
+            signers: [senderPubKeyHash],
             noSigners: [],
             proposal: { recipient, amount: Number(amount) },
         };
@@ -159,13 +159,13 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
-        if (datum.signers.includes(walletAddress) || datum.noSigners.includes(walletAddress)) {
+        if (datum.signers.includes(voterPubKeyHash) || datum.noSigners.includes(voterPubKeyHash)) {
             throw new Error("Owner này đã vote rồi.");
         }
 
         const newDatum = approve
-            ? { ...datum, signers: [walletAddress, ...datum.signers], noSigners: datum.noSigners }
-            : { ...datum, noSigners: [walletAddress, ...datum.noSigners], signers: datum.signers };
+            ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
+            : { ...datum, noSigners: [voterPubKeyHash, ...datum.noSigners], signers: datum.signers };
 
         const unsignedTx = this.meshTxBuilder;
 
@@ -197,11 +197,20 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
-        if (!datum.proposal) {
+        const proposal = datum.proposal;
+        if (!proposal) {
             throw new Error("Không có proposal để execute.");
         }
         if (datum.signers.length < datum.threshold) {
             throw new Error("Chưa đủ chữ ký YES.");
+        }
+
+        const changeAddress =
+            walletAddress === proposal.recipient
+                ? (await this.meshWallet.getUnusedAddresses()).find((address) => address !== proposal.recipient)
+                : walletAddress;
+        if (!changeAddress) {
+            throw new Error("Recipient matches the wallet change address and no alternate wallet address is available.");
         }
 
         const ownLovelace = BigInt(utxo.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? "0");
@@ -219,7 +228,7 @@ export class MeshTxBuilder extends MeshAdapter {
             .txInInlineDatumPresent()
             .txInRedeemerValue(ActionRedeemer.Execute())
             .txInScript(this.spendScriptCbor)
-            .txOut(datum.proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
+            .txOut(proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
 
         if (isClosing) {
             if (!this.utxoRef) {
@@ -243,7 +252,7 @@ export class MeshTxBuilder extends MeshAdapter {
 
         unsignedTx
             .selectUtxosFrom(utxos)
-            .changeAddress(walletAddress)
+            .changeAddress(changeAddress)
             .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
             .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
             .setNetwork(APP_NETWORK);
@@ -252,28 +261,22 @@ export class MeshTxBuilder extends MeshAdapter {
     };
 
     end = async (): Promise<string> => {
-        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
         const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
 
         if (!utxo) {
             throw new Error("Cannot find proposal from Treasury");
         }
 
-        const unsignedTx = this.meshTxBuilder;
+        const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+        if (!datum.proposal) {
+            throw new Error("Cannot end Treasury without an active proposal for the full balance.");
+        }
 
-        unsignedTx
-            .mintPlutusScriptV3()
-            .mint("-1", this.policyId, stringToHex(this.name))
-            .mintingScript(this.mintScriptCbor)
-            .mintRedeemerValue(mConStr1([]));
+        const treasuryBalance = BigInt(utxo.output.amount.find((asset) => asset.unit === "lovelace")?.quantity ?? "0");
+        if (BigInt(datum.proposal.amount) !== treasuryBalance) {
+            throw new Error("Cannot end Treasury: proposal amount must equal the full treasury balance.");
+        }
 
-        unsignedTx
-            .selectUtxosFrom(utxos)
-            .changeAddress(walletAddress)
-            .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
-            .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
-            .setNetwork(APP_NETWORK);
-
-        return await unsignedTx.complete();
+        return this.execute({ amount: treasuryBalance.toString() });
     };
 }

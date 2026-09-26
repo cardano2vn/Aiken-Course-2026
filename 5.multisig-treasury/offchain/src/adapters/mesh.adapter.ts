@@ -13,10 +13,12 @@ import {
     serializePlutusScript,
     UTxO,
     mOutputReference,
+    type Data,
 } from "@meshsdk/core";
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import plutus from "../libs/plutus.json";
 import { Plutus } from "../types";
+import { decodedPlutusDataToMeshData } from "../utils/types";
 import { DECIMAL_PLACE, title } from "../constants/common";
 import { APP_NETWORK_ID } from "../constants/enviroments";
 
@@ -253,7 +255,7 @@ export class MeshAdapter {
         allowance: number;
         signers: string[];
         noSigners: string[];
-        proposal: { recipient: string; amount: number } | null;
+        proposal: { recipient: string; amount: number; rawPlutusData?: Data } | null;
     } => {
         try {
             const datum = deserializeDatum(plutusData);
@@ -262,6 +264,15 @@ export class MeshAdapter {
 
             const proposalField = fields[6];
             const hasProposal = proposalField && proposalField.fields && proposalField.fields.length > 0;
+            const proposal = hasProposal ? proposalField.fields[0] : null;
+            const recipientAddress = proposal?.fields?.[0];
+            const recipientPubKeyHash = recipientAddress?.fields?.[0]?.fields?.[0]?.bytes;
+            const stakeOption = recipientAddress?.fields?.[1];
+            const stakeCredentialHash = Number(stakeOption?.constructor) === 0 ? stakeOption.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes : undefined;
+
+            if (hasProposal && !recipientPubKeyHash) {
+                throw new Error("Proposal recipient is not a supported verification-key address.");
+            }
 
             return {
                 policyId: fields[0].bytes,
@@ -272,8 +283,9 @@ export class MeshAdapter {
                 noSigners: fields[5].list.map((item: any) => item.bytes),
                 proposal: hasProposal
                     ? {
-                          recipient: proposalField.fields[0]?.fields?.[0]?.bytes || "",
-                          amount: Number(proposalField.fields[0]?.fields?.[1]?.int || 0),
+                          recipient: serializeAddressObj(pubKeyAddress(recipientPubKeyHash, stakeCredentialHash), APP_NETWORK_ID),
+                          amount: Number(proposal.fields?.[1]?.int || 0),
+                          rawPlutusData: decodedPlutusDataToMeshData(proposalField),
                       }
                     : null,
             };
