@@ -1,10 +1,10 @@
 import { MeshAdapter } from "../adapters/mesh.adapter";
 import { APP_NETWORK } from "../constants/enviroments";
-import { deserializeAddress, mConStr0, mConStr1, mConStr2, stringToHex, mPubKeyAddress } from "@meshsdk/core";
+import { deserializeAddress, mConStr0, mConStr1, stringToHex } from "@meshsdk/core";
+import { ActionRedeemer, datumToPlutusData } from "../utils/types";
 
 export class MeshTxBuilder extends MeshAdapter {
     init = async ({
-        receiver,
         signers,
         noSigners,
         owners,
@@ -12,7 +12,6 @@ export class MeshTxBuilder extends MeshAdapter {
         threshold,
         allowance,
     }: {
-        receiver: string;
         owners: Array<string>;
         signers: Array<string>;
         noSigners: Array<string>;
@@ -38,15 +37,17 @@ export class MeshTxBuilder extends MeshAdapter {
                 { unit: "lovelace", quantity: initial },
                 { unit: this.policyId + stringToHex(this.name), quantity: "1" },
             ])
-            .txOutInlineDatumValue(mConStr0([
-                this.policyId,
-                owners,
-                threshold,
-                allowance,
-                signers,
-                noSigners,
-                mConStr1([]),
-            ]));
+            .txOutInlineDatumValue(
+                datumToPlutusData({
+                    policyId: this.policyId,
+                    owners,
+                    threshold,
+                    allowance,
+                    signers,
+                    noSigners,
+                    proposal: null,
+                }),
+            );
 
         unsignedTx
             .selectUtxosFrom(utxos)
@@ -58,201 +59,207 @@ export class MeshTxBuilder extends MeshAdapter {
         return await unsignedTx.complete();
     };
 
-    // deposit = async ({ quantity }: { quantity: string }): Promise<string> => {
-    //     const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-    //     const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
-
-    //     const unsignedTx = this.meshTxBuilder;
-
-    //     if (utxo) {
-    //         const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
-    //         unsignedTx
-    //             .spendingPlutusScriptV3()
-    //             .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    //             .txInInlineDatumPresent()
-    //             .txInRedeemerValue(mConStr0([]))
-    //             .txInScript(this.spendScriptCbor)
-
-    //             .txOut(this.spendAddress, [
-    //                 { unit: this.policyId + stringToHex(this.name), quantity: "1" },
-    //                 {
-    //                     unit: "lovelace",
-    //                     quantity: String(
-    //                         utxo.output.amount.reduce((total, asset) => {
-    //                             if (asset.unit === "lovelace") {
-    //                                 return total + Number(asset.quantity);
-    //                             }
-    //                             return total;
-    //                         }, Number(quantity)),
-    //                     ),
-    //                 },
-    //             ])
-    //             .txOutInlineDatumValue(
-    //                 mConStr0([
-    //                     mPubKeyAddress(deserializeAddress(datum.receiver!).pubKeyHash, deserializeAddress(datum.receiver!).stakeCredentialHash),
-    //                     datum.owners!.map((owner) =>
-    //                         mPubKeyAddress(deserializeAddress(owner).pubKeyHash, deserializeAddress(owner).stakeCredentialHash),
-    //                     ),
-    //                     datum.signers!.map((signer) =>
-    //                         mPubKeyAddress(deserializeAddress(signer!).pubKeyHash, deserializeAddress(signer).stakeCredentialHash),
-    //                     ),
-    //                 ]),
-    //             );
-    //     } else {
-    //         throw new Error("No proposals were found from Treasury");
-    //     }
-    //     unsignedTx
-    //         .selectUtxosFrom(utxos)
-    //         .changeAddress(walletAddress)
-    //         .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
-    //         .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
-    //         .setNetwork(APP_NETWORK);
-
-    //     return await unsignedTx.complete();
-    // };
-
-    // signature = async (): Promise<string> => {
-    //     const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-
-    //     const unsignedTx = this.meshTxBuilder;
-    //     const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
-
-    //     if (!utxo) {
-    //         throw new Error("No proposals were found from Treasury");
-    //     }
-
-    //     const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
-
-    //     if (datum.owners.includes(walletAddress) && !datum.signers.includes(walletAddress)) {
-    //         unsignedTx
-    //             .spendingPlutusScriptV3()
-    //             .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    //             .txInInlineDatumPresent()
-    //             .txInRedeemerValue(mConStr2([]))
-    //             .txInScript(this.spendScriptCbor)
-    //             .txOut(this.spendAddress, utxo.output.amount)
-    //             .txOutInlineDatumValue(
-    //                 mConStr0([
-    //                     mPubKeyAddress(deserializeAddress(datum.receiver!).pubKeyHash, deserializeAddress(datum.receiver!).stakeCredentialHash),
-    //                     datum.owners!.map((owner) =>
-    //                         mPubKeyAddress(deserializeAddress(owner).pubKeyHash, deserializeAddress(owner).stakeCredentialHash),
-    //                     ),
-    //                     [
-    //                         ...datum.signers!.map((signer) =>
-    //                             mPubKeyAddress(deserializeAddress(signer).pubKeyHash, deserializeAddress(signer).stakeCredentialHash),
-    //                         ),
-    //                         mPubKeyAddress(deserializeAddress(walletAddress).pubKeyHash, deserializeAddress(walletAddress).stakeCredentialHash),
-    //                     ],
-    //                 ]),
-    //             );
-    //     } else {
-    //         throw new Error("The owner has already signed.");
-    //     }
-
-    //     unsignedTx
-    //         .selectUtxosFrom(utxos)
-    //         .changeAddress(walletAddress)
-    //         .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
-    //         .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
-    //         .setNetwork(APP_NETWORK);
-    //     return await unsignedTx.complete();
-    // };
-
-    // execute = async ({ amount }: { amount: string }): Promise<string> => {
-    //     const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-
-    //     const unsignedTx = this.meshTxBuilder;
-
-    //     const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
-
-    //     if (!utxo) {
-    //         throw new Error("Cannot find proposal from Treasury");
-    //     }
-
-    //     const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
-    //     const value = utxo.output.amount.reduce((total, asset) => {
-    //         if (asset.unit === "lovelace") {
-    //             return total + Number(asset.quantity);
-    //         }
-    //         return total;
-    //     }, Number(0));
-    //     if (datum.signers.length >= this.threshold || Number(amount) > this.allowance) {
-    //         if (value === Number(amount)) {
-    //             unsignedTx
-    //                 .mintPlutusScriptV3()
-    //                 .mint("-1", this.policyId, stringToHex(this.name))
-    //                 .mintRedeemerValue(mConStr1([]))
-    //                 .mintingScript(this.mintScriptCbor)
-
-    //                 .spendingPlutusScriptV3()
-    //                 .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    //                 .txInInlineDatumPresent()
-    //                 .txInRedeemerValue(mConStr1([]))
-    //                 .txInScript(this.spendScriptCbor)
-
-    //                 .txOut(datum.receiver, [
-    //                     {
-    //                         unit: "lovelace",
-    //                         quantity: String(value),
-    //                     },
-    //                 ]);
-    //         } else {
-    //             unsignedTx
-    //                 .spendingPlutusScriptV3()
-    //                 .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    //                 .txInInlineDatumPresent()
-    //                 .txInRedeemerValue(mConStr1([]))
-    //                 .txInScript(this.spendScriptCbor)
-
-    //                 .txOut(datum.receiver, [
-    //                     {
-    //                         unit: "lovelace",
-    //                         quantity: amount,
-    //                     },
-    //                 ])
-    //                 .txOut(this.spendAddress, [
-    //                     {
-    //                         unit: "lovelace",
-    //                         quantity: String(value - Number(amount)),
-    //                     },
-    //                     {
-    //                         unit: this.policyId + stringToHex(this.name),
-    //                         quantity: "1",
-    //                     },
-    //                 ])
-    //                 .txOutInlineDatumValue(
-    //                     mConStr0([
-    //                         mPubKeyAddress(deserializeAddress(datum.receiver!).pubKeyHash, deserializeAddress(datum.receiver!).stakeCredentialHash),
-    //                         datum.owners!.map((owner) =>
-    //                             mPubKeyAddress(deserializeAddress(owner).pubKeyHash, deserializeAddress(owner).stakeCredentialHash),
-    //                         ),
-    //                         [],
-    //                     ]),
-    //                 );
-    //         }
-    //     } else {
-    //         throw new Error("Not enough signatures to proceed with disbursement.");
-    //     }
-    //     unsignedTx
-    //         .selectUtxosFrom(utxos)
-    //         .changeAddress(walletAddress)
-    //         .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
-    //         .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
-    //         .setNetwork(APP_NETWORK);
-
-    //     return await unsignedTx.complete();
-    // };
-
-    end = async (): Promise<string> => {
+    deposit = async ({ quantity }: { quantity: string }): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+        const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
+        if (!utxo) {
+            throw new Error("Cannot find proposal from Treasury");
+        }
+
+        const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+        const lovelace = utxo.output.amount.find((a) => a.unit === "lovelace");
+        const currentLovelace = BigInt(lovelace?.quantity ?? "0");
+        const nextLovelace = (currentLovelace + BigInt(quantity)).toString();
 
         const unsignedTx = this.meshTxBuilder;
 
+        unsignedTx
+            .spendingPlutusScriptV3()
+            .txIn(utxo.input.txHash, utxo.input.outputIndex)
+            .txInInlineDatumPresent()
+            .txInRedeemerValue(ActionRedeemer.Deposit())
+            .txInScript(this.spendScriptCbor)
+            .txOut(this.spendAddress, [
+                { unit: "lovelace", quantity: nextLovelace },
+                { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+            ])
+            .txOutInlineDatumValue(datumToPlutusData(datum));
+
+        unsignedTx
+            .selectUtxosFrom(utxos)
+            .changeAddress(walletAddress)
+            .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
+            .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
+            .setNetwork(APP_NETWORK);
+
+        return await unsignedTx.complete();
+    };
+
+    propose = async ({ recipient, amount }: { recipient: string; amount: string }): Promise<string> => {
+        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+        const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
+
+        if (!utxo) {
+            throw new Error("No proposals were found from Treasury");
+        }
+
+        const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+        const senderPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+        const amountValue = BigInt(amount);
+
+        if (amountValue > BigInt(datum.allowance)) {
+            throw new Error("Vượt allowance của quỹ.");
+        }
+
+        const lovelaceAsset = utxo.output.amount.find((a) => a.unit === "lovelace");
+        const treasuryBalance = lovelaceAsset ? BigInt(lovelaceAsset.quantity) : 0;
+        if (amountValue > treasuryBalance) {
+            throw new Error("Vượt số dư treasury.");
+        }
+
+        const newDatum = {
+            ...datum,
+            signers: [walletAddress],
+            noSigners: [],
+            proposal: { recipient, amount: Number(amount) },
+        };
+
+        const unsignedTx = this.meshTxBuilder;
+
+        unsignedTx
+            .spendingPlutusScriptV3()
+            .txIn(utxo.input.txHash, utxo.input.outputIndex)
+            .txInInlineDatumPresent()
+            .txInRedeemerValue(ActionRedeemer.Propose(senderPubKeyHash, recipient, Number(amount)))
+            .txInScript(this.spendScriptCbor)
+            .txOut(this.spendAddress, utxo.output.amount)
+            .txOutInlineDatumValue(datumToPlutusData(newDatum));
+
+        unsignedTx
+            .selectUtxosFrom(utxos)
+            .changeAddress(walletAddress)
+            .requiredSignerHash(senderPubKeyHash)
+            .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
+            .setNetwork(APP_NETWORK);
+
+        return await unsignedTx.complete();
+    };
+
+    vote = async ({ approve }: { approve: boolean }): Promise<string> => {
+        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
         const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
 
         if (!utxo) {
             throw new Error("Cannot find proposal from Treasury");
         }
+
+        const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+        if (!datum.proposal) {
+            throw new Error("Không có proposal đang mở để vote.");
+        }
+
+        const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+        if (datum.signers.includes(walletAddress) || datum.noSigners.includes(walletAddress)) {
+            throw new Error("Owner này đã vote rồi.");
+        }
+
+        const newDatum = approve
+            ? { ...datum, signers: [walletAddress, ...datum.signers], noSigners: datum.noSigners }
+            : { ...datum, noSigners: [walletAddress, ...datum.noSigners], signers: datum.signers };
+
+        const unsignedTx = this.meshTxBuilder;
+
+        unsignedTx
+            .spendingPlutusScriptV3()
+            .txIn(utxo.input.txHash, utxo.input.outputIndex)
+            .txInInlineDatumPresent()
+            .txInRedeemerValue(ActionRedeemer.Vote(voterPubKeyHash, approve))
+            .txInScript(this.spendScriptCbor)
+            .txOut(this.spendAddress, utxo.output.amount)
+            .txOutInlineDatumValue(datumToPlutusData(newDatum));
+
+        unsignedTx
+            .selectUtxosFrom(utxos)
+            .changeAddress(walletAddress)
+            .requiredSignerHash(voterPubKeyHash)
+            .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
+            .setNetwork(APP_NETWORK);
+
+        return await unsignedTx.complete();
+    };
+
+    execute = async ({ amount }: { amount: string }): Promise<string> => {
+        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+        const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
+
+        if (!utxo) {
+            throw new Error("Cannot find proposal from Treasury");
+        }
+
+        const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+        if (!datum.proposal) {
+            throw new Error("Không có proposal để execute.");
+        }
+        if (datum.signers.length < datum.threshold) {
+            throw new Error("Chưa đủ chữ ký YES.");
+        }
+
+        const ownLovelace = BigInt(utxo.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? "0");
+        const amountValue = BigInt(amount);
+        if (amountValue > ownLovelace) {
+            throw new Error("amount vượt số dư treasury — dữ liệu không hợp lệ.");
+        }
+
+        const isClosing = amountValue === ownLovelace;
+        const unsignedTx = this.meshTxBuilder;
+
+        unsignedTx
+            .spendingPlutusScriptV3()
+            .txIn(utxo.input.txHash, utxo.input.outputIndex)
+            .txInInlineDatumPresent()
+            .txInRedeemerValue(ActionRedeemer.Execute())
+            .txInScript(this.spendScriptCbor)
+            .txOut(datum.proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
+
+        if (isClosing) {
+            if (!this.utxoRef) {
+                throw new Error("Đóng quỹ cần truyền utxoRef gốc để burn identity token trong cùng tx.");
+            }
+            unsignedTx
+                .mintPlutusScriptV3()
+                .mint("-1", this.policyId, stringToHex(this.name))
+                .mintingScript(this.mintScriptCbor)
+                .mintRedeemerValue(mConStr1([]));
+        } else {
+            const remaining = (ownLovelace - amountValue).toString();
+            const newDatum = { ...datum, signers: [], noSigners: [], proposal: null };
+            unsignedTx
+                .txOut(this.spendAddress, [
+                    { unit: "lovelace", quantity: remaining },
+                    { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+                ])
+                .txOutInlineDatumValue(datumToPlutusData(newDatum));
+        }
+
+        unsignedTx
+            .selectUtxosFrom(utxos)
+            .changeAddress(walletAddress)
+            .requiredSignerHash(deserializeAddress(walletAddress).pubKeyHash)
+            .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
+            .setNetwork(APP_NETWORK);
+
+        return await unsignedTx.complete();
+    };
+
+    end = async (): Promise<string> => {
+        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+        const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + stringToHex(this.name));
+
+        if (!utxo) {
+            throw new Error("Cannot find proposal from Treasury");
+        }
+
+        const unsignedTx = this.meshTxBuilder;
 
         unsignedTx
             .mintPlutusScriptV3()

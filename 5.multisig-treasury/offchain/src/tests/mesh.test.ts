@@ -1,4 +1,4 @@
-import { MeshWallet, UTxO } from "@meshsdk/core";
+import { MeshWallet, deserializeAddress } from "@meshsdk/core";
 import { MeshTxBuilder } from "../txbuilders/mesh.txbuilder";
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import { APP_MNEMONIC, APP_NETWORK, APP_NETWORK_ID } from "../constants/enviroments";
@@ -6,9 +6,7 @@ import { DECIMAL_PLACE } from "../constants/common";
 
 describe("A multisig treasury is a shared fund where spending requires approval from at least m of n participants, with a predefined spending limit for security.", function () {
     let meshWallet: MeshWallet;
-
-
-
+    let utxoRef: { txHash: string; outputIndex: number };
     // account 0 - addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g
     // account 1 - addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew
     // account 2 - addr_test1qqy0z4ekhv8gcnmvkeakkaher82rlrx2yu9y79cjf4r704pqg73fhf002takqewlvjcy39dellyumg43f08uea0p6mps7pw77f
@@ -26,38 +24,78 @@ describe("A multisig treasury is a shared fund where spending requires approval 
                 words: APP_MNEMONIC?.split(" ") || [],
             },
         });
+
+        utxoRef = {
+            txHash: "022e6dc0e7f2f6a36a4702f301906a2378801124d79a468363d157c15fece6d4",
+            outputIndex: 0,
+        };
     });
 
     jest.setTimeout(600000000);
 
     test("Init", async function () {
-        // return;
-        const utxoRef = (await meshWallet.getUtxos()).find((u) => u.output.amount.some((a) => a.unit === "lovelace" && Number(a.quantity) >= 5_000_000));
+        const utxos = await meshWallet.getUtxos();
 
-        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-            meshWallet: meshWallet,
-            utxoRef: utxoRef?.input as { txHash: string; outputIndex: number },
+        const selectedUtxo = utxos.find((u) => u.output.amount.some((a) => a.unit === "lovelace" && Number(a.quantity) >= 5_000_000));
+
+        if (!selectedUtxo) {
+            throw new Error("No valid wallet UTxO for one-shot utxoRef.");
+        }
+
+        const utxoRef = {
+            txHash: selectedUtxo!.input.txHash,
+            outputIndex: selectedUtxo!.input.outputIndex,
+        };
+        console.log("utxoRef", utxoRef);
+
+        const meshTxBuilder = new MeshTxBuilder({
+            meshWallet,
+            utxoRef,
             name: "Aiken Course 2026",
         });
 
         await meshTxBuilder.initalize();
 
-        const unsignedTx: string = await meshTxBuilder.init({
-            receiver: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
+        const unsignedTx = await meshTxBuilder.init({
             owners: [
-                "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
-                "addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew",
-                "addr_test1qqy0z4ekhv8gcnmvkeakkaher82rlrx2yu9y79cjf4r704pqg73fhf002takqewlvjcy39dellyumg43f08uea0p6mps7pw77f",
+                deserializeAddress("addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g")
+                    .pubKeyHash,
+                deserializeAddress("addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew")
+                    .pubKeyHash,
+                deserializeAddress("addr_test1qqy0z4ekhv8gcnmvkeakkaher82rlrx2yu9y79cjf4r704pqg73fhf002takqewlvjcy39dellyumg43f08uea0p6mps7pw77f")
+                    .pubKeyHash,
             ],
             signers: [],
             noSigners: [],
             threshold: 2,
             allowance: 20 * DECIMAL_PLACE,
-            initial: String(10 * DECIMAL_PLACE),    
+            initial: String(10 * DECIMAL_PLACE),
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
+        const txHash = await meshWallet.submitTx(signedTx);
 
+        await new Promise<void>((resolve) => {
+            blockfrostProvider.onTxConfirmed(txHash, () => {
+                console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
+                resolve();
+            });
+        });
+    });
+
+    test("Deposit", async function () {
+        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
+            meshWallet: meshWallet,
+            utxoRef: utxoRef,
+            name: "Aiken Course 2026",
+        });
+
+        await meshTxBuilder.initalize();
+        const unsignedTx: string = await meshTxBuilder.deposit({
+            quantity: String(10 * DECIMAL_PLACE),
+        });
+
+        const signedTx = await meshWallet.signTx(unsignedTx, true);
         const txHash = await meshWallet.submitTx(signedTx);
         await new Promise<void>(function (resolve) {
             blockfrostProvider.onTxConfirmed(txHash, () => {
@@ -67,96 +105,95 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         });
     });
 
-    test("Deposit", async function () {
-        return;
-        // const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        //     meshWallet: meshWallet,
-        //     threshold: 2,
-        //     allowance: 20 * DECIMAL_PLACE,
-        //     name: "Aiken Course 2026",
-        // });
+    test("Propose", async function () {
+        // return;
+        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
+            meshWallet: meshWallet,
+            utxoRef: utxoRef,
+            name: "Aiken Course 2026",
+        });
 
-        // await meshTxBuilder.initalize();
-        // const unsignedTx: string = await meshTxBuilder.deposit({
-        //     quantity: String(10 * DECIMAL_PLACE),
-        // });
+        await meshTxBuilder.initalize();
+        const unsignedTx: string = await meshTxBuilder.propose({
+            recipient: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
+            amount: String(10 * DECIMAL_PLACE),
+        });
 
-        // const signedTx = await meshWallet.signTx(unsignedTx, true);
-        // const txHash = await meshWallet.submitTx(signedTx);
-        // await new Promise<void>(function (resolve) {
-        //     blockfrostProvider.onTxConfirmed(txHash, () => {
-        //         console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
-        //         resolve();
-        //     });
-        // });
+        const signedTx = await meshWallet.signTx(unsignedTx, true);
+        const txHash = await meshWallet.submitTx(signedTx);
+        await new Promise<void>(function (resolve) {
+            blockfrostProvider.onTxConfirmed(txHash, () => {
+                console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
+                resolve();
+            });
+        });
     });
 
-    test("Signature", async function () {
+    test("Vote", async function () {
         return;
-        // const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        //     meshWallet: meshWallet,
-        //     threshold: 2,
-        //     allowance: 20 * DECIMAL_PLACE,
-        //     name: "Aiken Course 2026",
-        // });
-        // await meshTxBuilder.initalize();
+        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
+            meshWallet: meshWallet,
+            utxoRef: utxoRef,
+            name: "Aiken Course 2026",
+        });
 
-        // const unsignedTx: string = await meshTxBuilder.signature();
+        await meshTxBuilder.initalize();
+        const unsignedTx: string = await meshTxBuilder.vote({
+            approve: true,
+        });
 
-        // const signedTx = await meshWallet.signTx(unsignedTx, true);
-        // const txHash = await meshWallet.submitTx(signedTx);
-        // await new Promise<void>(function (resolve) {
-        //     blockfrostProvider.onTxConfirmed(txHash, () => {
-        //         console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
-        //         resolve();
-        //     });
-        // });
+        const signedTx = await meshWallet.signTx(unsignedTx, true);
+        const txHash = await meshWallet.submitTx(signedTx);
+        await new Promise<void>(function (resolve) {
+            blockfrostProvider.onTxConfirmed(txHash, () => {
+                console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
+                resolve();
+            });
+        });
     });
 
     test("Execute", async function () {
         return;
-        // const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        //     meshWallet: meshWallet,
-        //     threshold: 2,
-        //     allowance: 20 * DECIMAL_PLACE,
-        //     name: "Aiken Course 2026",
-        // });
+        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
+            meshWallet: meshWallet,
+            utxoRef: utxoRef,
+            name: "Aiken Course 2026",
+        });
 
-        // await meshTxBuilder.initalize();
-        // const unsignedTx: string = await meshTxBuilder.execute({
-        //     amount: String(20 * DECIMAL_PLACE),
-        // });
+        await meshTxBuilder.initalize();
+        const unsignedTx: string = await meshTxBuilder.execute({
+            amount: String(20 * DECIMAL_PLACE),
+        });
 
-        // const signedTx = await meshWallet.signTx(unsignedTx, true);
-        // const txHash = await meshWallet.submitTx(signedTx);
-        // await new Promise<void>(function (resolve) {
-        //     blockfrostProvider.onTxConfirmed(txHash, () => {
-        //         console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
-        //         resolve();
-        //     });
-        // });
+        const signedTx = await meshWallet.signTx(unsignedTx, true);
+        const txHash = await meshWallet.submitTx(signedTx);
+        await new Promise<void>(function (resolve) {
+            blockfrostProvider.onTxConfirmed(txHash, () => {
+                console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
+                resolve();
+            });
+        });
     });
 
     test("End", async function () {
         return;
-        // const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        //     meshWallet: meshWallet,
-        //     threshold: 2,
-        //     allowance: 20 * DECIMAL_PLACE,
-        //     name: "Aiken Course 2026",
-        // });
+        const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
+            meshWallet: meshWallet,
+            utxoRef: utxoRef,
+            name: "Aiken Course 2026",
+        });
 
-        // await meshTxBuilder.initalize();
+        await meshTxBuilder.initalize();
 
-        // const unsignedTx: string = await meshTxBuilder.end();
+        const unsignedTx: string = await meshTxBuilder.end();
 
-        // const signedTx = await meshWallet.signTx(unsignedTx, true);
-        // const txHash = await meshWallet.submitTx(signedTx);
-        // await new Promise<void>(function (resolve) {
-        //     blockfrostProvider.onTxConfirmed(txHash, () => {
-        //         console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
-        //         resolve();
-        //     });
-        // });
+        const signedTx = await meshWallet.signTx(unsignedTx, true);
+        const txHash = await meshWallet.submitTx(signedTx);
+        await new Promise<void>(function (resolve) {
+            blockfrostProvider.onTxConfirmed(txHash, () => {
+                console.log("https://" + APP_NETWORK + ".cexplorer.io/tx/" + txHash);
+                resolve();
+            });
+        });
     });
 });

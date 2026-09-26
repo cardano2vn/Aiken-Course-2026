@@ -13,7 +13,6 @@ import {
     serializePlutusScript,
     UTxO,
     mOutputReference,
-     
 } from "@meshsdk/core";
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import plutus from "../libs/plutus.json";
@@ -248,57 +247,36 @@ export class MeshAdapter {
     }: {
         plutusData: string;
     }): {
-        receiver: string;
+        policyId: string;
         owners: string[];
+        threshold: number;
+        allowance: number;
         signers: string[];
+        noSigners: string[];
+        proposal: { recipient: string; amount: number } | null;
     } => {
         try {
             const datum = deserializeDatum(plutusData);
 
-            const buildAddress = (paymentHex: string, stakeHex?: string): string => {
-                if (typeof paymentHex !== "string" || paymentHex.length !== 56) {
-                    throw new Error(`Invalid payment hex length (expected 56): ${paymentHex}`);
-                }
-                if (stakeHex && stakeHex.length !== 56) {
-                    throw new Error(`Invalid stake hex length (expected 56): ${stakeHex}`);
-                }
-                return serializeAddressObj(pubKeyAddress(paymentHex, stakeHex || "", false), APP_NETWORK_ID);
+            const fields = datum.fields;
+
+            const proposalField = fields[6];
+            const hasProposal = proposalField && proposalField.fields && proposalField.fields.length > 0;
+
+            return {
+                policyId: fields[0].bytes,
+                owners: fields[1].list.map((item: any) => item.bytes),
+                threshold: Number(fields[2].int),
+                allowance: Number(fields[3].int),
+                signers: fields[4].list.map((item: any) => item.bytes),
+                noSigners: fields[5].list.map((item: any) => item.bytes),
+                proposal: hasProposal
+                    ? {
+                          recipient: proposalField.fields[0]?.fields?.[0]?.bytes || "",
+                          amount: Number(proposalField.fields[0]?.fields?.[1]?.int || 0),
+                      }
+                    : null,
             };
-
-            const receiverPayment = datum.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-            const receiverStake = datum.fields?.[0]?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-
-            if (!receiverPayment) {
-                throw new Error("Missing receiver payment credential.");
-            }
-
-            const receiver = buildAddress(receiverPayment, receiverStake);
-
-            const ownersList = datum.fields?.[1]?.list || [];
-            const owners = ownersList.map((item: any, index: number) => {
-                const payment = item?.fields?.[0]?.fields?.[0]?.bytes;
-                const stake = item?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-
-                if (!payment) {
-                    throw new Error(`Owner #${index + 1} missing payment.`);
-                }
-
-                return buildAddress(payment, stake);
-            });
-
-            const signersList = datum.fields?.[2]?.list || [];
-            const signers = signersList.map((item: any, index: number) => {
-                const payment = item?.fields?.[0]?.fields?.[0]?.bytes;
-                const stake = item?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-
-                if (!payment) {
-                    throw new Error(`Signer #${index + 1} missing payment.`);
-                }
-
-                return buildAddress(payment, stake);
-            });
-
-            return { receiver, owners, signers };
         } catch (err) {
             throw new Error(`Invalid Plutus datum: ${err instanceof Error ? err.message : String(err)}`);
         }
