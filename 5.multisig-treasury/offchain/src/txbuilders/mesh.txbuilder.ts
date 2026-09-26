@@ -1,7 +1,6 @@
 import { MeshAdapter } from "../adapters/mesh.adapter";
 import { APP_NETWORK } from "../constants/enviroments";
 import { deserializeAddress, mConStr0, mConStr1, stringToHex } from "@meshsdk/core";
-import { ActionRedeemer, datumToPlutusData } from "../utils/types";
 
 export class MeshTxBuilder extends MeshAdapter {
     init = async ({
@@ -38,7 +37,7 @@ export class MeshTxBuilder extends MeshAdapter {
                 { unit: this.policyId + stringToHex(this.name), quantity: "1" },
             ])
             .txOutInlineDatumValue(
-                datumToPlutusData({
+                this.datumToPlutusData({
                     policyId: this.policyId,
                     owners,
                     threshold,
@@ -77,13 +76,13 @@ export class MeshTxBuilder extends MeshAdapter {
             .spendingPlutusScriptV3()
             .txIn(utxo.input.txHash, utxo.input.outputIndex)
             .txInInlineDatumPresent()
-            .txInRedeemerValue(ActionRedeemer.Deposit())
+            .txInRedeemerValue(this.redeemer.Deposit())
             .txInScript(this.spendScriptCbor)
             .txOut(this.spendAddress, [
                 { unit: "lovelace", quantity: nextLovelace },
                 { unit: this.policyId + stringToHex(this.name), quantity: "1" },
             ])
-            .txOutInlineDatumValue(datumToPlutusData(datum));
+            .txOutInlineDatumValue(this.datumToPlutusData(datum));
 
         unsignedTx
             .selectUtxosFrom(utxos)
@@ -130,10 +129,10 @@ export class MeshTxBuilder extends MeshAdapter {
             .spendingPlutusScriptV3()
             .txIn(utxo.input.txHash, utxo.input.outputIndex)
             .txInInlineDatumPresent()
-            .txInRedeemerValue(ActionRedeemer.Propose(senderPubKeyHash, recipient, Number(amount)))
+            .txInRedeemerValue(this.redeemer.Propose(senderPubKeyHash, recipient, Number(amount)))
             .txInScript(this.spendScriptCbor)
             .txOut(this.spendAddress, utxo.output.amount)
-            .txOutInlineDatumValue(datumToPlutusData(newDatum));
+            .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
 
         unsignedTx
             .selectUtxosFrom(utxos)
@@ -173,10 +172,10 @@ export class MeshTxBuilder extends MeshAdapter {
             .spendingPlutusScriptV3()
             .txIn(utxo.input.txHash, utxo.input.outputIndex)
             .txInInlineDatumPresent()
-            .txInRedeemerValue(ActionRedeemer.Vote(voterPubKeyHash, approve))
+            .txInRedeemerValue(this.redeemer.Vote(voterPubKeyHash, approve))
             .txInScript(this.spendScriptCbor)
             .txOut(this.spendAddress, utxo.output.amount)
-            .txOutInlineDatumValue(datumToPlutusData(newDatum));
+            .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
 
         unsignedTx
             .selectUtxosFrom(utxos)
@@ -226,7 +225,7 @@ export class MeshTxBuilder extends MeshAdapter {
             .spendingPlutusScriptV3()
             .txIn(utxo.input.txHash, utxo.input.outputIndex)
             .txInInlineDatumPresent()
-            .txInRedeemerValue(ActionRedeemer.Execute())
+            .txInRedeemerValue(this.redeemer.Execute())
             .txInScript(this.spendScriptCbor)
             .txOut(proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
 
@@ -247,7 +246,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     { unit: "lovelace", quantity: remaining },
                     { unit: this.policyId + stringToHex(this.name), quantity: "1" },
                 ])
-                .txOutInlineDatumValue(datumToPlutusData(newDatum));
+                .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
         }
 
         unsignedTx

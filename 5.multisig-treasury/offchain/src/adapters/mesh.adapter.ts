@@ -12,6 +12,10 @@ import {
     serializeAddressObj,
     serializePlutusScript,
     UTxO,
+    mConStr0,
+    mConStr1,
+    mConStr2,
+    mConStr3,
     mOutputReference,
     type Data,
 } from "@meshsdk/core";
@@ -226,6 +230,32 @@ export class MeshAdapter {
         })[0];
     };
 
+    protected datumToPlutusData = (d: {
+        policyId: string;
+        owners: string[];
+        threshold: number;
+        allowance: number;
+        signers: string[];
+        noSigners: string[];
+        proposal: { recipient: string; amount: number; rawPlutusData?: Data } | null;
+    }): Data => {
+        const proposalData = d.proposal
+            ? (d.proposal.rawPlutusData ?? mConStr0([mConStr0([this.addressToPlutusData(d.proposal.recipient), d.proposal.amount])]))
+            : mConStr1([]);
+
+        return mConStr0([d.policyId, d.owners, d.threshold, d.allowance, d.signers, d.noSigners, proposalData]);
+    };
+
+    protected addressToPlutusData = (bech32Address: string): Data => {
+        const { pubKeyHash, stakeCredentialHash } = deserializeAddress(bech32Address);
+
+        const paymentCred = mConStr0([pubKeyHash]);
+
+        const stakeCred = stakeCredentialHash ? mConStr0([mConStr0([mConStr0([stakeCredentialHash])])]) : mConStr1([]);
+
+        return mConStr0([paymentCred, stakeCred]);
+    };
+
     /**
      * @description
      * Retrieve wallet essentials for building a transaction:
@@ -292,5 +322,15 @@ export class MeshAdapter {
         } catch (err) {
             throw new Error(`Invalid Plutus datum: ${err instanceof Error ? err.message : String(err)}`);
         }
+    };
+
+    protected redeemer = {
+        Deposit: (): Data => mConStr0([]),
+        Propose: (proposer: string, recipientBech32: string, amount: number): Data =>
+            mConStr1([proposer, this.addressToPlutusData(recipientBech32), amount]),
+
+        Vote: (voter: string, approve: boolean): Data => mConStr2([voter, approve ? mConStr1([]) : mConStr0([])]),
+
+        Execute: (): Data => mConStr3([]),
     };
 }
