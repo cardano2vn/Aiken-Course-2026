@@ -193,6 +193,34 @@ export const signature = async function ({
     return unsignedTx;
 };
 
+export const vote = async function ({
+    walletAddress,
+    title,
+    approve,
+}: {
+    walletAddress: string;
+    title: string;
+    approve: boolean;
+}) {
+    const meshWallet = new MeshWallet({
+        networkId: APP_NETWORK_ID,
+        fetcher: blockfrostProvider,
+        submitter: blockfrostProvider,
+        key: {
+            type: "address",
+            address: walletAddress,
+        },
+    });
+
+    const meshTxBuilder = new MeshTxBuilder({
+        meshWallet,
+        name: title,
+    });
+
+    await meshTxBuilder.initalize();
+    return meshTxBuilder.vote({ approve });
+};
+
 export const withdraw = async function ({
     walletAddress,
     threshold,

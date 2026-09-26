@@ -70,11 +70,13 @@ export default function Page() {
                         <Signature
                             walletAddress={address || ""}
                             signers={data?.signers || []}
+                            noSigners={data?.noSigners || []}
                             owners={data?.owners || []}
                             isLoading={isLoading}
                             threshold={data?.threshold || 0}
                             allowance={data?.allowance || 0}
                             title={data?.title || ""}
+                            proposal={data?.proposal || null}
                         />
                     </div>
                 </section>

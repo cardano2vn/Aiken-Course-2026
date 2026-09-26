@@ -11,13 +11,21 @@ import {
     scriptAddress,
     serializeAddressObj,
     serializePlutusScript,
+    stringToHex,
     UTxO,
+    mConStr0,
+    mConStr1,
+    mConStr2,
+    mConStr3,
+    mOutputReference,
+    type Data,
 } from "@meshsdk/core";
-import { blockfrostProvider } from "@/providers/cardano";
+import { blockfrostProvider } from "../providers/cardano";
 import plutus from "../contract/plutus.json";
-import { Plutus } from "@/types";
-import { DECIMAL_PLACE, title } from "@/constants/common.constant";
-import { APP_NETWORK_ID, APP_WALLET_ADDRESS } from "@/constants/enviroments";
+import { Plutus } from "../types";
+
+import { DECIMAL_PLACE, title } from "../constants/common.constant";
+import { APP_NETWORK_ID } from "../constants/enviroments";
 
 /**
  * @description
@@ -31,8 +39,7 @@ export class MeshAdapter {
     public policyId: string;
     public spendAddress: string;
     public name: string;
-    public threshold: number;
-    public allowance: number;
+    public utxoRef?: { txHash: string; outputIndex: number };
 
     protected mintCompileCode: string;
     protected mintScriptCbor: string;
@@ -58,23 +65,23 @@ export class MeshAdapter {
      */
     constructor({
         meshWallet = null!,
-        threshold = 1,
-        allowance = 10 * DECIMAL_PLACE,
+        utxoRef,
         name,
     }: {
         meshWallet: MeshWallet;
-        threshold?: number;
-        allowance: number;
+        utxoRef?: {
+            txHash: string;
+            outputIndex: number;
+        };
         name: string;
     }) {
         this.meshWallet = meshWallet;
-        this.threshold = threshold;
-        this.allowance = allowance;
         this.name = name;
         this.fetcher = blockfrostProvider;
+        this.utxoRef = utxoRef;
 
         this.spendCompileCode = this.readValidator(plutus as Plutus, title.multisigTreasury);
-        this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, [this.threshold, this.allowance]);
+        this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, []);
         this.spendScript = {
             code: this.spendScriptCbor,
             version: "V3",
@@ -88,18 +95,23 @@ export class MeshAdapter {
             APP_NETWORK_ID,
         );
 
-        this.mintCompileCode = this.readValidator(plutus as Plutus, title.identityFactory);
-        this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
-            this.threshold,
-            this.allowance,
-            deserializeAddress(this.spendAddress).scriptHash,
-            this.name,
-        ]);
-        this.mintScript = {
-            code: this.mintScriptCbor,
-            version: "V3",
-        };
-        this.policyId = resolveScriptHash(this.mintScriptCbor, "V3");
+        this.mintCompileCode = "";
+        this.mintScriptCbor = "";
+        this.mintScript = { code: "", version: "V3" };
+        this.policyId = "";
+        if (utxoRef) {
+            this.mintCompileCode = this.readValidator(plutus as Plutus, title.identityFactory);
+            this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
+                mOutputReference(utxoRef.txHash, utxoRef.outputIndex),
+                deserializeAddress(this.spendAddress).scriptHash,
+                this.name,
+            ]);
+            this.mintScript = {
+                code: this.mintScriptCbor,
+                version: "V3",
+            };
+            this.policyId = resolveScriptHash(this.mintScriptCbor, "V3");
+        }
     }
 
     public initalize = async (): Promise<void> => {
@@ -200,6 +212,26 @@ export class MeshAdapter {
         return await this.fetcher.fetchAddressUTxOs(address, unit);
     };
 
+    protected getTreasuryUTXO = async () => {
+        const tokenName = stringToHex(this.name);
+        const utxos = await this.fetcher.fetchAddressUTxOs(this.spendAddress);
+
+        for (const utxo of utxos) {
+            const identityAsset = utxo.output.amount.find(
+                (asset) => asset.unit.length === 56 + tokenName.length && asset.unit.endsWith(tokenName) && asset.quantity === "1",
+            );
+            if (!identityAsset || !utxo.output.plutusData) continue;
+
+            const datum = this.convertDatum({ plutusData: utxo.output.plutusData as string });
+            if (identityAsset.unit === datum.policyId + tokenName) {
+                this.policyId = datum.policyId;
+                return utxo;
+            }
+        }
+
+        throw new Error("Cannot find the treasury identity token at its script address.");
+    };
+
     /**
      * @description
      * Select a UTxO from wallet to serve as collateral for Plutus script transactions.
@@ -225,6 +257,52 @@ export class MeshAdapter {
         })[0];
     };
 
+    decodedPlutusDataToMeshData = (value: any): Data => {
+        if (Array.isArray(value)) return value.map(this.decodedPlutusDataToMeshData);
+        if (typeof value !== "object" || value === null) {
+            throw new Error("Invalid decoded Plutus Data node.");
+        }
+        if ("bytes" in value) return String(value.bytes);
+        if ("int" in value) return BigInt(value.int);
+        if ("list" in value) return value.list.map(this.decodedPlutusDataToMeshData);
+        if ("map" in value) {
+            return new Map(value.map.map(({ k, v }: { k: any; v: any }) => [this.decodedPlutusDataToMeshData(k), this.decodedPlutusDataToMeshData(v)]));
+        }
+        if ("constructor" in value) {
+            return {
+                alternative: Number(value.constructor),
+                fields: value.fields.map(this.decodedPlutusDataToMeshData),
+            };
+        }
+        throw new Error("Unsupported decoded Plutus Data node.");
+    };
+
+    protected datumToPlutusData = (d: {
+        policyId: string;
+        owners: string[];
+        threshold: number;
+        allowance: number;
+        signers: string[];
+        noSigners: string[];
+        proposal: { recipient: string; amount: number; rawPlutusData?: Data } | null;
+    }): Data => {
+        const proposalData = d.proposal
+            ? (d.proposal.rawPlutusData ?? mConStr0([mConStr0([this.addressToPlutusData(d.proposal.recipient), d.proposal.amount])]))
+            : mConStr1([]);
+
+        return mConStr0([d.policyId, d.owners, d.threshold, d.allowance, d.signers, d.noSigners, proposalData]);
+    };
+
+    protected addressToPlutusData = (bech32Address: string): Data => {
+        const { pubKeyHash, stakeCredentialHash } = deserializeAddress(bech32Address);
+
+        const paymentCred = mConStr0([pubKeyHash]);
+
+        const stakeCred = stakeCredentialHash ? mConStr0([mConStr0([mConStr0([stakeCredentialHash])])]) : mConStr1([]);
+
+        return mConStr0([paymentCred, stakeCred]);
+    };
+
     /**
      * @description
      * Retrieve wallet essentials for building a transaction:
@@ -248,59 +326,58 @@ export class MeshAdapter {
     }: {
         plutusData: string;
     }): {
-        receiver: string;
+        policyId: string;
         owners: string[];
+        threshold: number;
+        allowance: number;
         signers: string[];
+        noSigners: string[];
+        proposal: { recipient: string; amount: number; rawPlutusData?: Data } | null;
     } => {
         try {
             const datum = deserializeDatum(plutusData);
 
-            const buildAddress = (paymentHex: string, stakeHex?: string): string => {
-                if (typeof paymentHex !== "string" || paymentHex.length !== 56) {
-                    throw new Error(`Invalid payment hex length (expected 56): ${paymentHex}`);
-                }
-                if (stakeHex && stakeHex.length !== 56) {
-                    throw new Error(`Invalid stake hex length (expected 56): ${stakeHex}`);
-                }
-                return serializeAddressObj(pubKeyAddress(paymentHex, stakeHex || "", false), APP_NETWORK_ID);
-            };
+            const fields = datum.fields;
 
-            const receiverPayment = datum.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-            const receiverStake = datum.fields?.[0]?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
+            const proposalField = fields[6];
+            const hasProposal = proposalField && proposalField.fields && proposalField.fields.length > 0;
+            const proposal = hasProposal ? proposalField.fields[0] : null;
+            const recipientAddress = proposal?.fields?.[0];
+            const recipientPubKeyHash = recipientAddress?.fields?.[0]?.fields?.[0]?.bytes;
+            const stakeOption = recipientAddress?.fields?.[1];
+            const stakeCredentialHash = Number(stakeOption?.constructor) === 0 ? stakeOption.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes : undefined;
 
-            if (!receiverPayment) {
-                throw new Error("Missing receiver payment credential.");
+            if (hasProposal && !recipientPubKeyHash) {
+                throw new Error("Proposal recipient is not a supported verification-key address.");
             }
 
-            const receiver = buildAddress(receiverPayment, receiverStake);
-
-            const ownersList = datum.fields?.[1]?.list || [];
-            const owners = ownersList.map((item: any, index: number) => {
-                const payment = item?.fields?.[0]?.fields?.[0]?.bytes;
-                const stake = item?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-
-                if (!payment) {
-                    throw new Error(`Owner #${index + 1} missing payment.`);
-                }
-
-                return buildAddress(payment, stake);
-            });
-
-            const signersList = datum.fields?.[2]?.list || [];
-            const signers = signersList.map((item: any, index: number) => {
-                const payment = item?.fields?.[0]?.fields?.[0]?.bytes;
-                const stake = item?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-
-                if (!payment) {
-                    throw new Error(`Signer #${index + 1} missing payment.`);
-                }
-
-                return buildAddress(payment, stake);
-            });
-
-            return { receiver, owners, signers };
+            return {
+                policyId: fields[0].bytes,
+                owners: fields[1].list.map((item: any) => item.bytes),
+                threshold: Number(fields[2].int),
+                allowance: Number(fields[3].int),
+                signers: fields[4].list.map((item: any) => item.bytes),
+                noSigners: fields[5].list.map((item: any) => item.bytes),
+                proposal: hasProposal
+                    ? {
+                          recipient: serializeAddressObj(pubKeyAddress(recipientPubKeyHash, stakeCredentialHash), APP_NETWORK_ID),
+                          amount: Number(proposal.fields?.[1]?.int || 0),
+                          rawPlutusData: this.decodedPlutusDataToMeshData(proposalField),
+                      }
+                    : null,
+            };
         } catch (err) {
             throw new Error(`Invalid Plutus datum: ${err instanceof Error ? err.message : String(err)}`);
         }
+    };
+
+    protected redeemer = {
+        Deposit: (): Data => mConStr0([]),
+        Propose: (proposer: string, recipientBech32: string, amount: number): Data =>
+            mConStr1([proposer, this.addressToPlutusData(recipientBech32), amount]),
+
+        Vote: (voter: string, approve: boolean): Data => mConStr2([voter, approve ? mConStr1([]) : mConStr0([])]),
+
+        Execute: (): Data => mConStr3([]),
     };
 }

@@ -1,11 +1,13 @@
 "use client";
 
-import { USD } from "./icons";
 import { memo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { images } from "@/public/images";
 import { shortenString } from "@/lib/utils";
+import { deserializeAddress } from "@meshsdk/core";
+import { Check, CircleCheck, CircleX, Clock3, ThumbsUp } from "lucide-react";
+import { DECIMAL_PLACE } from "@/constants/common.constant";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -20,72 +22,80 @@ import {
 import { useWallet } from "@/hooks/use-wallet";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { signature, submitTx } from "@/services/mesh";
+import { submitTx, vote as createVote } from "@/services/mesh";
 import { useQueryClient } from "@tanstack/react-query";
 
 const Signature = function ({
     walletAddress,
     signers,
+    noSigners,
     owners,
     isLoading,
     threshold,
     allowance,
     title,
+    proposal,
 }: {
     walletAddress: string;
     signers: string[];
+    noSigners: string[];
     owners: string[];
     isLoading?: boolean;
     threshold: number;
     allowance: number;
     title: string;
+    proposal: { recipient: string; amount: number } | null;
 }) {
-    const { address, signTx } = useWallet();
-
-    const [isLoadingSign, setIsLoadingSign] = useState(false);
-    const normWallet = walletAddress.toLowerCase();
+    const { signTx } = useWallet();
+    const [isLoadingVote, setIsLoadingVote] = useState(false);
+    const [isVoteDialogOpen, setIsVoteDialogOpen] = useState(false);
     const queryClient = useQueryClient();
-    const normSigners = new Set(signers.map((s) => s.toLowerCase()));
-    const onSubmitSend = async function () {
-        setIsLoadingSign(true);
+
+    let walletPubKeyHash = "";
+    if (walletAddress) {
+        try {
+            walletPubKeyHash = deserializeAddress(walletAddress).pubKeyHash.toLowerCase();
+        } catch {
+            walletPubKeyHash = "";
+        }
+    }
+
+    const normalizedSigners = new Set(signers.map((signer) => signer.toLowerCase()));
+    const normalizedNoSigners = new Set(noSigners.map((signer) => signer.toLowerCase()));
+    const isOwner = owners.some((owner) => owner.toLowerCase() === walletPubKeyHash);
+    const hasVoted = normalizedSigners.has(walletPubKeyHash) || normalizedNoSigners.has(walletPubKeyHash);
+
+    const onSubmitVote = async function () {
+        setIsLoadingVote(true);
         try {
             if (!walletAddress) {
                 toast.error("Please connect your wallet");
                 return;
             }
 
-            const unsignedTx = await signature({
+            const unsignedTx = await createVote({
                 walletAddress: walletAddress,
-                allowance: allowance,
-                threshold: threshold,
                 title: title,
+                approve: true,
             });
 
             const signedTx = await signTx(unsignedTx);
+            const result = await submitTx({ signedTx });
+            if (!result.result) throw new Error(result.message);
 
-            await submitTx({ signedTx: signedTx });
-            toast.success("Treasury signed successfully!");
+            setIsVoteDialogOpen(false);
+            toast.success("Your YES vote has been recorded.");
             await Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["treasury"] })]);
         } catch (error) {
-            toast.error("Failed to sign treasury. Please try again.");
+            toast.error(error instanceof Error ? error.message : "Could not submit your vote. Please try again.");
         } finally {
-            setIsLoadingSign(false);
+            setIsLoadingVote(false);
         }
     };
 
-    const formattedOwners = owners.map((owner) => {
-        const normOwner = owner.toLowerCase();
-        return {
-            owner,
-            isSigner: normSigners.has(normOwner),
-            isCurrentUser: normOwner === normWallet,
-            hasSigned: normSigners.has(normOwner),
-        };
-    });
-
     return (
         <motion.div
-            className=" rounded-2xl h-full border border-blue-200/50 bg-white shadow-lg dark:border-blue-900/30 dark:bg-slate-900"
+            className="h-full rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-slate-900"
             variants={{
                 hidden: { opacity: 0, y: 20 },
                 visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
@@ -94,23 +104,19 @@ const Signature = function ({
             animate="visible"
         >
             <div className="p-6">
-                <div className="flex items-center gap-3 rounded-lg bg-gradient-to-r from-blue-100 to-purple-100 p-4 dark:from-blue-900/50 dark:to-purple-900/50">
-                    <motion.div
-                        className="rounded-full bg-white/90 p-2 dark:bg-slate-800/90"
-                        whileHover={{ scale: 1.1 }}
-                        transition={{ type: "spring", stiffness: 300 }}
-                    >
-                        <USD className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                    </motion.div>
+                <div className="flex items-center gap-3 rounded-lg bg-emerald-50 p-4 dark:bg-emerald-950/40">
+                    <div className="rounded-full bg-white p-2 dark:bg-slate-800">
+                        <ThumbsUp className="h-6 w-6 text-emerald-700 dark:text-emerald-400" />
+                    </div>
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Signature</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Your latest signature treasury</p>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Proposal voting</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Review the active proposal and its approvals</p>
                     </div>
                 </div>
 
                 <div className="mt-4 flex-1 overflow-auto">
                     <AnimatePresence mode="wait">
-                        {formattedOwners.length === 0 ? (
+                        {owners.length === 0 ? (
                             <NotFound key="not-found" />
                         ) : isLoading ? (
                             <Loading key="loading" />
@@ -119,13 +125,16 @@ const Signature = function ({
                                 key="result"
                                 threshold={threshold}
                                 signers={signers}
+                                noSigners={noSigners}
                                 owners={owners}
-                                data={formattedOwners}
-                                page={1}
-                                setPage={null!}
-                                totalPages={0}
-                                onSubmitSend={onSubmitSend}
-                                isLoadingSign={isLoadingSign}
+                                proposal={proposal}
+                                walletPubKeyHash={walletPubKeyHash}
+                                isOwner={isOwner}
+                                hasVoted={hasVoted}
+                                isLoadingVote={isLoadingVote}
+                                isVoteDialogOpen={isVoteDialogOpen}
+                                setIsVoteDialogOpen={setIsVoteDialogOpen}
+                                onSubmitVote={onSubmitVote}
                             />
                         )}
                     </AnimatePresence>
@@ -148,15 +157,15 @@ const NotFound = function () {
             exit="hidden"
         >
             <motion.div
-                className="rounded-full bg-blue-100/50 p-6 dark:bg-blue-900/50"
+                    className="rounded-full bg-emerald-100 p-6 dark:bg-emerald-950/60"
                 whileHover={{ scale: 1.05 }}
                 transition={{ type: "spring", stiffness: 200 }}
             >
-                <USD className="h-12 w-12 text-blue-500 dark:text-blue-400" />
+                    <ThumbsUp className="h-12 w-12 text-emerald-700 dark:text-emerald-400" />
             </motion.div>
             <div className="mt-4 text-center">
-                <p className="text-lg font-medium text-gray-800 dark:text-gray-200">No Tips Yet</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Share your Tip Jar link to receive tips</p>
+                    <p className="text-lg font-medium text-gray-800 dark:text-gray-200">No owners configured</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Treasury voting details are unavailable.</p>
             </div>
         </motion.div>
     );
@@ -183,144 +192,156 @@ const Loading = function () {
 };
 
 const Result = function ({
-    data,
     threshold,
-    page,
     signers,
-
-    setPage,
-    totalPages,
-    onSubmitSend,
-    isLoadingSign,
+    noSigners,
+    owners,
+    proposal,
+    walletPubKeyHash,
+    isOwner,
+    hasVoted,
+    isLoadingVote,
+    isVoteDialogOpen,
+    setIsVoteDialogOpen,
+    onSubmitVote,
 }: {
     threshold: number;
     signers: string[];
+    noSigners: string[];
     owners: string[];
-    data: {
-        owner: string;
-        isSigner: boolean;
-        isCurrentUser: boolean;
-        hasSigned: boolean;
-    }[];
-    page: number;
-    setPage: React.Dispatch<React.SetStateAction<number>>;
-    totalPages?: number;
-    onSubmitSend: () => Promise<void>;
-    isLoadingSign: boolean;
+    proposal: { recipient: string; amount: number } | null;
+    walletPubKeyHash: string;
+    isOwner: boolean;
+    hasVoted: boolean;
+    isLoadingVote: boolean;
+    isVoteDialogOpen: boolean;
+    setIsVoteDialogOpen: (open: boolean) => void;
+    onSubmitVote: () => Promise<void>;
 }) {
+    const approvedOwners = new Set(signers.map((signer) => signer.toLowerCase()));
+    const rejectedOwners = new Set(noSigners.map((signer) => signer.toLowerCase()));
+    const approvalProgress = threshold > 0 ? Math.min((signers.length / threshold) * 100, 100) : 0;
+
     return (
-        <motion.div className="space-y-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
-            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900">
-                        <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider dark:text-gray-200">
-                                Owner
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-900 uppercase tracking-wider dark:text-gray-200">
-                                Signature
-                            </th>
-                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-900 uppercase tracking-wider dark:text-gray-200">
-                                Status
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200 dark:bg-slate-900 dark:divide-gray-700">
-                        {data.map((item, index: number) => (
-                            <motion.tr
-                                key={index}
-                                className="hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors duration-200"
-                                variants={{
-                                    hidden: { opacity: 0, x: -10 },
-                                    visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
-                                }}
-                                initial="hidden"
-                                animate="visible"
-                                transition={{ delay: index * 0.1 }}
-                            >
-                                <td className="px-4 py-3 text-sm font-mono text-gray-900 dark:text-gray-300">{shortenString(item.owner)}</td>
-                                <td className="px-4 py-3 text-sm font-mono text-gray-500 dark:text-gray-400">
-                                    {item.isSigner ? "Signed" : "Unsigned"}
-                                </td>
-                                <td className="px-4 py-3 text-center ...">
-                                    {item.isCurrentUser ? (
-                                        item.isSigner ? (
-                                            <span className="text-green-600 font-semibold">✓ Already Signed</span>
-                                        ) : (
-                                            <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button className="bg-orange-500 hover:bg-orange-600 text-white" onClick={() => {}}>
-                                                        {isLoadingSign ? "Signing..." : "Sign Now"}
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                    <AlertDialogHeader>
-                                                        <AlertDialogTitle>Confirm Signature</AlertDialogTitle>
-                                                        <AlertDialogDescription>Bạn đang ký xác nhận transaction này.</AlertDialogDescription>
-                                                    </AlertDialogHeader>
-                                                    <AlertDialogFooter>
-                                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                        <AlertDialogAction onClick={onSubmitSend}>Confirm Sign</AlertDialogAction>
-                                                    </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                            </AlertDialog>
-                                        )
-                                    ) : (
-                                        <span className="text-gray-500">—</span>
-                                    )}
-                                </td>
-                            </motion.tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-
-            <motion.div
-                className="flex justify-center items-center mt-4"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.25 }}
-            >
-                <div className="inline-flex items-center gap-4  px-6 py-3 shadow-md 0 dark:from-slate-800/80 dark:to-slate-900 dark:border-slate-700/70 dark:shadow-slate-950/40">
-                    {/* Phần đã ký */}
-                    <div className="flex items-center gap-2">
-                        <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold shadow-inner ${
-                                signers.length >= threshold
-                                    ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                                    : signers.length > 0
-                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                            }`}
-                        >
-                            {signers.length}
-                        </div>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">đã ký</span>
-                    </div>
-
-                    <div className="h-8 w-px bg-gray-300 dark:bg-gray-600" />
-
-                    <div className="flex items-center gap-2">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-lg font-bold shadow-inner dark:bg-blue-900/40 dark:text-blue-300">
-                            {threshold}
-                        </div>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">cần</span>
-                    </div>
-
-                    {threshold > 0 && signers.length >= threshold && (
-                        <div className="ml-3 flex items-center gap-1.5 rounded-full bg-green-100 px-4 py-1.5 text-sm font-semibold text-green-800 shadow-sm dark:bg-green-900/50 dark:text-green-200">
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                            Đủ chữ ký – Sẵn sàng thực thi
-                        </div>
-                    )}
-
-                    {threshold > 0 && signers.length < threshold && signers.length > 0 && (
-                        <div className="ml-3 text-xs text-amber-700 dark:text-amber-400 italic">Còn thiếu {threshold - signers.length} chữ ký</div>
-                    )}
+        <motion.div className="space-y-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+            {!proposal ? (
+                <div className="flex flex-col items-center border border-dashed border-gray-300 bg-gray-50 px-5 py-10 text-center dark:border-gray-700 dark:bg-slate-800/60">
+                    <Clock3 className="h-8 w-8 text-gray-400" aria-hidden="true" />
+                    <h4 className="mt-3 font-semibold text-gray-800 dark:text-gray-200">No active proposal</h4>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Voting opens when a proposal is submitted.</p>
                 </div>
-            </motion.div>
+            ) : (
+                <>
+                    <section className="border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-slate-800/60" aria-label="Active proposal">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Proposed payment</p>
+                                <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">
+                                    {(proposal.amount / DECIMAL_PLACE).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
+                                {signers.length} / {threshold} YES
+                            </div>
+                        </div>
+                        <dl className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+                            <dt className="text-xs text-gray-500 dark:text-gray-400">Recipient</dt>
+                            <dd className="mt-1 break-all font-mono text-sm text-gray-800 dark:text-gray-200">{shortenString(proposal.recipient)}</dd>
+                        </dl>
+                        <div className="mt-4 h-1.5 overflow-hidden bg-gray-200 dark:bg-gray-700" role="progressbar" aria-label="YES votes needed" aria-valuenow={signers.length} aria-valuemin={0} aria-valuemax={threshold}>
+                            <div className="h-full bg-emerald-500 transition-[width] duration-300" style={{ width: `${approvalProgress}%` }} />
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            {Math.max(threshold - signers.length, 0)} more YES {threshold - signers.length === 1 ? "vote" : "votes"} needed
+                        </p>
+                    </section>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Owner votes</h4>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{signers.length} YES · {noSigners.length} NO · {Math.max(owners.length - signers.length - noSigners.length, 0)} pending</p>
+                        </div>
+                        <AlertDialog open={isVoteDialogOpen} onOpenChange={setIsVoteDialogOpen}>
+                            <AlertDialogTrigger asChild>
+                                <Button
+                                    disabled={!isOwner || hasVoted || isLoadingVote}
+                                    className="bg-emerald-700 text-white hover:bg-emerald-800 disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
+                                >
+                                    <ThumbsUp aria-hidden="true" />
+                                    {hasVoted ? "Vote recorded" : isLoadingVote ? "Submitting vote..." : "Vote Yes"}
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Confirm YES vote</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Your wallet will sign a transaction approving {" "}
+                                        {(proposal.amount / DECIMAL_PLACE).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA for {shortenString(proposal.recipient)}.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel disabled={isLoadingVote}>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                        disabled={isLoadingVote}
+                                        onClick={(event) => {
+                                            event.preventDefault();
+                                            void onSubmitVote();
+                                        }}
+                                        className="bg-emerald-700 text-white hover:bg-emerald-800"
+                                    >
+                                        {isLoadingVote ? "Waiting for wallet..." : "Approve proposal"}
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+                    </div>
+
+                    {!isOwner && <p className="text-right text-xs text-gray-500 dark:text-gray-400">Connect an owner wallet to vote.</p>}
+                    {isOwner && hasVoted && <p className="text-right text-xs text-gray-500 dark:text-gray-400">This wallet has already voted on this proposal.</p>}
+
+                    <div className="overflow-x-auto border border-gray-200 dark:border-gray-700">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-50 dark:bg-slate-800">
+                                <tr>
+                                    <th scope="col" className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Owner</th>
+                                    <th scope="col" className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Vote</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-slate-900">
+                                {owners.map((owner) => {
+                                    const normalizedOwner = owner.toLowerCase();
+                                    const approved = approvedOwners.has(normalizedOwner);
+                                    const rejected = rejectedOwners.has(normalizedOwner);
+
+                                    return (
+                                        <tr key={owner} className="hover:bg-gray-50 dark:hover:bg-slate-800/70">
+                                            <td className="px-4 py-3 font-mono text-sm text-gray-800 dark:text-gray-200">
+                                                {shortenString(owner)}
+                                                {normalizedOwner === walletPubKeyHash && <span className="ml-2 font-sans text-xs text-gray-500">You</span>}
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                {approved ? (
+                                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400"><CircleCheck className="h-4 w-4" />YES</span>
+                                                ) : rejected ? (
+                                                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 dark:text-rose-400"><CircleX className="h-4 w-4" />NO</span>
+                                                ) : (
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400">Pending</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    {signers.length >= threshold && threshold > 0 && (
+                        <p className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                            <Check className="h-4 w-4" aria-hidden="true" /> Approval threshold reached. Proposal is ready to execute.
+                        </p>
+                    )}
+                </>
+            )}
         </motion.div>
     );
 };
