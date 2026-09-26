@@ -123,7 +123,13 @@ export const init = async function ({
         initial: String(initial),
     });
 
-    return unsignedTx;
+    return {
+        unsignedTx,
+        utxoRef: {
+            txHash: utxoRef.txHash,
+            outputIndex: utxoRef.outputIndex,
+        },
+    };
 };
 
 export const deposit = async function ({
@@ -131,6 +137,7 @@ export const deposit = async function ({
     threshold,
     allowance,
     title,
+    utxoRef,
 
     amount,
 }: {
@@ -138,6 +145,7 @@ export const deposit = async function ({
     threshold: number;
     allowance: number;
     title: string;
+    utxoRef?: { txHash: string; outputIndex: number };
     amount: number;
 }) {
     const meshWallet = new MeshWallet({
@@ -152,6 +160,7 @@ export const deposit = async function ({
 
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
+        utxoRef,
         name: title,
     });
     await meshTxBuilder.initalize();
@@ -167,10 +176,12 @@ export const vote = async function ({
     walletAddress,
     title,
     approve,
+    utxoRef,
 }: {
     walletAddress: string;
     title: string;
     approve: boolean;
+    utxoRef?: { txHash: string; outputIndex: number };
 }) {
     const meshWallet = new MeshWallet({
         networkId: APP_NETWORK_ID,
@@ -184,6 +195,7 @@ export const vote = async function ({
 
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
+        utxoRef,
         name: title,
     });
 
@@ -191,18 +203,46 @@ export const vote = async function ({
     return meshTxBuilder.vote({ approve });
 };
 
-export const withdraw = async function ({
+export const propose = async function ({
     walletAddress,
-    threshold,
-    allowance,
     title,
+    recipient,
     amount,
+    utxoRef,
 }: {
     walletAddress: string;
-    threshold: number;
-    allowance: number;
     title: string;
+    recipient: string;
     amount: number;
+    utxoRef?: { txHash: string; outputIndex: number };
+}) {
+    const meshWallet = new MeshWallet({
+        networkId: APP_NETWORK_ID,
+        fetcher: blockfrostProvider,
+        submitter: blockfrostProvider,
+        key: {
+            type: "address",
+            address: walletAddress,
+        },
+    });
+
+    const meshTxBuilder = new MeshTxBuilder({ meshWallet, utxoRef, name: title });
+    await meshTxBuilder.initalize();
+
+    return meshTxBuilder.propose({
+        recipient,
+        amount: String(Math.round(amount * DECIMAL_PLACE)),
+    });
+};
+
+export const withdraw = async function ({
+    walletAddress,
+    title,
+    utxoRef,
+}: {
+    walletAddress: string;
+    title: string;
+    utxoRef?: { txHash: string; outputIndex: number };
 }) {
     const meshWallet = new MeshWallet({
         networkId: APP_NETWORK_ID,
@@ -216,12 +256,11 @@ export const withdraw = async function ({
 
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
+        utxoRef,
         name: title,
     });
     await meshTxBuilder.initalize();
-    const unsignedTx = await meshTxBuilder.execute({
-        amount: String(amount * DECIMAL_PLACE),
-    });
+    const unsignedTx = await meshTxBuilder.execute();
 
     return unsignedTx;
 };

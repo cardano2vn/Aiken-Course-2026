@@ -17,7 +17,6 @@ import {
     AlertDialogFooter,
     AlertDialogHeader,
     AlertDialogTitle,
-    AlertDialogTrigger,
 } from "./ui/alert-dialog";
 import { useWallet } from "@/hooks/use-wallet";
 import { Button } from "./ui/button";
@@ -35,6 +34,7 @@ const Signature = function ({
     allowance,
     title,
     proposal,
+    utxoRef,
 }: {
     walletAddress: string;
     signers: string[];
@@ -45,10 +45,12 @@ const Signature = function ({
     allowance: number;
     title: string;
     proposal: { recipient: string; amount: number } | null;
+    utxoRef?: { txHash: string; outputIndex: number };
 }) {
     const { signTx } = useWallet();
     const [isLoadingVote, setIsLoadingVote] = useState(false);
     const [isVoteDialogOpen, setIsVoteDialogOpen] = useState(false);
+    const [voteDecision, setVoteDecision] = useState(true);
     const queryClient = useQueryClient();
 
     let walletPubKeyHash = "";
@@ -63,9 +65,11 @@ const Signature = function ({
     const normalizedSigners = new Set(signers.map((signer) => signer.toLowerCase()));
     const normalizedNoSigners = new Set(noSigners.map((signer) => signer.toLowerCase()));
     const isOwner = owners.some((owner) => owner.toLowerCase() === walletPubKeyHash);
-    const hasVoted = normalizedSigners.has(walletPubKeyHash) || normalizedNoSigners.has(walletPubKeyHash);
+    const hasVotedYes = normalizedSigners.has(walletPubKeyHash);
+    const hasVotedNo = normalizedNoSigners.has(walletPubKeyHash);
+    const hasVoted = hasVotedYes || hasVotedNo;
 
-    const onSubmitVote = async function () {
+    const onSubmitVote = async function (approve: boolean) {
         setIsLoadingVote(true);
         try {
             if (!walletAddress) {
@@ -76,7 +80,8 @@ const Signature = function ({
             const unsignedTx = await createVote({
                 walletAddress: walletAddress,
                 title: title,
-                approve: true,
+                approve,
+                utxoRef,
             });
 
             const signedTx = await signTx(unsignedTx);
@@ -84,7 +89,7 @@ const Signature = function ({
             if (!result.result) throw new Error(result.message);
 
             setIsVoteDialogOpen(false);
-            toast.success("Your YES vote has been recorded.");
+            toast.success(`Your ${approve ? "YES" : "NO"} vote has been recorded.`);
             await Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["treasury"] })]);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "Could not submit your vote. Please try again.");
@@ -131,9 +136,13 @@ const Signature = function ({
                                 walletPubKeyHash={walletPubKeyHash}
                                 isOwner={isOwner}
                                 hasVoted={hasVoted}
+                                hasVotedYes={hasVotedYes}
+                                hasVotedNo={hasVotedNo}
                                 isLoadingVote={isLoadingVote}
                                 isVoteDialogOpen={isVoteDialogOpen}
                                 setIsVoteDialogOpen={setIsVoteDialogOpen}
+                                voteDecision={voteDecision}
+                                setVoteDecision={setVoteDecision}
                                 onSubmitVote={onSubmitVote}
                             />
                         )}
@@ -200,9 +209,13 @@ const Result = function ({
     walletPubKeyHash,
     isOwner,
     hasVoted,
+    hasVotedYes,
+    hasVotedNo,
     isLoadingVote,
     isVoteDialogOpen,
     setIsVoteDialogOpen,
+    voteDecision,
+    setVoteDecision,
     onSubmitVote,
 }: {
     threshold: number;
@@ -213,10 +226,14 @@ const Result = function ({
     walletPubKeyHash: string;
     isOwner: boolean;
     hasVoted: boolean;
+    hasVotedYes: boolean;
+    hasVotedNo: boolean;
     isLoadingVote: boolean;
     isVoteDialogOpen: boolean;
     setIsVoteDialogOpen: (open: boolean) => void;
-    onSubmitVote: () => Promise<void>;
+    voteDecision: boolean;
+    setVoteDecision: (approve: boolean) => void;
+    onSubmitVote: (approve: boolean) => Promise<void>;
 }) {
     const approvedOwners = new Set(signers.map((signer) => signer.toLowerCase()));
     const rejectedOwners = new Set(noSigners.map((signer) => signer.toLowerCase()));
@@ -263,21 +280,36 @@ const Result = function ({
                             <p className="text-xs text-gray-500 dark:text-gray-400">{signers.length} YES · {noSigners.length} NO · {Math.max(owners.length - signers.length - noSigners.length, 0)} pending</p>
                         </div>
                         <AlertDialog open={isVoteDialogOpen} onOpenChange={setIsVoteDialogOpen}>
-                            <AlertDialogTrigger asChild>
+                            <div className="flex flex-wrap gap-2">
                                 <Button
                                     disabled={!isOwner || hasVoted || isLoadingVote}
+                                    onClick={() => {
+                                        setVoteDecision(true);
+                                        setIsVoteDialogOpen(true);
+                                    }}
                                     className="bg-emerald-700 text-white hover:bg-emerald-800 disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400"
                                 >
                                     <ThumbsUp aria-hidden="true" />
-                                    {hasVoted ? "Vote recorded" : isLoadingVote ? "Submitting vote..." : "Vote Yes"}
+                                    {hasVotedYes ? "Voted Yes" : isLoadingVote && voteDecision ? "Submitting..." : "Vote Yes"}
                                 </Button>
-                            </AlertDialogTrigger>
+                                <Button
+                                    variant="outline"
+                                    disabled={!isOwner || hasVoted || isLoadingVote}
+                                    onClick={() => {
+                                        setVoteDecision(false);
+                                        setIsVoteDialogOpen(true);
+                                    }}
+                                >
+                                    {hasVotedNo ? "Voted No" : isLoadingVote && !voteDecision ? "Submitting..." : "Vote No"}
+                                </Button>
+                            </div>
                             <AlertDialogContent>
                                 <AlertDialogHeader>
-                                    <AlertDialogTitle>Confirm YES vote</AlertDialogTitle>
+                                    <AlertDialogTitle>Confirm {voteDecision ? "YES" : "NO"} vote</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        Your wallet will sign a transaction approving {" "}
-                                        {(proposal.amount / DECIMAL_PLACE).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA for {shortenString(proposal.recipient)}.
+                                        {voteDecision
+                                            ? `Your wallet will approve ${(proposal.amount / DECIMAL_PLACE).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA for ${shortenString(proposal.recipient)}.`
+                                            : "Your wallet will reject this proposal. If enough owners vote NO that it can no longer reach threshold, the contract will cancel it."}
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -286,11 +318,11 @@ const Result = function ({
                                         disabled={isLoadingVote}
                                         onClick={(event) => {
                                             event.preventDefault();
-                                            void onSubmitVote();
+                                            void onSubmitVote(voteDecision);
                                         }}
-                                        className="bg-emerald-700 text-white hover:bg-emerald-800"
+                                        className={voteDecision ? "bg-emerald-700 text-white hover:bg-emerald-800" : "bg-rose-700 text-white hover:bg-rose-800"}
                                     >
-                                        {isLoadingVote ? "Waiting for wallet..." : "Approve proposal"}
+                                        {isLoadingVote ? "Waiting for wallet..." : voteDecision ? "Confirm YES" : "Confirm NO"}
                                     </AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>

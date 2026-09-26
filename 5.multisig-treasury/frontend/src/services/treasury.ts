@@ -7,6 +7,13 @@ import { blockfrostFetcher, blockfrostProvider } from "@/providers/cardano";
 import { MeshTxBuilder } from "@/txbuilders/mesh.txbuilder";
 import { MeshWallet, stringToHex } from "@meshsdk/core";
 
+type StoredUtxoRef = { utxoTxHash: string | null; utxoOutputIndex: number | null };
+
+const getUtxoRef = (treasury: StoredUtxoRef) =>
+    treasury.utxoTxHash && treasury.utxoOutputIndex !== null
+        ? { txHash: treasury.utxoTxHash, outputIndex: treasury.utxoOutputIndex }
+        : undefined;
+
 export async function getTreasuries({ page = 1, limit = 12, owner }: { page?: number; limit?: number; owner?: string }) {
     const skip = (page - 1) * limit;
     const treasuries = await prisma.treasury.findMany({
@@ -34,6 +41,7 @@ export async function getTreasuries({ page = 1, limit = 12, owner }: { page?: nu
             });
             const meshTxBuilder = new MeshTxBuilder({
                 meshWallet,
+                utxoRef: getUtxoRef(treasury),
                 name: treasury.title,
             });
             await meshTxBuilder.initalize();
@@ -63,6 +71,7 @@ export async function createTreasury({
     threshold,
     description,
     owner,
+    utxoRef,
 }: {
     name: string;
     allowance: number;
@@ -70,6 +79,7 @@ export async function createTreasury({
     threshold: number;
     owner: string;
     description: string;
+    utxoRef: { txHash: string; outputIndex: number };
 }) {
     await prisma.treasury.create({
         data: {
@@ -79,6 +89,8 @@ export async function createTreasury({
             image: image,
             description: description,
             owner: owner,
+            utxoTxHash: utxoRef.txHash,
+            utxoOutputIndex: utxoRef.outputIndex,
         },
     });
 }
@@ -104,6 +116,7 @@ export async function getTreasury({ id }: { id: string }) {
     });
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
+        utxoRef: getUtxoRef(treasury),
         name: treasury.title,
     });
     await meshTxBuilder.initalize();
@@ -136,12 +149,14 @@ export async function getHistories({
     threshold,
     page = 1,
     limit = 10,
+    utxoRef,
 }: {
     name: string;
     threshold: number;
     allowance: number;
     page?: number;
     limit?: number;
+    utxoRef?: { txHash: string; outputIndex: number };
 }) {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
@@ -156,6 +171,7 @@ export async function getHistories({
 
     const meshTxBuilder = new MeshTxBuilder({
         meshWallet,
+        utxoRef,
         name,
     });
     await meshTxBuilder.initalize();

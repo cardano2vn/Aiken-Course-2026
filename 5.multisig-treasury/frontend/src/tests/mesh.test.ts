@@ -119,9 +119,7 @@ describe("A multisig treasury is a shared fund where spending requires approval 
         });
 
         await meshTxBuilder.initalize();
-        const unsignedTx: string = await meshTxBuilder.execute({
-            amount: "15000000",
-        });
+        const unsignedTx: string = await meshTxBuilder.execute();
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
         const txHash = await meshWallet.submitTx(signedTx);

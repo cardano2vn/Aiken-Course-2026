@@ -8,13 +8,15 @@ datasource db {
 }
 
 model Treasury {
-  id          String @id @default(uuid())
-  title       String
-  owner       String @default("")
-  image       String
-  threshold   Int
-  allowance   Int
-  description String
+  id              String  @id @default(uuid())
+  title           String
+  owner           String  @default("")
+  image           String
+  threshold       Int
+  allowance       Int
+  description     String
+  utxoTxHash      String?
+  utxoOutputIndex Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

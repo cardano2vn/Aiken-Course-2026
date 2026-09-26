@@ -8,7 +8,7 @@ import { getHistories } from "@/services/treasury";
 import Pagination from "./pagination";
 import CountUp from "react-countup";
 
-const History = function ({ name, threshold, allowance }: { name: string; threshold: number; allowance: number }) {
+const History = function ({ name, threshold, allowance, utxoRef }: { name: string; threshold: number; allowance: number; utxoRef?: { txHash: string; outputIndex: number } }) {
     const [page, setPage] = useState(1);
 
     const { data, isLoading, error } = useQuery({
@@ -20,6 +20,7 @@ const History = function ({ name, threshold, allowance }: { name: string; thresh
                 name: name,
                 page: page,
                 limit: 6,
+                utxoRef,
             }),
     });
 

@@ -39,12 +39,14 @@ const FormTip = function ({
     title,
     value,
     isLoading,
+    utxoRef,
 }: {
     allowance: number;
     threshold: number;
     title: string;
     value: number;
     isLoading: boolean;
+    utxoRef?: { txHash: string; outputIndex: number };
 }) {
     const { address, signTx } = useWallet();
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -80,6 +82,7 @@ const FormTip = function ({
                 allowance: allowance,
                 threshold: threshold,
                 title: title,
+                utxoRef,
             });
             if (typeof unsignedTx !== "string") {
                 throw new Error("Invalid transaction format");

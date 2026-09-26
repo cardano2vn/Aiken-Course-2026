@@ -18,11 +18,11 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "./ui/alert-dialog";
-import { Input } from "./ui/input"; // ← thêm import Input từ shadcn/ui
 import { Warn } from "./icons";
 import { submitTx, withdraw } from "@/services/mesh";
-import { useWallet } from "@/hooks/use-wallet"; // ← giả sử bạn có hook này
+import { useWallet } from "@/hooks/use-wallet";
 import { DECIMAL_PLACE } from "@/constants/common.constant";
+import { shortenString } from "@/lib/utils";
 
 interface StatusProps {
     title: string;
@@ -32,25 +32,25 @@ interface StatusProps {
     threshold: number;
     signers: string[];
     address: string;
+    utxoRef?: { txHash: string; outputIndex: number };
+    proposal?: { recipient: string; amount: number } | null;
+    balance?: number;
 }
 
-const Status: React.FC<StatusProps> = ({ title, allowance, loading, threshold, signers, name, address }) => {
-    const { signTx } = useWallet(); // =
+const Status: React.FC<StatusProps> = ({ title, allowance, loading, threshold, signers, name, address, utxoRef, proposal, balance = 0 }) => {
+    const { signTx } = useWallet();
     const [isLoading, setIsLoading] = useState(false);
-    const [amount, setAmount] = useState<string>("");
     const [showAmountDialog, setShowAmountDialog] = useState(false);
     const queryClient = useQueryClient();
+    const isRecipientWallet = Boolean(proposal && address && proposal.recipient.toLowerCase() === address.toLowerCase());
+    const isProposalApproved = Boolean(proposal && threshold > 0 && signers.length >= threshold);
+    const isClosing = Boolean(proposal && proposal.amount === balance);
+    const missingPolicyRefForClose = isClosing && !utxoRef;
+    const canWithdraw = Boolean(proposal && isProposalApproved && proposal.amount <= allowance * DECIMAL_PLACE && !isRecipientWallet && !missingPolicyRefForClose);
 
     const onSubmitWithdraw = async () => {
-        const withdrawAmount = Number(amount);
-
-        if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
-            toast.error("Vui lòng nhập số lượng ADA hợp lệ (lớn hơn 0)");
-            return;
-        }
-
-        if (withdrawAmount > allowance) {
-            toast.error(`Số lượng rút (${withdrawAmount} ADA) vượt quá allowance hiện có (${allowance} ADA)`);
+        if (!proposal || !isProposalApproved || isRecipientWallet) {
+            toast.error("This wallet cannot execute the current proposal.");
             return;
         }
 
@@ -63,31 +63,25 @@ const Status: React.FC<StatusProps> = ({ title, allowance, loading, threshold, s
 
             const unsignedTx = await withdraw({
                 walletAddress: address,
-                allowance: allowance * DECIMAL_PLACE,
-                threshold: threshold,
                 title: name,
-                amount: withdrawAmount,
+                utxoRef,
             });
 
             const signedTx = await signTx(unsignedTx);
+            const result = await submitTx({ signedTx });
+            if (!result.result) throw new Error(result.message);
 
-            await submitTx({ signedTx: signedTx });
-            toast.success("Treasury withdrawn successfully!");
+            toast.success("Approved proposal executed successfully.");
             await Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["treasury"] })]);
 
-            setAmount("");
             setShowAmountDialog(false);
         } catch (error) {
-            console.error(error);
-            toast.error("Failed to withdraw treasury. Please try again.");
+            toast.error(error instanceof Error ? error.message : "Failed to execute the approved proposal.");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const canWithdraw = signers.length >= threshold && allowance > 0;
-
-    
     return (
         <motion.div
             className="relative flex w-full items-center gap-4 rounded-lg border-l-4 border-blue-400 bg-gradient-to-r from-blue-50 to-white p-4 shadow-md dark:border-blue-600 dark:from-blue-900/30 dark:to-gray-900"
@@ -133,9 +127,24 @@ const Status: React.FC<StatusProps> = ({ title, allowance, loading, threshold, s
                         <span className="rounded-md bg-blue-100 px-2 py-1 dark:bg-blue-800/50">{allowance || "0"} ADA</span>
                     )}
                 </motion.div>
+                {missingPolicyRefForClose && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                        This proposal spends the full balance, but the original policy reference is missing. This treasury cannot be closed from this record.
+                    </p>
+                )}
+                {isRecipientWallet && proposal && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                        This wallet is the recipient. Connect a different wallet to execute so transaction change goes to another address.
+                    </p>
+                )}
+                {proposal && !isProposalApproved && (
+                    <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                        {Math.max(threshold - signers.length, 0)} more YES {threshold - signers.length === 1 ? "vote" : "votes"} needed before execution.
+                    </p>
+                )}
             </div>
 
-            {canWithdraw && (
+            {proposal && !isRecipientWallet && (
                 <motion.div
                     variants={{
                         hidden: { opacity: 0, x: -20 },
@@ -148,45 +157,33 @@ const Status: React.FC<StatusProps> = ({ title, allowance, loading, threshold, s
                     <AlertDialog open={showAmountDialog} onOpenChange={setShowAmountDialog}>
                         <AlertDialogTrigger asChild>
                             <Button
-                                disabled={isLoading || allowance <= 0}
+                                disabled={isLoading || !canWithdraw}
                                 className="rounded-md bg-blue-500 py-3 px-8 text-base font-semibold text-white shadow-lg hover:bg-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-700"
                             >
-                                {isLoading ? "Withdrawing..." : "Withdraw"}
+                                {isLoading ? "Executing..." : "Execute proposal"}
                             </Button>
                         </AlertDialogTrigger>
 
                         <AlertDialogContent>
                             <AlertDialogHeader>
-                                <AlertDialogTitle>Rút tiền từ Treasury</AlertDialogTitle>
+                                <AlertDialogTitle>Execute approved proposal</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                    Nhập số lượng ADA bạn muốn rút. Allowance hiện tại: <strong>{allowance} ADA</strong>.
+                                    Send the approved amount to {shortenString(proposal.recipient)}:
+                                    <strong className="ml-1">{(proposal.amount / DECIMAL_PLACE).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA</strong>.
                                 </AlertDialogDescription>
                             </AlertDialogHeader>
-
-                            <div className="py-4">
-                                <Input
-                                    type="number"
-                                    placeholder="Số ADA muốn rút"
-                                    value={amount}
-                                    onChange={(e) => setAmount(e.target.value)}
-                                    min={0}
-                                    step="0.000001" // hỗ trợ ADA có decimal nhỏ
-                                    className="w-full"
-                                    disabled={isLoading}
-                                />
-                                {amount && Number(amount) > allowance && (
-                                    <p className="mt-1 text-sm text-red-600">Số lượng vượt quá allowance hiện có</p>
-                                )}
-                            </div>
 
                             <AlertDialogFooter>
                                 <AlertDialogCancel disabled={isLoading}>Hủy</AlertDialogCancel>
                                 <AlertDialogAction
-                                    onClick={onSubmitWithdraw}
-                                    disabled={isLoading || !amount || Number(amount) <= 0 || Number(amount) > allowance}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        void onSubmitWithdraw();
+                                    }}
+                                    disabled={isLoading || !canWithdraw}
                                     className="bg-blue-600 hover:bg-blue-700"
                                 >
-                                    {isLoading ? "Đang xử lý..." : "Xác nhận rút"}
+                                    {isLoading ? "Đang xử lý..." : "Confirm execution"}
                                 </AlertDialogAction>
                             </AlertDialogFooter>
                         </AlertDialogContent>

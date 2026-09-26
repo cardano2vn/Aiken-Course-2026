@@ -27,22 +27,27 @@ import {
     AlertDialogFooter,
     AlertDialogHeader,
     AlertDialogTitle,
-    AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 type Form = z.infer<typeof TreasurySchema>;
+type PendingCreation = {
+    unsignedTx: string;
+    utxoRef: { txHash: string; outputIndex: number };
+    form: Form;
+};
 
 export default function Page() {
     const { status: sessionStatus } = useSession();
     const queryClient = useQueryClient();
     const { address, signTx } = useWallet();
-    const [loading, setLoading] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
+    const [isConfirmationOpen, setIsConfirmationOpen] = useState(false);
+    const [pendingCreation, setPendingCreation] = useState<PendingCreation | null>(null);
 
     const {
         register,
         handleSubmit,
         formState: { errors, isSubmitting },
-        control,
         watch,
     } = useForm<Form>({
         resolver: zodResolver(TreasurySchema),
@@ -58,14 +63,16 @@ export default function Page() {
     });
     const formValues = watch();
 
-    const onSubmit = useCallback(
+    const onPrepare = useCallback(
         async (data: Form) => {
-            if (!address) return;
+            if (!address) {
+                toast.error("Connect your wallet before initializing a treasury.");
+                return;
+            }
 
             try {
-                setLoading(true);
                 const owners = data.owners.split(",").map((owner) => owner.trim());
-                const unsignedTx = await init({
+                const prepared = await init({
                     walletAddress: address,
                     threshold: data.threshold,
                     allowance: data.allowance * DECIMAL_PLACE,
@@ -73,29 +80,46 @@ export default function Page() {
                     owners: owners,
                     initial: data.initialAmount * DECIMAL_PLACE,
                 });
-                const signedTx = await signTx(unsignedTx);
+                setPendingCreation({ ...prepared, form: data });
+                setIsConfirmationOpen(true);
+            } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Could not prepare treasury initialization.");
+            }
+        },
+        [address],
+    );
+
+    const onConfirmCreation = useCallback(async () => {
+        if (!address || !pendingCreation) return;
+
+        setIsCreating(true);
+        try {
+                const signedTx = await signTx(pendingCreation.unsignedTx);
                 const result = await submitTx({ signedTx });
                 if (!result.result) throw new Error(result.message);
 
                 await createTreasury({
-                    name: data.title,
-                    description: data.description,
-                    image: data.image || "",
-                    threshold: data.threshold,
-                    allowance: data.allowance * DECIMAL_PLACE,
+                    name: pendingCreation.form.title,
+                    description: pendingCreation.form.description,
+                    image: pendingCreation.form.image || "",
+                    threshold: pendingCreation.form.threshold,
+                    allowance: pendingCreation.form.allowance * DECIMAL_PLACE,
                     owner: address,
+                    utxoRef: pendingCreation.utxoRef,
                 });
-                toast.success("Proposal created successfully!");
-                queryClient.invalidateQueries({ queryKey: ["status", "proposal", "proposals"] });
-                await Promise.allSettled([queryClient.invalidateQueries({ queryKey: ["proposal"] })]);
-            } catch (error) {
-                toast.error("Proposal created failed !");
-            } finally {
-                setLoading(false);
-            }
-        },
-        [address, signTx, queryClient],
-    );
+            toast.success("Treasury initialized successfully.");
+            setIsConfirmationOpen(false);
+            setPendingCreation(null);
+            await Promise.allSettled([
+                queryClient.invalidateQueries({ queryKey: ["status", "proposal", "proposals"] }),
+                queryClient.invalidateQueries({ queryKey: ["proposal"] }),
+            ]);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Treasury initialization failed.");
+        } finally {
+            setIsCreating(false);
+        }
+    }, [address, pendingCreation, queryClient, signTx]);
 
     const formInputs = useMemo(
         () => [
@@ -169,7 +193,7 @@ export default function Page() {
                                 visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
                             }}
                         >
-                            <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
+                            <form className="space-y-6" onSubmit={handleSubmit(onPrepare)}>
                                 {formInputs.map(({ id, label, type, placeholder, rows, min, max }, index) => (
                                     <motion.div
                                         key={id}
@@ -230,32 +254,67 @@ export default function Page() {
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
                                 >
-                                    <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <button
-                                                disabled={isSubmitting}
-                                                className="w-full rounded-md bg-blue-500 dark:bg-blue-600 py-3 px-8 text-base font-semibold text-white dark:text-white shadow-lg hover:bg-blue-600 dark:hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                                            >
-                                                {isSubmitting ? "Submitting..." : "Register"}
-                                            </button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Confirm treasury initialization</AlertDialogTitle>
-                                                <AlertDialogDescription>
-                                                    Initialize this treasury with {formValues.initialAmount} ADA. The balance stays in the treasury; network fees are additional.
-                                                </AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={handleSubmit(onSubmit)}>
-                                                    {isSubmitting ? "Committing..." : "Commit"}
-                                                </AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
+                                    <button
+                                        type="submit"
+                                        disabled={isSubmitting || isCreating}
+                                        className="w-full rounded-md bg-emerald-700 py-3 px-8 text-base font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 disabled:opacity-50"
+                                    >
+                                        {isSubmitting ? "Preparing transaction..." : "Review initialization"}
+                                    </button>
                                 </motion.div>
                             </form>
+                            <AlertDialog open={isConfirmationOpen} onOpenChange={setIsConfirmationOpen}>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Review treasury initialization</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Confirm the initial balance and one-shot UTxO reference. Your wallet will sign only after you approve this summary.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    {pendingCreation && (
+                                        <dl className="divide-y divide-gray-200 border-y border-gray-200 text-sm dark:divide-gray-700 dark:border-gray-700">
+                                            <div className="flex justify-between gap-4 py-3">
+                                                <dt className="text-gray-500 dark:text-gray-400">Treasury</dt>
+                                                <dd className="min-w-0 truncate font-medium text-gray-900 dark:text-gray-100">{pendingCreation.form.title}</dd>
+                                            </div>
+                                            <div className="flex justify-between gap-4 py-3">
+                                                <dt className="text-gray-500 dark:text-gray-400">Initial balance</dt>
+                                                <dd className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                                    {(pendingCreation.form.initialAmount).toLocaleString(undefined, { maximumFractionDigits: 6 })} ADA
+                                                </dd>
+                                            </div>
+                                            <div className="flex justify-between gap-4 py-3">
+                                                <dt className="text-gray-500 dark:text-gray-400">Approval threshold</dt>
+                                                <dd className="font-medium text-gray-900 dark:text-gray-100">
+                                                    {pendingCreation.form.threshold} of {pendingCreation.form.owners.split(",").filter((owner) => owner.trim()).length} owners
+                                                </dd>
+                                            </div>
+                                            <div className="py-3">
+                                                <dt className="text-gray-500 dark:text-gray-400">One-shot UTxO reference</dt>
+                                                <dd
+                                                    className="mt-1 break-all font-mono text-xs text-gray-900 dark:text-gray-100"
+                                                    title={`${pendingCreation.utxoRef.txHash}#${pendingCreation.utxoRef.outputIndex}`}
+                                                >
+                                                    {pendingCreation.utxoRef.txHash.slice(0, 12)}...{pendingCreation.utxoRef.txHash.slice(-8)}#{pendingCreation.utxoRef.outputIndex}
+                                                </dd>
+                                            </div>
+                                        </dl>
+                                    )}
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel disabled={isCreating}>Back</AlertDialogCancel>
+                                        <AlertDialogAction
+                                            disabled={isCreating || !pendingCreation}
+                                            onClick={(event) => {
+                                                event.preventDefault();
+                                                void onConfirmCreation();
+                                            }}
+                                            className="bg-emerald-700 text-white hover:bg-emerald-800"
+                                        >
+                                            {isCreating ? "Waiting for wallet and network..." : "Confirm and sign"}
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
                         </motion.div>
                     </div>
                     <motion.div

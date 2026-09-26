@@ -2,6 +2,7 @@
 
 import Info from "@/components/info";
 import FormTip from "@/components/form-deposit";
+import FormProposal from "@/components/form-proposal";
 import { useParams } from "next/navigation";
 import Status from "@/components/status";
 
@@ -19,6 +20,9 @@ export default function Page() {
         queryKey: ["treasury", params.id],
         queryFn: async () => await getTreasury({ id: params.id as string }),
     });
+    const utxoRef = data?.utxoTxHash && data.utxoOutputIndex !== null
+        ? { txHash: data.utxoTxHash, outputIndex: data.utxoOutputIndex }
+        : undefined;
 
     if (error) {
         return (
@@ -52,10 +56,24 @@ export default function Page() {
                         signers={data?.signers || []}
                         allowance={Number(data?.allowance) / DECIMAL_PLACE}
                         address={address || ""}
+                        utxoRef={utxoRef}
+                        proposal={data?.proposal || null}
+                        balance={data?.value || 0}
                     />
                 </section>
 
-                <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="space-y-6 flex flex-col">
+                        <FormProposal
+                            title={data?.title || ""}
+                            owners={data?.owners || []}
+                            allowance={data?.allowance || 0}
+                            balance={data?.value || 0}
+                            proposal={data?.proposal || null}
+                            utxoRef={utxoRef}
+                            isLoading={isLoading}
+                        />
+                    </div>
                     <div className="space-y-6 flex flex-col">
                         <FormTip
                             isLoading={isLoading}
@@ -63,6 +81,7 @@ export default function Page() {
                             threshold={data?.threshold as number}
                             title={data?.title || ""}
                             value={data?.value as number}
+                            utxoRef={utxoRef}
                         />
                         <Info link={`https://multisig-treasury.cardano2vn.io/treasury/${params.id}`} />
                     </div>
@@ -77,12 +96,13 @@ export default function Page() {
                             allowance={data?.allowance || 0}
                             title={data?.title || ""}
                             proposal={data?.proposal || null}
+                            utxoRef={utxoRef}
                         />
                     </div>
                 </section>
 
                 <div className="w-full">
-                    <History name={data?.title as string} threshold={data?.threshold || 0} allowance={data?.allowance || 0} />
+                    <History name={data?.title as string} threshold={data?.threshold || 0} allowance={data?.allowance || 0} utxoRef={utxoRef} />
                 </div>
             </div>
         </aside>

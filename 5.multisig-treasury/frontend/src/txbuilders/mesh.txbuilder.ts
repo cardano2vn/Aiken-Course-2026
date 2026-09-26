@@ -192,7 +192,7 @@ export class MeshTxBuilder extends MeshAdapter {
         return await unsignedTx.complete();
     };
 
-    execute = async ({ amount }: { amount: string }): Promise<string> => {
+    execute = async (): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
         const utxo = await this.getTreasuryUTXO();
 
@@ -214,11 +214,11 @@ export class MeshTxBuilder extends MeshAdapter {
                 ? (await this.meshWallet.getUnusedAddresses()).find((address) => address !== proposal.recipient)
                 : walletAddress;
         if (!changeAddress) {
-            throw new Error("Recipient matches the wallet change address and no alternate wallet address is available.");
+            throw new Error("This wallet is the proposal recipient and has no alternate change address. Execute from a different wallet, or cancel the proposal with enough NO votes.");
         }
 
         const ownLovelace = BigInt(utxo.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? "0");
-        const amountValue = BigInt(amount);
+        const amountValue = BigInt(proposal.amount);
         if (amountValue > ownLovelace) {
             throw new Error("amount vượt số dư treasury — dữ liệu không hợp lệ.");
         }
@@ -281,6 +281,6 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("Cannot end Treasury: proposal amount must equal the full treasury balance.");
         }
 
-        return this.execute({ amount: treasuryBalance.toString() });
+        return this.execute();
     };
 }
