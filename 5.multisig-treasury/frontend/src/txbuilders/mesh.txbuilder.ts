@@ -167,9 +167,13 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("Owner này đã vote rồi.");
         }
 
-        const newDatum = approve
-            ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
-            : { ...datum, noSigners: [voterPubKeyHash, ...datum.noSigners], signers: datum.signers };
+                const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+                const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
+                const newDatum = approve
+                        ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
+                        : isDoomed
+                            ? { ...datum, proposal: null, signers: [], noSigners: [] }
+                            : { ...datum, noSigners: updatedNoSigners, signers: datum.signers };
 
         const unsignedTx = this.meshTxBuilder;
 

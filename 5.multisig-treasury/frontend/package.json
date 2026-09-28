@@ -8,7 +8,7 @@
         "start": "next start",
         "lint": "eslint",
         "test": "jest --runInBand",
-        "postinstall": "fumadocs-mdx",
+        "postinstall": "fumadocs-mdx && prisma generate",
         "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
         "contract:check": "cd ./contract && aiken check",
         "contract:build": "cd ./contract && aiken build"
@@ -16,7 +16,7 @@
     "dependencies": {
         "@hookform/resolvers": "^5.2.2",
         "@icons-pack/react-simple-icons": "^13.8.0",
-        "@meshsdk/core": "^1.9.0-beta.103",
+        "@meshsdk/core": "^1.9.1",
         "@prisma/adapter-pg": "^7.3.0",
         "@prisma/client": "^7.3.0",
         "@radix-ui/react-alert-dialog": "^1.1.15",
