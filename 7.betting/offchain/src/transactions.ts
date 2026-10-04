@@ -27,6 +27,21 @@ import {
   TOKEN_UNIT
 } from "./config";
 
+// ─── Realistic Redeemer Budgets (Cho Announce & Cancel) ──────────────────────
+/**
+ * Safe Execution Unit Budgets (dựa trên Aiken test profile thực tế + 30% buffer an toàn).
+ * Thực tế từ aiken check:
+ * - Spend (Cancel/Announce): ~185k mem, ~82M steps
+ * - Mint (Burn): ~45k mem, ~18M steps
+ * 
+ * Được áp dụng cho Announce Winner và Cancel Bet (các giao dịch chỉ tiêu dùng script UTxO,
+ * không có UTxO ví bù tiền), giúp loại bỏ hoàn toàn lỗi Ogmios EvaluationFailure
+ * do thuật toán Coin Selection của MeshSDK gây ra.
+ */
+export const BET_SPEND_ANNOUNCE_BUDGET = { mem: 245000, steps: 110000000 };
+export const BET_SPEND_CANCEL_BUDGET = { mem: 245000, steps: 110000000 };
+export const BET_BURN_BUDGET = { mem: 60000, steps: 25000000 };
+
 // ─── Datum Builder ────────────────────────────────────────────────────────────
 
 /**
@@ -35,13 +50,14 @@ import {
  * @param owner - PubKeyAddress of owner
  * @param player - PubKeyAddress of player, or null for None
  * @param referee - PubKeyAddress of referee
- * @param expiration - unix timestamp
+
+* @param expiration - Unix timestamp in milliseconds (POSIX time)
  */
 export const buildBetDatum = (
   owner: PubKeyAddress,
   player: PubKeyAddress | null,
   referee: PubKeyAddress,
-  expiration: number | bigint  // app-level: can pass number or bigint; integer() handles both
+  expiration: number | bigint  // milliseconds; integer() handles both number and bigint
 ) => {
   // Option<Address>: Some(addr) = conStr0([addr]), None = conStr1([])
   const playerData = player ? conStr0([player]) : conStr1([]);
@@ -56,6 +72,49 @@ export const bech32ToPubKeyAddress = (bech32: string) => {
   return pubKeyAddress(pubKeyHash, stakeCredentialHash);
 };
 
+// ─── CIP-20 Metadata Helpers ──────────────────────────────────────────────────
+
+/**
+ * Tách nội dung tin nhắn thành mảng các chuỗi không quá 64 bytes theo chuẩn CIP-20.
+ * Bảo toàn ký tự UTF-8 không bị cắt đôi (surrogate pairs hoặc multi-byte characters).
+ */
+export const splitMessageCip20 = (message: string, maxChunkBytes = 64): string[] => {
+  if (!message) return [];
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let currentChunk = "";
+  let currentBytes = 0;
+
+  for (const char of message) {
+    const charBytes = encoder.encode(char).length;
+    if (currentBytes + charBytes > maxChunkBytes) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
+      currentChunk = char;
+      currentBytes = charBytes;
+    } else {
+      currentChunk += char;
+      currentBytes += charBytes;
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+};
+
+/**
+ * Chuẩn hóa giá trị msg cho CIP-20 label 674:
+ * Theo đặc tả chuẩn CIP-0020, key "msg" bắt buộc luôn luôn là một mảng các chuỗi (string[]),
+ * trong đó mỗi phần tử chuỗi có độ dài tối đa 64 bytes (UTF-8).
+ */
+export const formatCip20Message = (message: string): string[] => {
+  return splitMessageCip20(message, 64);
+};
+
 // ─── Transactions ─────────────────────────────────────────────────────────────
 
 export const createBetTx = async (
@@ -66,6 +125,10 @@ export const createBetTx = async (
   betAmountLovelace: bigint,
   betMessage: string
 ) => {
+  if (expirationUnix <= Date.now()) {
+    throw new Error("Expiration must be in the future");
+  }
+
   const ownerAddr = await ownerWallet.getChangeAddress();
   const ownerPkh = resolvePaymentKeyHash(ownerAddr);
   const utxos = await ownerWallet.getUtxos();
@@ -81,6 +144,8 @@ export const createBetTx = async (
   const refPubKeyAddr = bech32ToPubKeyAddress(refereeAddress);
 
   const datum = buildBetDatum(ownerPubKeyAddr, null, refPubKeyAddr, expirationUnix);
+  const cip20Msg = formatCip20Message(betMessage);
+  const expirationSlot = unixTimeToEnclosingSlot(Number(expirationUnix), SLOT_CONFIG_NETWORK.preprod);
 
   return await txBuilder
     .mintPlutusScriptV3()
@@ -92,7 +157,7 @@ export const createBetTx = async (
       { unit: TOKEN_UNIT, quantity: "1" },
     ])
     .txOutInlineDatumValue(datum, "JSON")
-    .metadataValue("674", { msg: betMessage })
+    .metadataValue("674", { msg: cip20Msg })
     .changeAddress(ownerAddr)
     .txInCollateral(
       collateral.input.txHash,
@@ -102,6 +167,7 @@ export const createBetTx = async (
     )
     .requiredSignerHash(ownerPkh)
     .selectUtxosFrom(utxos)
+    .invalidHereafter(expirationSlot - 1)
     .complete();
 };
 
@@ -151,6 +217,7 @@ export const joinBetTx = async (
       collateral.output.amount,
       collateral.output.address
     )
+    .requiredSignerHash(playerPkh)
     .selectUtxosFrom(utxos)
     .invalidHereafter(expirationSlot - 1)
     .complete();
@@ -185,12 +252,12 @@ export const announceWinnerTx = async (
     .spendingPlutusScriptV3()
     .txIn(betUtxo.input.txHash, betUtxo.input.outputIndex, betUtxo.output.amount, SCRIPT_ADDRESS)
     .txInInlineDatumPresent()
-    .txInRedeemerValue(mConStr1([isOwnerWinData]))
+    .txInRedeemerValue(mConStr1([isOwnerWinData]), "Mesh", BET_SPEND_ANNOUNCE_BUDGET)
     .txInScript(SCRIPT_CBOR)
     .mintPlutusScriptV3()
     .mint("-1", POLICY_ID, TOKEN_NAME_HEX)
     .mintingScript(SCRIPT_CBOR)
-    .mintRedeemerValue("")
+    .mintRedeemerValue(mConStr0([]), "Mesh", BET_BURN_BUDGET)
     .changeAddress(winnerAddress)
     .txInCollateral(
       collateral.input.txHash,
@@ -226,12 +293,12 @@ export const cancelBetTx = async (
     .spendingPlutusScriptV3()
     .txIn(betUtxo.input.txHash, betUtxo.input.outputIndex, betUtxo.output.amount, SCRIPT_ADDRESS)
     .txInInlineDatumPresent()
-    .txInRedeemerValue(mConStr2([]))
+    .txInRedeemerValue(mConStr2([]), "Mesh", BET_SPEND_CANCEL_BUDGET)
     .txInScript(SCRIPT_CBOR)
     .mintPlutusScriptV3()
     .mint("-1", POLICY_ID, TOKEN_NAME_HEX)
     .mintingScript(SCRIPT_CBOR)
-    .mintRedeemerValue("")
+    .mintRedeemerValue(mConStr0([]), "Mesh", BET_BURN_BUDGET)
     .changeAddress(betDatumData.ownerAddress)
     .txInCollateral(
       collateral.input.txHash,

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Mat tren (Top Face) - mau trang sang -->
+  <polygon points="32,7 55,20 32,33 9,20" 
+    fill="#FFFFFF" 
+    stroke="#d4d4d8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+  
+  <!-- Mat trai (Left Face) - mau trang bong mo -->
+  <polygon points="9,20 32,33 32,57 9,44" 
+    fill="#e4e4e7" 
+    stroke="#d4d4d8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+  
+  <!-- Mat phai (Right Face) - bong toi nhe -->
+  <polygon points="32,33 55,20 55,44 32,57" 
+    fill="#d4d4d8" 
+    stroke="#a1a1aa" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+
+  <!-- Cham mat tren: 1 cham do truyen thong cua xuc xac casino -->
+  <circle cx="32" cy="20" r="3.4" fill="#EF4444" />
+
+  <!-- Cham mat trai: 3 cham den -->
+  <circle cx="16.5" cy="29.5" r="2.2" fill="#18181b" />
+  <circle cx="20.5" cy="38.5" r="2.2" fill="#18181b" />
+  <circle cx="24.5" cy="47.5" r="2.2" fill="#18181b" />
+
+  <!-- Cham mat phai: 2 cham den -->
+  <circle cx="40" cy="36.5" r="2.2" fill="#18181b" />
+  <circle cx="47" cy="45.5" r="2.2" fill="#18181b" />
+</svg>

@@ -96,7 +96,11 @@ export const fetchBetMessage = async (
     if (!res.ok) return null;
     const data: any[] = await res.json();
     const entry = data.find((m) => String(m.label) === "674");
-    return entry?.json_metadata?.msg ?? null;
+    const rawMsg = entry?.json_metadata?.msg;
+    if (Array.isArray(rawMsg)) {
+      return rawMsg.join("");
+    }
+    return typeof rawMsg === "string" ? rawMsg : null;
   };
 
   try {

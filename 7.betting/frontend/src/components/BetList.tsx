@@ -12,6 +12,7 @@ import {
 import { useWallet } from "@/contexts/WalletContext";
 import { joinBetTx, cancelBetTx, announceWinnerTx, ParsedBetDatum } from "@cardano-bet-dapp/offchain";
 import TxStatus, { TxStepStatus } from "@/components/TxStatus";
+import { waitForTxConfirmation, pendingTxStorage } from "@/utils/txUtils";
 
 interface BetItem {
   utxo: UTxO;
@@ -32,8 +33,8 @@ const ITEMS_PER_PAGE = 8;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 // datum.expiration được lưu dưới dạng Unix milliseconds
-function getBetStatus(datum: ParsedBetDatum): BetStatus {
-  const isExpired = Date.now() >= Number(datum.expiration);
+function getBetStatus(datum: ParsedBetDatum, currentTime: number = Date.now()): BetStatus {
+  const isExpired = currentTime >= Number(datum.expiration);
   // player is AddressObj | null (null = no one joined yet)
   if (datum.player !== null) return isExpired ? "AWAITING_RESULT" : "CLOSED";
   return isExpired ? "EXPIRED" : "OPEN";
@@ -90,7 +91,14 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
   const [page, setPage] = useState(0);
   const [selectingWinnerFor, setSelectingWinnerFor] = useState<string | null>(null);
 
-  // 1. Thu thập TẤT CẢ PKH (từ used, unused và change address) để nhận dạng "You" siêu chuẩn trên ví HD/Multi-address
+  // 0. Timer tự động cập nhật thời gian thực mỗi 3 giây để thẻ bet tự nhảy trạng thái khi qua mốc Expiration
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 1. Thu thập TẤT CẢ PKH (từ used, unused và change address) để nhận dạng các chuẩn bet mà người dùng có liên quan -> hỗ trợ ví Multi-address
   const [myPkhs, setMyPkhs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -117,17 +125,41 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
           try { pkhSet.add(resolvePaymentKeyHash(addr)); } catch { }
         });
 
+        console.log("all allAddrs addresses", allAddrs);
+        console.log("all pkhSet addresses", pkhSet);
+
         setMyPkhs(pkhSet);
       })
       .catch(console.error);
   }, [connected, wallet, address]);
+
+  // Khôi phục tiến trình xác nhận từ LocalStorage nếu người dùng reload / F5 trang
+  useEffect(() => {
+    const pending = pendingTxStorage.get("pending_bet_action");
+    if (!pending) return;
+
+    const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
+    if (!apiKey) return;
+    const provider = new BlockfrostProvider(apiKey);
+
+    setActiveTxHash(pending.txId || pending.hash);
+    setSuccessTxHash(pending.hash);
+    setTxStatus("confirming");
+
+    waitForTxConfirmation(provider, pending.hash).then((isConfirmed) => {
+      pendingTxStorage.clear("pending_bet_action");
+      setTxStatus(isConfirmed ? "success" : "submitted");
+      onSuccess();
+    });
+  }, [onSuccess]);
 
   const totalPages = Math.ceil(bets.length / ITEMS_PER_PAGE);
   const paginated = bets.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
 
   const buildAndSubmit = async (
     buildFn: (txBuilder: MeshTxBuilder) => Promise<string>,
-    txId: string
+    txId: string,
+    useEvaluator: boolean = false
   ) => {
     if (!wallet) return;
     const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
@@ -140,33 +172,31 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
     setTxStatus("building");
 
     try {
-      const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+      const txBuilder = new MeshTxBuilder(
+        useEvaluator
+          ? { fetcher: provider, evaluator: provider, submitter: provider }
+          : { fetcher: provider, submitter: provider }
+      );
       const unsignedTx = await buildFn(txBuilder);
 
       setTxStatus("signing");
       const signedTx = await wallet.signTx(unsignedTx);
 
       setTxStatus("submitting");
-      const hash = await wallet.submitTx(signedTx);
+      const hash = await provider.submitTx(signedTx);
       setSuccessTxHash(hash);
 
-      setTxStatus("confirming");
-      // 2 phút chờ tx được confirm trên chuỗi 
-      let isConfirmed = false;
-      for (let i = 0; i < 24; i++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        try {
-          const info = await provider.fetchTxInfo(hash);
-          if (info) {
-            isConfirmed = true;
-            break;
-          }
-        } catch { /* thoát và thông báo tx submitted nhưng chưa được confirm*/ }
-      }
+      // Lưu pending Tx vào LocalStorage để chống mất trạng thái khi reload / F5
+      pendingTxStorage.save("pending_bet_action", { hash, txId });
 
+      setTxStatus("confirming");
+      const isConfirmed = await waitForTxConfirmation(provider, hash);
+
+      pendingTxStorage.clear("pending_bet_action");
       setTxStatus(isConfirmed ? "success" : "submitted");
       onSuccess();
     } catch (err: any) {
+      pendingTxStorage.clear("pending_bet_action");
       let msg = err.message || "Unknown error";
       try {
         const match = msg.match(/Data:\s*(\{.*?\})/);
@@ -182,7 +212,8 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
     if (!wallet) return;
     buildAndSubmit(
       (txBuilder) => joinBetTx(txBuilder, wallet, b.utxo, b.datum),
-      b.utxo.input.txHash
+      b.utxo.input.txHash,
+      true
     );
   };
 
@@ -190,7 +221,8 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
     if (!wallet) return;
     buildAndSubmit(
       (txBuilder) => cancelBetTx(txBuilder, wallet, b.utxo, b.datum),
-      b.utxo.input.txHash
+      b.utxo.input.txHash,
+      false
     );
   };
 
@@ -198,7 +230,8 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
     if (!wallet) return;
     buildAndSubmit(
       (txBuilder) => announceWinnerTx(txBuilder, wallet, isOwnerWin, b.utxo, b.datum),
-      b.utxo.input.txHash
+      b.utxo.input.txHash,
+      false
     );
     setSelectingWinnerFor(null);
   };
@@ -246,7 +279,7 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <AnimatePresence>
               {paginated.map((b) => {
-                const status = getBetStatus(b.datum);
+                const status = getBetStatus(b.datum, now);
                 const expDate = getExpirationDate(b.datum.expiration);
                 const lovelace = getLovelaceAmount(b.utxo);
                 let ownerPkh = null, playerPkh = null, refereePkh = null;
@@ -297,7 +330,7 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                         </p>
                       )}
                       <p className="flex items-center gap-1.5">
-                        <span className="w-14 inline-block text-text-muted">Ref:</span>
+                        <span className="w-14 inline-block text-text-muted">Referee:</span>
                         <span>{b.datum.refereeAddress.slice(0, 14)}...{b.datum.refereeAddress.slice(-4)}</span>
                         {isReferee && <YouBadge />}
                       </p>

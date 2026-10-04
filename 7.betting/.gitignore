@@ -28,3 +28,8 @@ onchain/build/
 # Temporary files
 /tmp/
 *.log
+
+# Homework Solutions
+*_solution.*
+
+docs/video_resources/

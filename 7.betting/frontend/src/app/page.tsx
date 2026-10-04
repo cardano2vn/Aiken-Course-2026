@@ -58,7 +58,7 @@ export default function Home() {
           <div className="w-10 h-10 rounded-full bg-brand/20 border border-brand/50 flex items-center justify-center shadow-glow">
             <span className="text-brand font-bold text-lg">🎲</span>
           </div>
-          <span className="font-bold text-xl tracking-wide hidden sm:block">BET dApp</span>
+          <span className="font-bold text-xl tracking-wide hidden sm:block">BETTING dApp</span>
         </div>
         <div className="flex items-center gap-4">
           <button

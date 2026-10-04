@@ -5,5 +5,18 @@
   "workspaces": [
     "offchain",
     "frontend"
-  ]
+  ],
+  "scripts": {
+    "dev": "npm -w frontend run dev",
+    "build": "npm -w frontend run build",
+    "test": "npm -w @cardano-bet-dapp/offchain run test"
+  },
+  "dependencies": {
+    "@meshsdk/core": "^1.9.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^1.5.0"
+  }
 }

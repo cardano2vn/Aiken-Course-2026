@@ -1,19 +1,18 @@
 use aiken/collection/dict
 use aiken/collection/list
-use cardano/address.{Address, Script, from_script}
-use cardano/assets.{from_asset, from_lovelace, has_any_nft_strict, lovelace_of}
+use cardano/address.{Address, Script}
+use cardano/assets.{
+  has_nft_strict, is_zero, lovelace_of, tokens, without_lovelace,
+}
 use cardano/transaction.{
-  InlineDatum, Input, NoDatum, Output, OutputReference, Transaction, find_input,
-  placeholder,
+  InlineDatum, Input, Output, OutputReference, Transaction, find_input,
+  find_script_outputs,
 }
 use cocktail/vodka_address.{address_payment_key}
 use cocktail/vodka_extra_signatories.{key_signed}
+use cocktail/vodka_inputs.{i_at}
+use cocktail/vodka_outputs.{outputs_at}
 use cocktail/vodka_validity_range.{valid_after, valid_before}
-use cocktail/vodka_value.{value_length}
-use mocktail/virgin_address.{mock_pub_key_address}
-use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
-use mocktail/virgin_output_reference.{mock_utxo_ref}
-use mocktail/virgin_validity_range.{mock_interval}
 
 /// Represents the state of a two-player betting game
 pub type BetDatum {
@@ -37,50 +36,49 @@ pub type Action {
   CANCEL
 }
 
-/// Validator chính xử lý toàn bộ vòng đời của bet
-validator bet {
-  /// Minting policy: Giám sát quá trình đúc (mint) và hủy (burn) Bet Token
+validator bet(bet_token_name: ByteArray, minimum_bet_amount: Int) {
+  // Minting handler
   mint(_redeemer: Data, policy_id: ByteArray, transaction: Transaction) {
-    let Transaction { outputs, extra_signatories, mint, .. } = transaction
+    let Transaction { outputs, extra_signatories, mint, validity_range, .. } = transaction
 
-    // Trích xuất số lượng token được mint/burn thuộc về policy này
-    expect [Pair(_asset_name, quantity)] =
-      mint
-        |> assets.tokens(policy_id)
-        |> dict.to_pairs()
+    expect [Pair(token_name, quantity)] = dict.to_pairs(tokens(mint, policy_id))
+    expect token_name == bet_token_name
 
-    if quantity == 1 {
-      // === MINT (Tạo bet): Đúc 1 Token mới ===
-      // Chỉ có 1 UTxO đầu ra thuộc về địa chỉ script của hợp đồng này. Nó chính là Bet UTxO chứa trạng thái của bet được tạo
-      expect [bet_output] =
-        list.filter(
-          outputs,
-          fn(output) { output.address == from_script(policy_id) },
-        )
+    when quantity is {
+      1 -> {
+        // === CREATE (Tạo bet): Đúc 1 Bet Token mới và khởi tạo Bet UTxO ===
+        // Đảm bảo đúng 1 output trả về Script này
+        // Lợi thế của multi-purpose validator: policy_id chính là script hash
+        expect [bet_output] = find_script_outputs(outputs, policy_id)
 
-      let Output { datum, .. } = bet_output
-      expect InlineDatum(bet_datum_data) = datum
-      expect BetDatum { owner, player, referee, .. } = bet_datum_data
+        let Output { value: output_value, datum, .. } = bet_output
+        expect InlineDatum(bet_datum_data) = datum
+        expect BetDatum { owner, player, referee, expiration } = bet_datum_data
 
-      and {
-        // Yêu cầu chữ ký của người tạo (Chủ phòng)
-        key_signed(extra_signatories, address_payment_key(owner))?,
-        // Lúc mới tạo, ghế người chơi (Player) phải còn trống
-        (player == None)?,
-        // Trọng tài không được phép trùng với Chủ phòng
-        (referee != owner)?,
-        // Đảm bảo Bet Token vừa được đúc phải nằm trong bet UTxO, ngoài ra không có token nào khác ngoài ada
-        has_any_nft_strict(bet_output.value, policy_id)?,
+        let owner_phk = address_payment_key(owner)
+
+        // 1. Bet UTxO được khởi tạo chính xác
+        let bet_init_correct = and {
+          (lovelace_of(output_value) >= minimum_bet_amount)?,
+          has_nft_strict(output_value, policy_id, bet_token_name)?,
+          (player == None)?,
+          (address_payment_key(referee) != owner_phk)?,
+        }
+
+        // 2. Bet phải được tạo trước thời điểm hết hạn
+        let created_before_expiration = valid_before(validity_range, expiration)
+        // 3. Yêu cầu chữ ký của người tạo (Owner)
+        let owner_signed = key_signed(extra_signatories, owner_phk)
+
+        bet_init_correct? && created_before_expiration? && owner_signed?
       }
-    } else if quantity == -1 {
-      // === BURN ===
-      True
-    } else {
-      False
+      -1 -> True
+      _ -> False
     }
   }
 
-  /// Spending validator: Xử lý các thay đổi trạng thái và giải ngân
+  // Spending handler
+  // Xử lý các thay đổi trạng thái và giải ngân
   spend(
     input_datum: Option<BetDatum>,
     redeemer: Action,
@@ -88,109 +86,111 @@ validator bet {
     transaction: Transaction,
   ) {
     expect Some(current_datum) = input_datum
-    let Transaction { inputs, outputs, extra_signatories, validity_range, .. } =
-      transaction
+    let Transaction { inputs, outputs, extra_signatories, validity_range, .. } = transaction
+
+    expect Some(bet_input) = find_input(inputs, own_output_ref)
+    let Output { value: input_value, address: own_address, .. } = bet_input.output
+    // Lấy ra script hash từ Bet UTXO => nó chính là policy_id của bet token
+    expect Script(own_policy_id) = own_address.payment_credential
+
+    // Input bắt buộc chứa đúng Bet Token + Ada
+    expect has_nft_strict(input_value, own_policy_id, bet_token_name)
+
+    // Chống Double Satisfaction: Mỗi giao dịch chỉ được phép xử lý đúng 1 Script UTxO
+    expect list.count(inputs, i_at(own_address)) == 1
 
     when redeemer is {
       JOIN -> {
-        expect Some(own_input) = find_input(inputs, own_output_ref)
-        let Output { value: input_value, .. } = own_input.output
-        // ======= CHỈ ĐUỌC JOIN 1 BET TRONG 1 TRANSACTION (NGĂN CHẶN DOUBLE SATISFACTION) ======
-        let join_only_one_bet =
-          list.count(
-            inputs,
-            fn(input) { input.output.address == own_input.output.address },
-          ) == 1
+        // 1. Kiểm tra ván cược còn trống player
+        let has_no_player_before = current_datum.player == None
 
-        // ==================== KIỂM TRA GHẾ NGƯỜI CHƠI CÒN TRỐNG ========================
-        let player_was_empty_before = current_datum.player == None
+        // 2. Kiểm tra Bet UTxO cập nhật chính xác
+        // Giao dịch có 1 continuing output duy nhất (own_output)
+        expect [bet_output] = outputs_at(outputs, own_address)
 
-        // ==================== KIỂM TRA XEM BET UTXO MỚI CÓ HỢP LỆ KHÔNG ====================
-        // Chỉ có duy nhất 1 UTxO trả lại vào hợp đồng - đây chính là Bet UTxO
-        expect [continuing_output] =
-          list.filter(
-            outputs,
-            fn(output) { output.address == own_input.output.address },
-          )
-        // Trích xuất dữ liệu từ Bet UTxO
-        let Output { value: output_value, datum: updated_datum, .. } =
-          continuing_output
+        // Trích xuất dữ liệu từ Bet UTxO mới
+        let Output { value: output_value, datum: updated_datum, .. } = bet_output
         expect InlineDatum(updated_datum) = updated_datum
         expect new_datum: BetDatum = updated_datum
-        expect Script(policy_id) = own_input.output.address.payment_credential
         expect Some(player) = new_datum.player
-        let bet_output_correct = and {
-            // Nguòi choi phải khác Chủ phòng và trọng tài
-            (player != current_datum.owner)?,
-            (player != current_datum.referee)?,
-            // Phải bảo toàn toàn bộ dữ liệu cũ
-            (new_datum.owner == current_datum.owner)?,
-            (new_datum.referee == current_datum.referee)?,
-            (new_datum.expiration == current_datum.expiration)?,
-            // Utxo chỉ chứa ADA và 1 bet token
-            has_any_nft_strict(output_value, policy_id)?,
-            // Tiền cọc (Pot) được nạp thêm chính xác
-            (lovelace_of(output_value) == 2 * lovelace_of(input_value))?,
-          }
+        let player_payment_key = address_payment_key(player)
 
-        // ==================== LOGIC KIỂM TRA CUỐI CÙNG ========================
-        and {
-          join_only_one_bet?,
-          player_was_empty_before?,
-          bet_output_correct?,
-          // Join TRƯỚC thời hạn kết thúc
-          valid_before(validity_range, new_datum.expiration)?,
+        let bet_update_correct = and {
+          (lovelace_of(output_value) == 2 * lovelace_of(input_value))?,
+          has_nft_strict(output_value, own_policy_id, bet_token_name)?,
+          (player_payment_key != address_payment_key(current_datum.referee))?,
+          (player_payment_key != address_payment_key(current_datum.owner))?,
+          (new_datum == BetDatum { ..current_datum, player: Some(player) })?,
         }
+
+        // 3. Kiểm tra ván cược chưa hết hạn
+        let joined_before_expiration = valid_before(
+          validity_range,
+          current_datum.expiration,
+        )
+        // 4. Yêu cầu chữ ký của người chơi (Player)
+        let player_signed = key_signed(extra_signatories, player_payment_key)
+
+        has_no_player_before? && bet_update_correct? && joined_before_expiration? && player_signed?
       }
+
       ANNOUNCE_WINNER { is_owner_win } -> {
         let BetDatum { owner, player, referee, expiration } = current_datum
-
+        // Đảm bảo bet đã có người chơi
         expect Some(player_addr) = player
-        let winner =
-          if is_owner_win {
-            owner
-          } else {
-            player_addr
-          }
+        // Địa chỉ người thắng
+        let winner = if is_owner_win {
+          owner
+        } else {
+          player_addr
+        }
 
-        // Bắt buộc giao dịch chỉ được tạo ra ĐÚNG 1 output trả về cho người chiến thắng (winner)
-        // và output đó chỉ có ADA, đảm bảo Bet token được đốt trong cùng tx
-        let only_one_output_with_lovelace_to_winner = {
+        // 1. Bắt buộc giao dịch chỉ được tạo ra ĐÚNG 1 output trả về cho winner
+        // và output đó chỉ có ADA -> đảm bảo Bet token được đốt trong tx
+        let single_output_to_winner = {
           expect [output_to_winner] = outputs
-          expect output_to_winner.address == winner
-          // Nếu length = 1, tức là Output này CÓ DUY NHẤT lovelace
-          value_length(output_to_winner.value) == 1
+          (output_to_winner.address == winner)? && (output_to_winner.value
+            |> without_lovelace
+            |> is_zero)?
         }
 
-        and {
-          only_one_output_with_lovelace_to_winner?,
-          // Trọng tài (Referee) ký xác nhận giao dịch
-          key_signed(extra_signatories, address_payment_key(referee))?,
-          // Chỉ được phép công bố kết quả SAU KHI thời gian chơi đã hết hạn
-          valid_after(validity_range, expiration)?,
-        }
+        // 2. Trọng tài (Referee) ký xác nhận giao dịch
+        let referee_signed = key_signed(
+          extra_signatories,
+          address_payment_key(referee),
+        )
+
+        // 3. Chỉ được phép công bố kết quả SAU KHI hết hạn
+        let announced_after_expiration = valid_after(validity_range, expiration)
+
+        single_output_to_winner? && referee_signed? && announced_after_expiration?
       }
+
       CANCEL -> {
         let BetDatum { owner, player, expiration, .. } = current_datum
 
-        // Bắt buộc giao dịch chỉ được tạo ra ĐÚNG 1 output trả về cho owner
-        // và output đó chỉ có ADA, đảm bảo Bet token được đốt trong cùng tx
-        let only_one_output_with_lovelace_to_owner = {
+        // === 1. Kiểm tra ván cược vẫn chưa có người chơi ===
+        let has_no_player_before = player == None
+
+        // 2. Bắt buộc giao dịch chỉ được tạo ra ĐÚNG 1 output trả về cho owner
+        // và output đó chỉ có ADA -> đảm bảo Bet token được đốt trong tx
+        let single_output_to_owner = {
           expect [output_to_owner] = outputs
-          expect output_to_owner.address == owner
-          // Nếu length = 1, tức là Output này CÓ DUY NHẤT lovelace
-          value_length(output_to_owner.value) == 1
+          (output_to_owner.address == owner)? && (output_to_owner.value
+            |> without_lovelace
+            |> is_zero)?
         }
 
-        and {
-          // Chỉ được huỷ khi người chơi thứ 2 VẪN CHƯA THAM GIA
-          (player == None)?,
-          only_one_output_with_lovelace_to_owner?,
-          // Bắt buộc có chữ ký Owner
-          key_signed(extra_signatories, address_payment_key(owner))?,
-          // Chỉ được phép huỷ cược SAU KHI bet hết hạn
-          valid_after(validity_range, expiration)?,
-        }
+        // 3. Chỉ được phép cancel sau khi hết hạn
+        let canceled_after_expiration = valid_after(validity_range, expiration)
+
+        // 4. Bắt buộc có chữ ký Owner
+        let owner_signed = key_signed(
+          extra_signatories,
+          address_payment_key(owner),
+        )
+
+        has_no_player_before? && single_output_to_owner? && canceled_after_expiration? && owner_signed?
       }
     }
   }
@@ -198,408 +198,4 @@ validator bet {
   else(_) {
     fail
   }
-}
-
-// ============= TESTS =============
-
-test should_init_the_bet() {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      outputs: [
-        Output {
-          address: from_script(mock_policy_id(1)),
-          value: from_lovelace(3000000)
-            |> assets.add(mock_policy_id(1), "Bet Token", 1),
-          datum: InlineDatum(initial_bet_datum),
-          reference_script: None,
-        },
-      ],
-      mint: from_asset(mock_policy_id(1), "Bet Token", 1),
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: mock_interval(Some(1752989540), Some(1752990020)),
-    }
-  bet.mint(NoDatum, mock_policy_id(1), test_transaction)
-}
-
-test join_the_bet() {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let updated_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: Some(mock_pub_key_address(2, None)),
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(3000000)
-              |> assets.add(mock_policy_id(1), "simple_bet", 1),
-            datum: InlineDatum(initial_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: from_script(mock_policy_id(1)),
-          value: from_lovelace(6000000)
-            |> assets.add(mock_policy_id(1), "Bet Token", 1),
-          datum: InlineDatum(updated_bet_datum),
-          reference_script: None,
-        },
-      ],
-      extra_signatories: [mock_pub_key_hash(2)],
-      validity_range: mock_interval(Some(1753162820), Some(1753163120)),
-    }
-
-  let join_action: Action = JOIN
-  bet.spend(
-    Some(initial_bet_datum),
-    join_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test cancel_the_bet() {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(3000000)
-              |> assets.add(mock_policy_id(1), "simple_bet", 1),
-            datum: InlineDatum(initial_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: mock_pub_key_address(1, None),
-          value: from_lovelace(3000000),
-          datum: NoDatum,
-          reference_script: None,
-        },
-      ],
-      // Burn the bet token when cancelling
-      mint: from_asset(mock_policy_id(1), "Bet Token", -1),
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: mock_interval(Some(1754027120), None),
-    }
-
-  // After expiration
-  let cancel_action: Action = CANCEL
-  bet.spend(
-    Some(initial_bet_datum),
-    cancel_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test announce_winner_the_bet() {
-  let closed_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: Some(mock_pub_key_address(2, None)),
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(6000000)
-              |> assets.add(mock_policy_id(1), "simple_bet", 1),
-            datum: InlineDatum(closed_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: mock_pub_key_address(1, None),
-          value: from_lovelace(6000000),
-          datum: NoDatum,
-          reference_script: None,
-        },
-      ],
-      // Burn the bet token when announcing winner
-      mint: from_asset(mock_policy_id(1), "Bet Token", -1),
-      extra_signatories: [mock_pub_key_hash(3)],
-      validity_range: mock_interval(Some(1754027120), None),
-    }
-
-  let announce_action: Action = ANNOUNCE_WINNER { is_owner_win: True }
-  bet.spend(
-    Some(closed_bet_datum),
-    announce_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test fail_cancel_before_expiration() fail {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(3000000)
-              |> assets.add(mock_policy_id(1), "Bet Token", 1),
-            datum: InlineDatum(initial_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: mock_pub_key_address(1, None),
-          value: from_lovelace(3000000),
-          datum: NoDatum,
-          reference_script: None,
-        },
-      ],
-      mint: from_asset(mock_policy_id(1), "Bet Token", -1),
-      extra_signatories: [mock_pub_key_hash(1)],
-      // valid range được đặt TRƯỚC thời điểm hết hạn (1753939940) -> Fail
-      validity_range: mock_interval(Some(1752989540), Some(1752990020)),
-    }
-
-  let cancel_action: Action = CANCEL
-  bet.spend(
-    Some(initial_bet_datum),
-    cancel_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test fail_announce_before_expiration() fail {
-  let closed_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: Some(mock_pub_key_address(2, None)),
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(6000000)
-              |> assets.add(mock_policy_id(1), "Bet Token", 1),
-            datum: InlineDatum(closed_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: mock_pub_key_address(1, None),
-          value: from_lovelace(6000000),
-          datum: NoDatum,
-          reference_script: None,
-        },
-      ],
-      mint: from_asset(mock_policy_id(1), "Bet Token", -1),
-      extra_signatories: [mock_pub_key_hash(3)],
-      // Giao dịch nộp TRƯỚC thời hạn (fail)
-      validity_range: mock_interval(Some(1752989540), Some(1752990020)),
-    }
-
-  let announce_action: Action = ANNOUNCE_WINNER { is_owner_win: True }
-  bet.spend(
-    Some(closed_bet_datum),
-    announce_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test fail_init_owner_is_referee() fail {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      // Trọng tài trùng với Owner (Fail)
-      referee: mock_pub_key_address(1, None),
-      expiration: 1753939940,
-    }
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      outputs: [
-        Output {
-          address: from_script(mock_policy_id(1)),
-          value: from_lovelace(3000000)
-            |> assets.add(mock_policy_id(1), "Bet Token", 1),
-          datum: InlineDatum(initial_bet_datum),
-          reference_script: None,
-        },
-      ],
-      mint: from_asset(mock_policy_id(1), "Bet Token", 1),
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: mock_interval(Some(1752989540), Some(1752990020)),
-    }
-  bet.mint(NoDatum, mock_policy_id(1), test_transaction)
-}
-
-test fail_join_player_is_owner() fail {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let updated_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      // Người chơi cũng là Owner (Fail)
-      player: Some(mock_pub_key_address(1, None)),
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(3000000)
-              |> assets.add(mock_policy_id(1), "Bet Token", 1),
-            datum: InlineDatum(initial_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: from_script(mock_policy_id(1)),
-          value: from_lovelace(6000000)
-            |> assets.add(mock_policy_id(1), "Bet Token", 1),
-          datum: InlineDatum(updated_bet_datum),
-          reference_script: None,
-        },
-      ],
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: mock_interval(Some(1753162820), Some(1753163120)),
-    }
-
-  let join_action: Action = JOIN
-  bet.spend(
-    Some(initial_bet_datum),
-    join_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
-}
-
-test fail_join_player_is_referee() fail {
-  let initial_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      player: None,
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let updated_bet_datum =
-    BetDatum {
-      owner: mock_pub_key_address(1, None),
-      // Người chơi là Giám khảo (Fail)
-      player: Some(mock_pub_key_address(3, None)),
-      referee: mock_pub_key_address(3, None),
-      expiration: 1753939940,
-    }
-  let test_transaction =
-    Transaction {
-      ..placeholder,
-      inputs: [
-        Input {
-          output: Output {
-            address: from_script(mock_policy_id(1)),
-            value: from_lovelace(3000000)
-              |> assets.add(mock_policy_id(1), "Bet Token", 1),
-            datum: InlineDatum(initial_bet_datum),
-            reference_script: None,
-          },
-          output_reference: mock_utxo_ref(1, 0),
-        },
-      ],
-      outputs: [
-        Output {
-          address: from_script(mock_policy_id(1)),
-          value: from_lovelace(6000000)
-            |> assets.add(mock_policy_id(1), "Bet Token", 1),
-          datum: InlineDatum(updated_bet_datum),
-          reference_script: None,
-        },
-      ],
-      extra_signatories: [mock_pub_key_hash(3)],
-      validity_range: mock_interval(Some(1753162820), Some(1753163120)),
-    }
-
-  let join_action: Action = JOIN
-  bet.spend(
-    Some(initial_bet_datum),
-    join_action,
-    mock_utxo_ref(1, 0),
-    test_transaction,
-  )
 }

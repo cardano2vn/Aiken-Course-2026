@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
 import { BlockfrostProvider, MeshTxBuilder } from "@meshsdk/core";
 import { useWallet } from "@/contexts/WalletContext";
 import { createBetTx } from "@cardano-bet-dapp/offchain";
 import TxStatus, { TxStepStatus } from "@/components/TxStatus";
+import { waitForTxConfirmation, pendingTxStorage } from "@/utils/txUtils";
 
 interface CreateBetProps {
   onSuccess: () => void;
@@ -24,27 +25,33 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
   const [betAmount, setBetAmount] = useState("5");   // ADA, default 5
   const [betMessage, setBetMessage] = useState("");
 
-  // Metadata Cardano giới hạn 64 bytes UTF-8, không phải 64 ký tự
-  const MAX_MSG_BYTES = 64;
-  const msgByteLength = (s: string) => new TextEncoder().encode(s).length;
-  const truncateToBytes = (s: string, maxBytes: number) => {
-    const encoder = new TextEncoder();
-    let bytes = 0;
-    let i = 0;
-    for (const char of s) {
-      const charBytes = encoder.encode(char).length;
-      if (bytes + charBytes > maxBytes) break;
-      bytes += charBytes;
-      i += char.length; // handle surrogate pairs
-    }
-    return s.slice(0, i);
-  };
+  // Cho phép nhập tối đa 250 ký tự (sẽ được tự động phân tách theo chuẩn CIP-20 64-byte chunks ở tầng giao dịch)
+  const MAX_MSG_CHARS = 250;
   const handleBetMessageChange = (value: string) => {
-    setBetMessage(truncateToBytes(value, MAX_MSG_BYTES));
+    setBetMessage(value.slice(0, MAX_MSG_CHARS));
   };
   const [txStatus, setTxStatus] = useState<TxStepStatus>("idle");
   const [txError, setTxError] = useState("");
   const [txHash, setTxHash] = useState("");
+
+  // Khôi phục tiến trình xác nhận từ LocalStorage nếu người dùng reload / F5 trang
+  useEffect(() => {
+    const pending = pendingTxStorage.get("pending_create_bet");
+    if (!pending) return;
+
+    const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
+    if (!apiKey) return;
+    const provider = new BlockfrostProvider(apiKey);
+
+    setTxHash(pending.hash);
+    setTxStatus("confirming");
+
+    waitForTxConfirmation(provider, pending.hash).then((isConfirmed) => {
+      pendingTxStorage.clear("pending_create_bet");
+      setTxStatus(isConfirmed ? "success" : "submitted");
+      onSuccess();
+    });
+  }, [onSuccess]);
 
   // Hiển thị timezone offset của client
   const tzLabel = useMemo(() => {
@@ -98,7 +105,11 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
     setTxStatus("building");
 
     try {
-      const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: wallet });
+      const txBuilder = new MeshTxBuilder({
+        fetcher: provider,
+        evaluator: provider,
+        submitter: provider,
+      });
       const betAmountLovelace = BigInt(Math.round(betAmountNum * 1_000_000));
       const unsignedTx = await createBetTx(txBuilder, wallet, refereeAddr, expUnixTime, betAmountLovelace, betMessage);
 
@@ -106,23 +117,16 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
       const signedTx = await wallet.signTx(unsignedTx);
 
       setTxStatus("submitting");
-      const hash = await wallet.submitTx(signedTx);
+      const hash = await provider.submitTx(signedTx);
       setTxHash(hash);
 
-      setTxStatus("confirming");
-      // 2 phút chờ tx được confirm trên chuỗi 
-      let isConfirmed = false;
-      for (let i = 0; i < 24; i++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        try {
-          const info = await provider.fetchTxInfo(hash);
-          if (info) {
-            isConfirmed = true;
-            break;
-          }
-        } catch { /* thoát và thông báo tx submitted nhưng chưa được confirm*/ }
-      }
+      // Lưu pending Tx vào LocalStorage để chống mất trạng thái khi reload
+      pendingTxStorage.save("pending_create_bet", { hash });
 
+      setTxStatus("confirming");
+      const isConfirmed = await waitForTxConfirmation(provider, hash);
+
+      pendingTxStorage.clear("pending_create_bet");
       setTxStatus(isConfirmed ? "success" : "submitted");
       onSuccess();
       // Reset form
@@ -131,6 +135,7 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
       setBetAmount("5");
       setBetMessage("");
     } catch (err: any) {
+      pendingTxStorage.clear("pending_create_bet");
       let msg = err.message || "Unknown error";
       try {
         const match = msg.match(/Data:\s*(\{.*?\})/);
@@ -191,17 +196,18 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
           <label className="block text-xs uppercase tracking-wider text-text-muted mb-1">
             Bet Content / Message
           </label>
-          <input
+          <textarea
             value={betMessage}
             onChange={(e) => handleBetMessageChange(e.target.value)}
-            placeholder="Nội dung cá cược ..."
-            className="glass-input text-xs"
+            placeholder="Nội dung cá cược (tối đa 250 ký tự) ..."
+            rows={3}
+            className="glass-input text-xs resize-none"
           />
-          <p className={`text-[11px] mt-1 ${msgByteLength(betMessage) >= MAX_MSG_BYTES
+          <p className={`text-[11px] mt-1 ${betMessage.length >= MAX_MSG_CHARS
             ? "text-status-warning"
             : "text-text-muted"
             }`}>
-            {msgByteLength(betMessage)}/{MAX_MSG_BYTES} bytes
+            {betMessage.length}/{MAX_MSG_CHARS} ký tự
           </p>
         </div>
 
