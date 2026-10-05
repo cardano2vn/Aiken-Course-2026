@@ -38,6 +38,8 @@ Validator không có khả năng tự động "chạy ở ngoài" để tìm UTx
 
 Đây cũng là nguyên lý cốt lõi của dApp Cardano: không tin UI, tin chain. UI chỉ là lớp tiện ích, không phải lớp bảo mật.
 
+Có thể nhìn workflow như một chuỗi trách nhiệm nối tiếp nhau: provider cung cấp snapshot dữ liệu; builder dùng snapshot đó để chuẩn bị transaction; wallet yêu cầu người dùng ký; mạng tiếp nhận transaction và validator kiểm tra các điều kiện on-chain. Một bước thành công không đồng nghĩa tất cả bước sau cũng thành công. Chẳng hạn, builder tạo được unsigned transaction chưa có nghĩa là ví sẽ chấp nhận ký, và ký xong cũng chưa có nghĩa transaction đã được xác nhận trong block. Giao diện nên cho người dùng biết rõ transaction đang ở giai đoạn nào thay vì hiển thị một thông báo thành công quá sớm.
+
 ---
 
 ## 2. Kiến trúc treasury và dữ liệu state
@@ -57,18 +59,20 @@ Mỗi action đều tương ứng với một trạng thái mới của treasury
 
 ### 2.2. Cấu trúc dữ liệu cơ bản
 
-Một treasury state kiểu mẫu có thể chứa:
+Trong cấu trúc on-chain của dự án, datum treasury có các trường:
 
-- `owners`: danh sách public key hashes của chủ sở hữu/quản lý.
-- `threshold`: số lượng chữ ký tối thiểu cần để thực thi.
-- `balance`: số lovelace đang có trong treasury.
-- `allowance`: số tiền tối đa một proposal có thể yêu cầu trong một chu kỳ.
-- `proposal`: proposal hiện tại, nếu có.
-- `yesVotes` và `noVotes`: danh sách người đã bỏ phiếu.
-- `status`: trạng thái proposal, ví dụ open/closed.
-- `identity token`: token duy nhất xác định treasury state hiện tại.
+- `policy_id`: policy định danh identity token của treasury.
+- `owners`: danh sách public key hash của các owner.
+- `threshold`: số phiếu YES tối thiểu để thực thi proposal.
+- `allowance`: hạn mức lovelace tối đa cho từng proposal.
+- `signers` và `no_signers`: danh sách owner đã vote YES và NO cho proposal hiện tại.
+- `proposal`: `None` nếu chưa có proposal, hoặc chứa proposal với `recipient` và `amount` nếu đang mở.
+
+Số dư không phải một trường trong datum. Nó nằm trong `Value` của treasury UTxO, nên builder cần đọc cả datum lẫn giá trị asset của output để biết đầy đủ state. Tương tự, proposal không có trường `status` riêng: ở mô hình này, `proposal = Some(...)` biểu thị đang có proposal và `proposal = None` biểu thị chưa có. Người đề xuất được phản ánh qua phiếu YES ban đầu trong `signers`, còn các trường `yesVotes`/`noVotes` trong một mô hình giao diện cần được chuyển đổi tương ứng sang `signers`/`no_signers` khi làm việc với datum.
 
 Các token và script address hoạt động như một "bộ nhận dạng" cho treasury. Bất kỳ ai cũng có thể tìm thấy treasury bằng cách tìm output chứa identity token và script address. Điều này rất quan trọng vì UI không nên dùng cách đoán "output thứ 1" hay "địa chỉ ví của chủ sở hữu"; phải dựa trên script address và asset identity.
+
+Việc hiển thị state cũng cần ghép đúng các nguồn dữ liệu. Ví dụ, giao diện không nên lấy số dư từ một bản ghi cũ trong cache trong khi lấy proposal từ datum mới hơn, vì người dùng khi đó sẽ thấy một trạng thái chưa từng tồn tại trên chain. Cách an toàn hơn là xác định đúng UTxO treasury hiện hành bằng địa chỉ script và identity token, rồi đọc value cùng inline datum từ chính output đó.
 
 ### 2.3. Tại sao cần identity token?
 
@@ -81,6 +85,8 @@ Trong hệ thống này, treasury UTxO thường có dạng:
 - Datum: thông tin chủ sở hữu, ngưỡng, proposal, phiếu.
 
 Đây là cách cùng một script address lưu nhiều lần state khác nhau nhưng chỉ có một state đang được dùng cho state machine.
+
+Identity token giúp nhận diện UTxO đang hoạt động, nhưng bản thân việc sở hữu token không chứng minh transaction cập nhật state là hợp lệ. Spending validator vẫn kiểm tra token có được giữ đúng trong output tiếp tục, datum có chuyển đúng theo action và transaction có đủ chữ ký cần thiết hay không. Khi quỹ đóng, token phải được burn theo minting policy; vì vậy, frontend nên dùng token để tìm đúng state nhưng không xem token như một quyền bỏ qua các quy tắc còn lại.
 
 ---
 
@@ -107,6 +113,8 @@ Một builder điển hình có các tham số như:
 - `policyId` và `tokenName`: dùng để tìm treasury UTxO qua identity token
 - `scriptCbor`: script raw đã build từ Aiken
 
+Vai trò của adapter là gom các thao tác hạ tầng thường lặp lại vào một chỗ, để mỗi builder tập trung vào action cần thực hiện. Ví dụ, `propose` không nên tự định nghĩa một cách tìm UTxO treasury khác với `vote`, vì sự khác biệt đó có thể khiến hai luồng chọn hai state khác nhau. Adapter cung cấp cách dùng provider, script và tiện ích chuyển đổi dữ liệu nhất quán; từng builder vẫn chịu trách nhiệm tạo đúng redeemer, output và datum cho action của nó.
+
 ### 3.2. Query UTxO là bước cực kỳ quan trọng
 
 Trước khi dựng transaction, builder phải biết rõ:
@@ -126,6 +134,8 @@ Các hàm thường gặp:
 
 Không phải lúc nào mã client cũng có thể thành công ngay lập tức. Ví dụ nếu UTxO đã bị tiêu bởi một giao dịch khác, dữ liệu local sẽ cũ. Khi đó builder phải query lại dữ liệu từ mạng và rebuild transaction. Đây là nguyên nhân rất phổ biến của lỗi "Transaction is invalid, already spent" hoặc "No valid UTxO found".
 
+Việc query cần kiểm tra đồng thời địa chỉ script, policy ID, token name và dữ liệu output, thay vì chỉ lấy output đầu tiên trả về từ provider. Sau khi tìm thấy candidate UTxO, builder nên xác nhận inline datum có thể decode và các trường cần thiết có giá trị hợp lệ trước khi dùng nó. Nếu không tìm được duy nhất state phù hợp hoặc dữ liệu thiếu, cần dừng và báo lỗi rõ ràng; tiếp tục dựng transaction từ một output đoán được có thể khiến người dùng ký một giao dịch chắc chắn bị từ chối.
+
 ### 3.3. Giao dịch Plutus cần những phần nào?
 
 Một transaction dùng validator trên Cardano thường cần các phần sau:
@@ -140,6 +150,8 @@ Một transaction dùng validator trên Cardano thường cần các phần sau:
 - `change address`: nơi trả lại ADA thừa từ input
 
 Đây là lý do vì sao off-chain phải hiểu rõ về serialization, datum encoding, giá trị ADA/lovelace, và coin selection. Một giao dịch sai nhỏ ngay ở bậc encode datum cũng có thể khiến validator từ chối.
+
+Những thành phần này có quan hệ với nhau chứ không phải danh sách các trường độc lập. Redeemer phải mô tả cùng action mà builder đang thực hiện; datum output phải là state tiếp theo mà validator dự kiến; các input phụ phải đủ để thanh toán phí và tạo change; collateral được ví dùng theo quy tắc giao dịch Plutus. Chỉ cần datum được encode theo sai thứ tự constructor hoặc amount được đổi nhầm giữa ADA và lovelace, transaction có thể không còn khớp với kiểu dữ liệu và điều kiện mà Aiken kiểm tra.
 
 ---
 
@@ -167,8 +179,10 @@ Builder sẽ:
 4. Tạo output script address với:
    - `lovelace` khởi tạo
    - identity token
-   - `inline datum` chứa owners, threshold, balance, danh sách proposal rỗng
+   - `inline datum` chứa owners, threshold, allowance, các danh sách vote rỗng và proposal chưa mở
 5. Gắn signer của người khởi tạo.
+
+Chọn đúng one-shot UTxO là điều kiện quan trọng hơn việc chọn một input bất kỳ có đủ tiền. Identity minting policy được tạo với reference UTxO cụ thể, nên giao dịch `Init` phải tiêu đúng UTxO đó; nếu reference đã bị dùng hoặc không còn trong ví, người tạo cần chọn một UTxO hợp lệ khác và khởi tạo policy phù hợp. Sau khi khởi tạo, builder cũng cần bảo đảm datum ban đầu có `proposal = None` và hai danh sách vote rỗng để treasury bắt đầu trong state sạch.
 
 #### Kiểm tra quan trọng
 
@@ -191,7 +205,7 @@ Thêm ADA vào treasury mà không thay đổi chủ sở hữu, threshold hoặ
 #### Cách hoạt động
 
 - Query treasury UTxO hiện tại.
-- Đọc `balance` từ current datum.
+- Đọc số lovelace hiện có từ `Value` của treasury UTxO; số dư không nằm trong datum.
 - Tạo output mới với `balance + amount`.
 - Giữ nguyên identity token và đầu vào `Datum` (hoặc cập nhật nếu data model yêu cầu).
 - Gắn redeemer `Deposit`.
@@ -206,6 +220,8 @@ Off-chain có thể kiểm tra trước rằng: số tiền nạp không âm, qu
 - tất cả điều kiện của action đều được thỏa mãn
 
 Deposit thường là hành động đơn giản nhất vì không cần sự đồng thuận hay dấu chứng từ nhiều người.
+
+Trong validator hiện tại, điều kiện chính là output có cùng datum và identity token như input, đồng thời số lovelace tăng lên. Nhánh `Deposit` không yêu cầu người gửi thuộc danh sách owners, nên về mặt contract bất kỳ ai có thể góp ADA vào treasury. Tuy vậy, wallet vẫn phải cung cấp input để trả khoản nạp và phí giao dịch, còn transaction phải giữ đủ value tối thiểu theo yêu cầu của mạng.
 
 ### 4.3. `propose`: tạo proposal chi tiền
 
@@ -224,6 +240,8 @@ Một proposal bao gồm các trường như:
 - `yesVotes`: danh sách người đã đồng ý
 - `noVotes`: danh sách người đã phản đối
 
+Ở tầng on-chain, cấu trúc proposal gọn hơn danh sách mô tả ở giao diện: `Proposal` chỉ lưu `recipient` và `amount`. Proposer được ghi nhận là phiếu YES đầu tiên trong `signers`; trạng thái mở được thể hiện bằng `proposal` có giá trị thay vì `None`. Khi trình bày lịch sử hay hiển thị nhãn "open", UI có thể suy ra từ state đó, nhưng không nên giả định những trường `status` hoặc `proposer` riêng đang tồn tại trong inline datum.
+
 #### Off-chain workflow
 
 Builder thực hiện:
@@ -233,10 +251,10 @@ Builder thực hiện:
 3. Kiểm tra `amount <= balance` và `amount <= allowance` nếu có giới hạn.
 4. Chuyển `proposer` thành `public key hash` và yêu cầu signer.
 5. Tạo output mới với datum update:
-   - `proposal = current Proposal`
-   - `yesVotes = [proposer]`
-   - `noVotes = []`
-   - `balance` không đổi
+   - `proposal = Some({ recipient, amount })`
+   - `signers = [proposer]`
+   - `no_signers = []`
+   - số lovelace trong treasury output được giữ nguyên
 6. Redeemer chứa `Propose` hoặc tương ứng với action logic.
 
 #### Điều quan trọng
@@ -249,6 +267,8 @@ Trước khi gửi transaction, UI có thể cho người dùng biết "giá tr�
 - output datum phải khớp với proposal được tạo
 
 Nếu không có một trong những điều đó, chain sẽ từ chối.
+
+Một ví dụ cụ thể: nếu quỹ đang có 30 ADA, allowance là 10 ADA và owner đề xuất chuyển 6 ADA, builder có thể kiểm tra sớm rằng 6 nhỏ hơn cả allowance lẫn số dư. Transaction tạo proposal chưa chuyển 6 ADA cho người nhận; nó chỉ tiêu treasury UTxO cũ và tạo UTxO mới có cùng giá trị, identity token được giữ nguyên, còn datum được cập nhật để ghi proposal và phiếu YES của proposer. Khoản thanh toán chỉ xảy ra ở bước `Execute` sau khi đủ ngưỡng.
 
 ### 4.4. `vote`: bỏ phiếu YES hoặc NO
 
@@ -264,7 +284,7 @@ Khi có proposal đang open:
 - người đó chưa vote trước đó
 - proposal chưa đóng
 - transaction phải chứa chữ ký của voter
-- output mới có danh sách `yesVotes` hoặc `noVotes` được cập nhật
+- output mới cập nhật `signers` nếu YES hoặc `no_signers` nếu NO
 
 #### Rủi ro khi off-chain không kiểm tra đủ
 
@@ -281,6 +301,8 @@ Builder nên:
 - xác định giá trị `yes` hoặc `no`
 
 Sau đó mới dựng transaction. Đó là cách tốt để tránh lỗi sớm và giảm chance người dùng phải chờ network reject.
+
+Nếu một phiếu NO làm cho proposal không còn khả năng đạt threshold, on-chain validator yêu cầu datum output xóa proposal và reset cả hai danh sách vote. Đây là một trường hợp mà builder không thể chỉ phản chiếu phép cập nhật thông thường “thêm voter vào `no_signers`”; output phải khớp với state machine on-chain. Vì thế, sau khi tính phiếu mới, off-chain cần kiểm tra số owner còn có thể vote YES và chọn đúng state tiếp theo trước khi đưa transaction cho wallet ký.
 
 ### 4.5. `execute`: thực thi chi tiền
 
@@ -324,6 +346,8 @@ Transaction không được "đặt amount theo cảm tính" ở UI. Validity ph
 
 Nói cách khác, validator là người quyết định giao dịch đó có thực thi đúng luật hay không, không phải component frontend.
 
+Đặc biệt, số tiền builder yêu cầu execute phải khớp với `proposal.amount`, vì validator xác định khoản thanh toán từ proposal đang lưu trong datum. Nếu số tiền truyền vào builder khác số tiền đã được owner biểu quyết, transaction có thể được dựng nhưng vẫn không thỏa điều kiện payment của validator. Với trường hợp rút toàn bộ, amount còn phải bằng đúng lovelace đang có trong treasury; khi đó transaction không tạo continuing treasury output và minting policy xác thực việc burn identity token.
+
 ---
 
 ## 5. Luồng ví CIP-30 và frontend
@@ -354,6 +378,8 @@ Một luồng proposal điển hình có thể như sau:
 8. UI submit signed tx bằng `wallet.submitTx()` hoặc provider API.
 9. UI refetch treasury state và cập nhật giao diện.
 
+Trình tự này cũng cho biết ở đâu cần hiển thị trạng thái chờ. Sau khi người dùng nhấn xác nhận trong wallet, frontend mới chỉ có thể biết transaction đã được ký và có thể được gửi đi; cần chờ provider phản ánh transaction hoặc UTxO mới trước khi khẳng định proposal hay vote đã xuất hiện trên chain. Trong thời gian chờ, UI có thể hiển thị tx hash và thông báo đang xác nhận, tránh để người dùng bấm gửi lại nhiều lần vì tưởng thao tác chưa chạy.
+
 ### 5.3. Component UI và UX
 
 Trong frontend, các component có tác dụng giúp người dùng hiểu rõ trạng thái dự án:
@@ -375,6 +401,8 @@ Vì vậy builder nên:
 - xác định `changeAddress` rõ ràng
 - không để output recipient và change address trùng ngẫu nhiên trong logic tiền
 - kiểm tra mọi output trước khi ký transaction
+
+Ngoài việc tránh trùng change address, preview cần giúp người dùng phân biệt khoản tiền đã được proposal thông qua với change sẽ quay lại ví executor. Ví dụ, người thực thi có thể chỉ đóng vai trò gửi transaction; họ không nhất thiết là proposer hay owner bỏ phiếu cuối cùng. Người dùng nên kiểm tra recipient, số lovelace được trả và việc treasury còn tiếp tục hay bị đóng trước khi chấp nhận ký.
 
 ---
 
@@ -399,6 +427,8 @@ Một số dữ liệu này có thể từ localDB hoặc backend, nhưng phần
 - danh sách owner: lấy từ datum
 
 Backend hoặc service layer không được "phán đoán bằng cảm tính" dựa trên sự kiện hiển thị trước đó; nên query lại từ script UTxO để tránh sai dữ liệu.
+
+Với lịch sử hoạt động, cần phân biệt state hiện tại với các sự kiện đã xảy ra. Datum của UTxO hiện tại cho biết proposal nào đang mở và ai đã vote trong proposal đó, nhưng sau khi `Execute` thành công các danh sách vote bị reset. Nếu muốn hiển thị đầy đủ lịch sử proposal và các lần thay đổi, ứng dụng cần lần theo transaction đã được xác nhận hoặc xây dựng một indexer phù hợp; không thể suy ra toàn bộ lịch sử chỉ từ datum hiện tại.
 
 ### 6.2. Lịch sử treasury cần phân tích UTxO và transaction
 
@@ -427,6 +457,8 @@ Lúc đó transaction sẽ thất bại vì quỹ state đã thay đổi, hoặc
 - hiển thị thông báo "Dữ liệu quỹ đã thay đổi, vui lòng refresh và thử lại"
 - nếu provider trả dữ liệu stale, không tiếp tục ký
 
+Nếu transaction thất bại vì UTxO đã bị tiêu, đừng chỉ gửi lại đúng bytes của transaction cũ: input đó vẫn không còn khả dụng. Hãy query lại treasury state, xác nhận proposal còn mở và hành động người dùng định làm vẫn chưa được người khác thực hiện, rồi dựng transaction mới từ UTxO hiện hành. Cách này vừa tránh lặp thao tác đã thành công ở nơi khác, vừa giúp người dùng hiểu rằng lỗi phát sinh do state cạnh tranh chứ không nhất thiết do ví của họ bị hỏng.
+
 Đây là một trong những kỹ năng quan trọng của off-chain developer: quản lý state chia sẻ trong môi trường bất biến như blockchain.
 
 ---
@@ -446,9 +478,9 @@ Một lỗi cực hay xảy ra là builder chọn sai UTxO. Nếu script address
 
 Một transaction chỉ thành công khi `datum` và `redeemer` đúng kiểu và đúng cấu trúc. Nếu `datumToPlutusData()` sai, hoặc `Redeemer` không theo format `Init`, `Deposit`, `Vote`, `Execute`, chain sẽ từ chối. Đây là lỗi logic rất khó phát hiện nếu không test kỹ từng action.
 
-### 7.3. Quên thêm signer
+### 7.3. Quên khai báo signer cần thiết
 
-Có nhiều builder quên gắn `signers` vào transaction, khiến chữ ký không được kiểm tra trên-chain. Khi đó validator sẽ báo không có đủ chữ ký hoặc không có signer hợp lệ. Đây là lỗi kinh điển trong quá trình làm dApp thứ nhất.
+Có builder quên khai báo public key hash cần ký trong transaction, hoặc giao diện không yêu cầu đúng owner kết nối ví của mình để ký. Danh sách `signers` trong datum chỉ ghi nhận những phiếu YES đã được state chấp nhận; tự thêm một hash vào danh sách đó không tạo ra chữ ký thật. Với `Propose` và `Vote`, validator đối chiếu owner được nêu trong redeemer với chữ ký có trong transaction context, nên thiếu chữ ký hợp lệ sẽ khiến transaction bị từ chối. Đây là lý do cần phân biệt danh sách vote trên chain với yêu cầu ví ký transaction.
 
 ### 7.4. Số lượng ADA/lovelace không nhất quán
 

@@ -45,6 +45,10 @@ Ví dụ:
 
 Vấn đề không phải là "ai có quyền khởi tạo quỹ" mà là "quỹ chỉ được chi khi đạt ngưỡng đồng thuận đã định". Cơ chế này làm giảm rủi ro tập trung và tăng tính minh bạch.
 
+Hãy hình dung một nhóm ba người cùng quản lý ngân sách của một dự án cộng đồng. Nếu chỉ một người giữ khóa của ví, mọi người còn lại phải tin rằng người đó luôn hành động đúng và luôn giữ khóa an toàn. Với mô hình 2-of-3, một khoản chi cần ít nhất hai owner đồng ý; một người có thể khởi tạo đề xuất, nhưng không thể tự mình hoàn tất khoản chi nếu chưa đạt ngưỡng. Quy tắc này không loại bỏ mọi rủi ro, nhưng làm rõ ai có quyền tham gia và giảm khả năng một cá nhân đơn phương kiểm soát quỹ.
+
+Khi chọn ngưỡng, nhóm cần cân bằng giữa khả năng vận hành và mức độ kiểm soát. Ngưỡng quá thấp khiến việc chi tiền dễ dàng hơn nhưng làm giảm hiệu quả của cơ chế đa chữ ký. Ngưỡng quá cao tăng yêu cầu đồng thuận, nhưng cũng có thể làm quỹ ngừng hoạt động nếu một số owner mất ví, vắng mặt hoặc không thể ký đúng lúc. Vì vậy, M-of-N không chỉ là tham số kỹ thuật; đó còn là quyết định quản trị cần được thống nhất trước khi tạo treasury.
+
 ### Khác biệt giữa ví đơn ký và treasury multisig
 
 Trong ví đơn ký, có 1 khóa và 1 quyền kiểm soát toàn bộ tài sản. Trong treasury multisig:
@@ -55,6 +59,8 @@ Trong ví đơn ký, có 1 khóa và 1 quyền kiểm soát toàn bộ tài sả
 - không thể "bỏ qua" kiểm tra bằng cách chỉnh UI hoặc script phía client
 
 Điều này vừa mang lại an toàn, vừa tạo ra độ phức tạp hơn do phải xử lý nhiều chữ ký, nhiều state transition, và nhiều giao dịch có thể xung đột nhau.
+
+Điểm cần phân biệt là treasury không gom các private key vào một chỗ để cùng ký. Mỗi owner tiếp tục giữ khóa riêng trong ví của mình; quy tắc trên chain chỉ yêu cầu transaction phải có đủ bằng chứng chữ ký hợp lệ. Do đó, dApp không cần và cũng không nên biết private key của thành viên nào. Quyền chi tiền hình thành từ việc validator kiểm tra chữ ký cùng trạng thái treasury, chứ không phải từ việc một máy chủ trung tâm lưu quyền truy cập của cả nhóm.
 
 ---
 
@@ -99,6 +105,8 @@ Validator sẽ so khớp `extra_signatories` với danh sách owners. Nếu kh�
 - chữ ký thuộc về ví user, không thuộc quyền kiểm soát của dApp
 - validator mới là nơi xác thực cuối cùng
 
+Ví dụ, trong một treasury 2-of-3, việc giao diện hiển thị ba tên owner không tự nó chứng minh ai đã ký. Validator cần kiểm tra danh sách `owners` đã được ghi trong state và các public key hash có mặt trong transaction context. Chỉ khi một hash vừa thuộc danh sách owner vừa có chữ ký tương ứng thì nó mới được tính là bằng chứng hợp lệ cho action yêu cầu chữ ký. Việc kiểm tra này giúp tách bạch dữ liệu mô tả thành viên với bằng chứng họ thực sự đã chấp thuận giao dịch.
+
 ### 2.4. Các quy tắc kiểm tra khởi tạo
 
 Khi khởi tạo treasury, dữ liệu đầu vào phải thỏa các điều kiện cơ bản:
@@ -112,6 +120,8 @@ Khi khởi tạo treasury, dữ liệu đầu vào phải thỏa các điều ki
 - vote list rỗng
 
 Nếu không thỏa, contract không cho mint identity token hay tạo treasury state.
+
+Các điều kiện khởi tạo này giúp tránh những cấu hình vô nghĩa ngay từ đầu. Chẳng hạn, treasury có ba owner nhưng threshold bằng bốn sẽ không bao giờ đạt đủ chữ ký; threshold bằng không lại khiến cơ chế phê duyệt mất ý nghĩa. Tương tự, owner bị lặp có thể khiến người đọc nhầm số người tham gia thực tế. Vì vậy, khởi tạo không chỉ là tạo địa chỉ script mà còn là thời điểm validator xác nhận rằng bộ quy tắc quản trị ban đầu có thể hoạt động.
 
 ---
 
@@ -157,6 +167,8 @@ Các trường này cho biết:
 - `no_signers`: những owner đã vote NO
 - `proposal`: proposal hiện tại đang xử lý, nếu có
 
+Trong mô hình này, cần phân biệt dữ liệu mô tả trạng thái với số tiền thực tế đang bị khóa. `Datum` lưu luật và tiến trình phê duyệt, còn số lovelace của treasury nằm trong `Value` của UTxO. Khi cần biết số dư để kiểm tra một khoản chi, transaction và validator đọc giá trị của UTxO đầu vào; không có trường `balance` riêng trong cấu trúc `Datum` ở ví dụ trên. Cách tổ chức này giúp tránh phải duy trì hai con số số dư có thể vô tình lệch nhau.
+
 ### 3.2. Tại sao cần identity token?
 
 Identity token là yếu tố cực kỳ quan trọng. Nó giúp hệ thống biết rằng UTxO nào là state treasury hiện tại và không bị nhầm với các UTxO cũ hay người dùng khác.
@@ -164,6 +176,8 @@ Identity token là yếu tố cực kỳ quan trọng. Nó giúp hệ thống bi
 Nghĩ đơn giản: nếu quỹ được biểu diễn như một biến state trong thế giới imperative, thì identity token chính là "định danh phiên bản hiện tại" của state. Một treasury mới được tạo ra khi mint 1 identity token; khi đóng quỹ, token đó bị burn.
 
 Dù off-chain có thể query `script address + policy id + token name`, nhưng quyền kiểm soát thật sự nằm ở validator. Việc tìm đúng UTxO là nhiệm vụ của off-chain, còn việc xác thực state transition là nhiệm vụ của on-chain.
+
+Identity token vì thế nên được hiểu là dấu nhận diện của state, không phải một cơ chế tự nó phê duyệt giao dịch. Nếu một giao dịch tiêu treasury input nhưng không tạo đúng continuing output có token và datum hợp lệ, spending validator vẫn có thể từ chối. Khi đóng quỹ, token cần được burn theo đúng policy; việc tìm thấy hoặc nắm giữ token không thay thế các điều kiện về owner, ngưỡng phê duyệt hay khoản thanh toán.
 
 ### 3.3. Một giao dịch đồng nghĩa với một state transition
 
@@ -177,6 +191,8 @@ Khi treasury thay đổi trạng thái, ta không "sửa" UTxO cũ. Ta thực hi
 
 Vì vậy, mọi hành động như `deposit`, `propose`, `vote`, `execute` đều là một state transition, không phải là một phương thức thay đổi biến trong bộ nhớ.
 
+Có thể theo dõi state bằng một ví dụ đơn giản. Ban đầu UTxO chứa 30 ADA, identity token và datum chưa có proposal. Sau khi owner tạo đề xuất 6 ADA, UTxO cũ bị tiêu và UTxO mới vẫn chứa 30 ADA cùng token, nhưng datum đã ghi recipient, amount và phiếu YES của proposer. Khi proposal được thực thi, transaction trả 6 ADA cho recipient và tạo UTxO treasury mới chứa 24 ADA, token vẫn còn, còn proposal và danh sách vote được đặt lại. Mỗi bước đều tạo bằng chứng giao dịch công khai cho sự thay đổi trước-sau.
+
 ### 3.4. Tại sao EUTxO lại phù hợp với multisig?
 
 Sự phù hợp ở đây là nhờ vào tính an toàn và có thể phân tích được:
@@ -189,6 +205,8 @@ Sự phù hợp ở đây là nhờ vào tính an toàn và có thể phân tíc
 Tuy nhiên, EUTxO cũng đưa ra một thực tế: nếu hai người cùng dùng cùng một state UTxO nhưng không query lại dữ liệu mới nhất, cả hai sẽ xây giao dịch dựa trên cùng một snapshot cũ. Chỉ một trong hai giao dịch sẽ đi qua; giao dịch còn lại sẽ fail do UTxO đã bị tiêu.
 
 Đây là nguyên nhân của các lỗi stale-state rất phổ biến trong dApp Cardano.
+
+Điều này không có nghĩa là tiền bị mất khi hai transaction xung đột. Thông thường, một transaction tiêu được UTxO trước; transaction còn lại tham chiếu đúng UTxO cũ nên không thể áp dụng lên state mới và sẽ bị từ chối. Ứng dụng cần báo cho người dùng biết trạng thái đã thay đổi, đọc lại UTxO hiện hành rồi dựng transaction mới nếu hành động vẫn còn phù hợp. Đây là khác biệt quan trọng giữa lỗi stale-state có thể thử lại và lỗi logic khiến transaction sai ngay cả khi dùng dữ liệu mới.
 
 ---
 
@@ -207,6 +225,8 @@ stateDiagram-v2
   Voting --> Closed: Execute hết quỹ / burn token
   Voting --> Ready: Vote NO đồng thời hủy proposal
 ```
+
+Sơ đồ này mô tả các trạng thái hợp lệ ở mức khái niệm. `Ready` nghĩa là quỹ đang hoạt động và chưa có proposal; `Voting` nghĩa là proposal đang được xử lý. Một lần vote không nhất thiết làm proposal được thông qua ngay: nếu chưa đủ YES thì state vẫn tiếp tục ở `Voting`. Ngược lại, nếu các phiếu NO khiến số owner còn có thể đồng ý thấp hơn `threshold`, proposal không còn khả năng thành công và có thể được xóa để treasury trở lại `Ready`.
 
 ### 4.2. Giai đoạn khởi tạo
 
@@ -252,6 +272,8 @@ votes: [ownerA yes]
 ```
 
 Trong nhiều thiết kế, proposer được xem là YES đầu tiên. Điều này khiến proposal có ít nhất 1 phiếu chấp thuận ngay từ đầu, và validator sẽ tiếp tục kiểm tra rằng số phiếu YES đủ threshold trước khi execute.
+
+Ở dự án này, việc proposer được tính là YES được thể hiện bằng cách ghi public key hash của proposer vào danh sách `signers` ngay khi tạo proposal. Đây không phải là một chữ ký bổ sung tự động do blockchain tạo ra: transaction tạo proposal vẫn phải chứa chữ ký thật của proposer. Khi đọc datum sau đó, người học có thể thấy rõ phiếu khởi đầu đã được ghi nhận và biết còn cần bao nhiêu owner khác chấp thuận để đạt threshold.
 
 ### 4.5. Vote YES / NO
 
@@ -364,6 +386,8 @@ Quy trình điển hình:
 6. Nếu hợp lệ, tx được ghi vào block
 7. Frontend refetch state mới và cập nhật UI
 
+Mỗi thành phần trong luồng này có một nhiệm vụ riêng. Provider giúp ứng dụng đọc dữ liệu từ mạng, nhưng không quyết định transaction có hợp lệ hay không. Builder chuẩn bị cấu trúc transaction theo state mà nó vừa đọc, nhưng không thể thay mặt owner ký. Wallet giữ khóa riêng và yêu cầu người dùng xác nhận; validator chạy quy tắc đã triển khai khi transaction được kiểm tra. Cuối cùng, ứng dụng cần đọc lại state sau khi gửi để phân biệt transaction mới chỉ được tạo, đang chờ xác nhận hay đã làm thay đổi treasury trên chain.
+
 ---
 
 ## 6. Ranh giới tin cậy, rủi ro và giới hạn
@@ -384,6 +408,8 @@ Nếu frontend sai hoặc bị lừa, chain vẫn sẽ từ chối nếu logic v
 - chain chỉ nhận một giao dịch, giao dịch còn lại sẽ fail vì UTxO không còn tồn tại
 
 Trường hợp này xảy ra vì on-chain state biến đổi rất nhanh, còn off-chain phải luôn refresh và validate trước khi ký.
+
+Ví dụ, nếu A và B cùng tải về datum có proposal chưa có phiếu của B, cả hai có thể dựng một giao dịch khác nhau từ cùng treasury UTxO. Nếu giao dịch của A được xác nhận trước, transaction của B không thể cập nhật UTxO đã bị tiêu. Ứng dụng nên xử lý tình huống này như một xung đột state có thể xảy ra trong hoạt động bình thường: thông báo rõ rằng dữ liệu đã cũ, tải lại proposal và danh sách vote, rồi để người dùng quyết định có gửi lại hành động hay không. Không nên âm thầm gửi lặp transaction cũ vì điều đó không khôi phục state trước đó.
 
 ### 6.3. Profile của người dùng và chữ ký thật
 
@@ -450,6 +476,8 @@ Khi threshold đạt, C hoặc A có thể build `Execute` để chi 6 ADA cho D
 - output recipient đúng 6 ADA
 - treasury output còn lại 24 ADA nếu chưa rút hết
 - proposal reset về `None` sau khi execute
+
+Con số 24 ADA ở ví dụ là số dư của treasury sau khi trừ đúng khoản thanh toán 6 ADA; transaction còn phải cân bằng phí mạng và các input/output phụ theo quy tắc Cardano. Dữ liệu hiển thị trên giao diện nên phân biệt số dư của treasury với phần ADA trong ví của người thực thi dùng để trả phí. Nhờ vậy, người học không nhầm rằng tiền phí mạng là một phần của khoản chi đã được proposal phê duyệt.
 
 ### Bước 5: Dữ liệu stale
 
