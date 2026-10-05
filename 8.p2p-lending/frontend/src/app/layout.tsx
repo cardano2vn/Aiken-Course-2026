@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "CrowdLend | Cardano",
-  description: "Decentralized crowdfunding and lending platform built on the Cardano blockchain.",
+  description: "Peer-to-peer Cardano lending secured by native-asset collateral and enforced by Aiken smart contracts.",
 };
 export default function RootLayout({
   children,

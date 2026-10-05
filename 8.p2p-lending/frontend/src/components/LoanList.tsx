@@ -3,64 +3,70 @@
 import { useState, useEffect, useCallback } from "react";
 import LoanCard from "./LoanCard";
 import { getLoans } from "@/actions/crowdlend";
+import type { Loan } from "@/types/loan";
 
 interface Props {
     onTxSuccess: (txHash: string) => void;
 }
 
 export default function LoanListPanel({ onTxSuccess }: Props) {
-    const [loans, setLoans] = useState<
-        {
-            borrower: string;
-            lender: string;
-            principal: number;
-            interestRate: number;
-            loanDuration: number;
-            dueDate?: number | undefined;
-            policyId: string;
-            assetName: string;
-            status: {
-                type: "Active" | "Pending";
-                fundedAt: number | undefined;
-            };
-            txHash: string
-        }[]
-    >([]);
+    const [loans, setLoans] = useState<Loan[]>([]);
     const [loading, setLoading] = useState(true);
-    const [lastRefresh, setLastRefresh] = useState(Date.now());
+    const [refreshCount, setRefreshCount] = useState(0);
+    const [error, setError] = useState<string | null>(null);
 
-    const loadLoans = useCallback(async () => {
+    const refresh = useCallback(() => {
         setLoading(true);
-        try {
-            setLoans(await getLoans());
-        } catch {
-        } finally {
-            setLoading(false);
-        }
+        setRefreshCount((count) => count + 1);
     }, []);
 
     useEffect(() => {
-        loadLoans();
-    }, [loadLoans, lastRefresh]);
+        let cancelled = false;
+        void getLoans()
+            .then((nextLoans) => {
+                if (cancelled) return;
+                setLoans(nextLoans);
+                setError(null);
+            })
+            .catch((err: unknown) => {
+                if (!cancelled) setError(err instanceof Error ? err.message : "Could not load loans from the Cardano network.");
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [refreshCount]);
 
-    // Polling mỗi 30 giây
     useEffect(() => {
-        const interval = setInterval(() => setLastRefresh(Date.now()), 30_000);
+        const interval = setInterval(() => setRefreshCount((count) => count + 1), 30_000);
         return () => clearInterval(interval);
     }, []);
 
-    const pendingLoans = loans.filter((l) => l.status.type === "Pending");
-    const activeLoans = loans.filter((l) => l.status.type === "Active");
-    console.log(activeLoans)
+    const pendingLoans = loans.filter((loan) => loan.status === "Pending");
+    const activeLoans = loans.filter((loan) => loan.status === "Active");
+
+    const renderLoans = (items: Loan[]) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {items.map((loan) => (
+                <LoanCard
+                    key={`${loan.txHash}#${loan.outputIndex}`}
+                    loan={loan}
+                    onTxSuccess={onTxSuccess}
+                    onRefresh={refresh}
+                />
+            ))}
+        </div>
+    );
 
     return (
         <div className="space-y-8">
-            {/* Loan Market */}
             <section>
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                         <h3 className="text-lg font-bold" style={{ color: "var(--color-heading)" }}>
-                            Loan Market
+                            Loan market
                         </h3>
                         {!loading && (
                             <span
@@ -75,15 +81,24 @@ export default function LoanListPanel({ onTxSuccess }: Props) {
                             </span>
                         )}
                     </div>
-                    <button className="btn-glass px-3 py-1.5 text-xs" onClick={() => setLastRefresh(Date.now())}>
-                        Refresh
+                    <button className="btn-glass px-3 py-1.5 text-xs" onClick={refresh} disabled={loading}>
+                        {loading ? "Loading..." : "Refresh"}
                     </button>
                 </div>
 
+                {error && (
+                    <div className="glass-card p-5 mb-4" role="alert">
+                        <p className="text-sm text-red-300">{error}</p>
+                        <button className="btn-glass px-3 py-1.5 text-xs mt-3" onClick={refresh}>
+                            Try again
+                        </button>
+                    </div>
+                )}
+
                 {loading ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {[1, 2, 3].map((i) => (
-                            <div key={i} className="glass-card p-6 animate-pulse h-64">
+                        {[1, 2, 3].map((item) => (
+                            <div key={item} className="glass-card p-6 animate-pulse h-64">
                                 <div className="h-4 rounded mb-4" style={{ background: "var(--color-accent-border)" }} />
                                 <div className="h-3 rounded mb-2 w-3/4" style={{ background: "var(--color-accent-border)" }} />
                                 <div className="h-3 rounded w-1/2" style={{ background: "var(--color-accent-border)" }} />
@@ -92,38 +107,21 @@ export default function LoanListPanel({ onTxSuccess }: Props) {
                     </div>
                 ) : pendingLoans.length === 0 ? (
                     <div className="glass-card p-8 text-center">
-                        <p style={{ color: "var(--color-body)" }}>No open loans. Be the first to create one!</p>
+                        <p style={{ color: "var(--color-body)" }}>
+                            {loans.length > 0 ? "No open loans right now." : "No loans found. Create the first one to get started."}
+                        </p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {pendingLoans.map((loan, index) => (
-                            <LoanCard
-                                key={index}
-                                loan={loan}
-                                onTxSuccess={onTxSuccess}
-                                onRefresh={() => setLastRefresh(Date.now())}
-                            />
-                        ))}
-                    </div>
+                    renderLoans(pendingLoans)
                 )}
             </section>
 
-            {/* Active Loans */}
             {activeLoans.length > 0 && (
                 <section>
                     <h3 className="text-lg font-bold mb-4" style={{ color: "var(--color-heading)" }}>
-                        Active Loans
+                        Active loans · {activeLoans.length}
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {activeLoans.map((loan, index) => (
-                            <LoanCard
-                                key={index}
-                                loan={loan}
-                                onTxSuccess={onTxSuccess}
-                                onRefresh={() => setLastRefresh(Date.now())}
-                            />
-                        ))}
-                    </div>
+                    {renderLoans(activeLoans)}
                 </section>
             )}
         </div>

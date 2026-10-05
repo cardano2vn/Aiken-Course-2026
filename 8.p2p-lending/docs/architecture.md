@@ -22,16 +22,16 @@ Frontend hiển thị loan và yêu cầu ký. Off-chain tìm loan UTxO, tạo v
 ```text
 Datum {
   borrower, lender?, principal, interest_rate,
-  loan_duration, due_date?, collateral_policy_id,
-  collateral_asset_name, status
+  collateral_policy_id, collateral_asset_name,
+  collateral_amount, loan_duration, due_date?
 }
 ```
 
-Collateral trong bản demo là một native asset xác định bởi `collateral_policy_id` và `collateral_asset_name`. `Pending` chưa có lender; `Active` có `funded_at` và `due_date`.
+Collateral là native asset xác định bởi `collateral_policy_id`, `collateral_asset_name` và `collateral_amount`; token này được khóa cùng identity token tại địa chỉ lending. `Pending` có `lender` và `due_date` là `None`; `Active` có cả hai giá trị này là `Some`.
 
 ## 3. Luồng nghiệp vụ
 
-1. Borrower tạo loan: mint state token, khóa collateral và tạo datum `Pending`.
+1. Borrower tạo loan: mint identity token có tên duy nhất được dẫn xuất từ UTxO seed, khóa collateral và tạo datum `Pending`.
 2. Lender fund: gửi principal, ký giao dịch; datum chuyển sang `Active` và tính `due_date`.
 3. Borrower repay: trước due date, trả principal cộng interest cho lender và nhận collateral.
 4. Borrower cancel: khi còn `Pending`, borrower lấy lại collateral.
@@ -41,4 +41,4 @@ Mỗi hành động đều tiêu loan UTxO hiện tại. Việc cùng lúc fund 
 
 ## 4. Thời gian
 
-Validator dùng `validity_range`, không dùng đồng hồ frontend. Funding lấy `lower_bound` làm thời điểm hiện tại; repayment yêu cầu `lower_bound < due_date`; liquidation yêu cầu `lower_bound > due_date`.
+Validator dùng `validity_range`, không dùng đồng hồ frontend. Funding tính `due_date` từ `upper_bound + loan_duration` và giới hạn validity range tối đa 10 phút; repayment phải hoàn tất không muộn hơn hạn trả; liquidation chỉ hợp lệ khi `lower_bound > due_date`.

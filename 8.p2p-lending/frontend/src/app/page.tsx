@@ -109,16 +109,16 @@ export default function Home() {
               className="text-lg leading-relaxed max-w-xl mx-auto mb-10"
               style={{ color: "var(--color-body)" }}
             >
-               Borrow and lend directly on Cardano. NFT collateral provides security for
-  every loan. No intermediaries required — Aiken smart contracts handle the
-  entire process.
+               Borrow and lend directly on Cardano. Each loan locks a native asset
+               as collateral until repayment, cancellation, or liquidation. Aiken
+               smart contracts enforce each transition on-chain.
             </p>
 
             {/* Stats row */}
             <div className="flex justify-center gap-8">
               {[
                 { label: "Smart Contract", value: "Aiken V3" },
-                { label: "Collateral", value: "NFT-backed" },
+                { label: "Collateral", value: "Native asset" },
                 { label: "Network", value: "Preprod" },
               ].map((stat) => (
                 <div key={stat.label} className="text-center">
@@ -170,7 +170,7 @@ export default function Home() {
             color: "var(--color-body)",
           }}
         >
-          P2P Lending dApp · Built with Aiken + MeshJS · Cardano Preprod Testnet with love &lt;3 from Cardano2vn
+          P2P Lending dApp · Aiken + MeshJS · Cardano Preprod Testnet · Collateral returned by the contract lifecycle
         </footer>
 
         <TxToast txHash={lastTxHash} onClose={() => setLastTxHash(null)} />
