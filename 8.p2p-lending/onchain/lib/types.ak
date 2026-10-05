@@ -1,5 +1,6 @@
 use cardano/address.{Address}
 use cardano/assets.{AssetName, PolicyId}
+use cardano/transaction.{OutputReference}
 
 /// Trạng thái suy ra từ datum:
 ///   Pending: lender == None && due_date == None
@@ -16,6 +17,11 @@ pub type Datum {
   /// thời hạn vay (ms)
   loan_duration: Int,
   due_date: Option<Int>,
+}
+
+pub type MintRedeemer {
+  Create(OutputReference)
+  Burn
 }
 
 pub type Redeemer {
