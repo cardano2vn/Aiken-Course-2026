@@ -33,7 +33,7 @@ export const convertDatum = ({
             return serializeAddressObj(pubKeyAddress(paymentHex, stakeHex || "", false), APP_NETWORK_ID);
         };
         const addressFromData = (addressData: (typeof fields)[number]): string => {
-            const paymentHex = addressData.fields[0]?.fields[0]?.fields[0]?.bytes;
+            const paymentHex = addressData.fields[0]?.fields[0]?.bytes;
             const stakeHex = addressData.fields[1]?.fields[0]?.fields[0]?.fields[0]?.bytes;
             return buildAddress(paymentHex, stakeHex);
         };

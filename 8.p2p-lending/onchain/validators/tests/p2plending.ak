@@ -1,3 +1,5 @@
+use aiken/cbor
+use aiken/crypto.{blake2b_256}
 use cardano/address.{Address}
 use cardano/assets.{AssetName, PolicyId, add, from_asset, from_lovelace}
 use cardano/transaction.{InlineDatum, Input, Transaction}
@@ -8,7 +10,7 @@ use mocktail.{
   tx_out_inline_datum,
 }
 use p2plending
-use types.{Cancel, Datum, Fund, Liquidate, Repay}
+use types.{Cancel, Create, Datum, Fund, Liquidate, MintRedeemer, Repay}
 
 fn loan_datum(
   borrower: Address,
@@ -32,6 +34,49 @@ fn loan_datum(
     loan_duration: loan_duration,
     due_date: due_date,
   }
+}
+
+test create_success_mints_seeded_identity_and_locks_collateral() {
+  let borrower = mock_pub_key_address(0, None)
+  let policy_id = mock_script_hash(0)
+  let collateral_policy_id = mock_policy_id(1)
+  let collateral_asset_name: AssetName = "Hydra Course 2026"
+  let collateral_amount = 1
+  let seed = mock_utxo_ref(1, 0)
+  let identity_name = blake2b_256(cbor.serialise(seed))
+  let script_address = mock_script_address(0, None)
+  let datum =
+    loan_datum(
+      borrower,
+      None,
+      10_000_000,
+      500,
+      collateral_policy_id,
+      collateral_asset_name,
+      collateral_amount,
+      3_600_000,
+      None,
+    )
+  let value =
+    from_asset(policy_id, identity_name, 1)
+      |> add(collateral_policy_id, collateral_asset_name, collateral_amount)
+
+  let tx: Transaction =
+    mocktail_tx()
+      |> tx_out(True, script_address, value)
+      |> tx_out_inline_datum(True, datum)
+      |> mint(True, 1, policy_id, identity_name)
+      |> required_signer_hash(True, mock_pub_key_hash(0))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: seed,
+            output: mock_script_output(borrower, from_lovelace(1), InlineDatum(None)),
+          },
+        )
+
+  p2plending.p2plending.mint(Create(seed), policy_id, tx)
 }
 
 test fund_success_updates_lender_and_due_date() {

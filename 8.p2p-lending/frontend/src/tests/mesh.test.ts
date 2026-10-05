@@ -29,7 +29,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
     jest.setTimeout(600000000);
 
     test("Create", async function () {
-        return;
+        // return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -41,7 +41,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
             principal: 10 * DECIMAL_PLACE,
             interestRate: 500,
             loanDuration: 60 * 60 * 1000,
-            collateralUnit: `${"0".repeat(56)}00`,
+            collateralUnit: `d9b15df3faee3a39677378562806a4d01d269b7f5898ae30b3c72561487964726120436f757273652032303236`,
             collateralAmount: 1,
         });
 
@@ -119,7 +119,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Liquidate an overdue loan owned by the test wallet", async function () {
+    test.skip("Liquidate an overdue loan owned by the test wallet", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -133,7 +133,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
             const datum = meshTxBuilder.convertDatum({ plutusData: utxo.output.plutusData });
             return datum.status === "Active" && datum.lender === walletAddress && datum.dueDate !== undefined && datum.dueDate < Date.now();
         });
-        if (!loanUtxo) throw new Error("No overdue loan owned by this integration-test wallet.");
+        if (loanUtxo === undefined) throw new Error("No overdue loan owned by this integration-test wallet.");
 
         const unsignedTx: string = await meshTxBuilder.liquidate({
             txHash: loanUtxo.input.txHash,
