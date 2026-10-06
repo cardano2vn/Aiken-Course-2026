@@ -4,6 +4,8 @@ import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import { APP_MNEMONIC, APP_NETWORK, APP_NETWORK_ID } from "../constants/enviroments";
 import { DECIMAL_PLACE } from "../constants/common";
 
+const runCardanoIntegrationTest = process.env.RUN_CARDANO_INTEGRATION_TESTS === "true" ? test : test.skip;
+
 describe("CrowdFund is a decentralized crowdfunding platform on Cardano that enables secure donations, transparent fund management, and trustless fundraising through smart contracts.", function () {
     let meshWallet: MeshWallet;
 
@@ -29,7 +31,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
     jest.setTimeout(600000000);
 
     test("Create", async function () {
-        // return;
+        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -64,7 +66,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
 
         await meshTxBuilder.initalize();
 
-        const unsignedTx: string = await meshTxBuilder.cancel({ txHash: "0".repeat(64), outputIndex: 0 });
+        const unsignedTx: string = await meshTxBuilder.cancel({ txHash: "520874ece56d9ff6ef8385878d7248faa4b82ad59175cfa45fdde87ac04a6fb8", outputIndex: 1 });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
 
@@ -77,15 +79,27 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Fund", async function () {
+    test("Fund a pending loan on Cardano", async function () {
         return;
+
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
 
         await meshTxBuilder.initalize();
 
-        const unsignedTx: string = await meshTxBuilder.fund({ txHash: "0".repeat(64), outputIndex: 0 });
+        const walletAddress = await meshWallet.getChangeAddress();
+        const pendingLoan = (await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress)).find((utxo) => {
+            if (!utxo.output.plutusData) return false;
+            const datum = meshTxBuilder.convertDatum({ plutusData: utxo.output.plutusData });
+            return datum.status === "Pending" && datum.borrower !== walletAddress;
+        });
+        if (!pendingLoan) throw new Error("No pending loan owned by another wallet is available to fund.");
+
+        const unsignedTx: string = await meshTxBuilder.fund({
+            txHash: pendingLoan.input.txHash,
+            outputIndex: pendingLoan.input.outputIndex,
+        });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
 
@@ -99,14 +113,25 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
     });
 
     test("Repay", async function () {
-        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
 
         await meshTxBuilder.initalize();
 
-        const unsignedTx: string = await meshTxBuilder.repay({ txHash: "0".repeat(64), outputIndex: 0 });
+        const walletAddress = await meshWallet.getChangeAddress();
+        const pendingLoan = (await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress)).find((utxo) => {
+            if (!utxo.output.plutusData) return false;
+            const datum = meshTxBuilder.convertDatum({ plutusData: utxo.output.plutusData });
+            return datum.status === "Pending" && datum.borrower !== walletAddress;
+        });
+        if (!pendingLoan) throw new Error("No pending loan owned by another wallet is available to fund.");
+
+        const unsignedTx: string = await meshTxBuilder.fund({
+            txHash: pendingLoan.input.txHash,
+            outputIndex: pendingLoan.input.outputIndex,
+        });
+
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
 

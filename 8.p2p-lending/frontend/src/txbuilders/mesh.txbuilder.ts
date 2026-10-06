@@ -187,14 +187,14 @@ export class MeshTxBuilder extends MeshAdapter {
             .txOutInlineDatumValue(
                 mConStr0([
                     addressToData(datum.borrower),
-                    mConStr1([addressToData(walletAddress)]),
+                    mConStr0([addressToData(walletAddress)]),
                     datum.principal,
                     datum.interestRate,
                     datum.collateralPolicyId,
                     datum.collateralAssetName,
                     datum.collateralAmount,
                     datum.loanDuration,
-                    mConStr1([dueDate]),
+                    mConStr0([dueDate]),
                 ]),
             )
             .txOut(datum.borrower, [{ unit: "lovelace", quantity: String(datum.principal) }])
