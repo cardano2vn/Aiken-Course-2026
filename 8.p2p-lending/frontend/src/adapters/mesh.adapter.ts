@@ -85,6 +85,7 @@ export class MeshAdapter {
             fetcher: this.fetcher,
             evaluator: blockfrostProvider,
         });
+        this.meshTxBuilder.txEvaluationMultiplier = 1.1;
     };
 
     /**

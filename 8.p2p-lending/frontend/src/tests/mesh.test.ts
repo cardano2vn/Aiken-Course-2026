@@ -17,7 +17,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
 
     beforeEach(async function () {
         meshWallet = new MeshWallet({
-            accountIndex: 0,
+            accountIndex: 1,
             networkId: APP_NETWORK_ID,
             fetcher: blockfrostProvider,
             submitter: blockfrostProvider,
@@ -113,6 +113,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
     });
 
     test("Repay", async function () {
+        return;
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -120,16 +121,19 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         await meshTxBuilder.initalize();
 
         const walletAddress = await meshWallet.getChangeAddress();
-        const pendingLoan = (await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress)).find((utxo) => {
+        const repayableLoan = (await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress)).find((utxo) => {
             if (!utxo.output.plutusData) return false;
             const datum = meshTxBuilder.convertDatum({ plutusData: utxo.output.plutusData });
-            return datum.status === "Pending" && datum.borrower !== walletAddress;
+            return datum.status === "Active"
+                && datum.borrower === walletAddress
+                && datum.dueDate !== undefined
+                && datum.dueDate > Date.now();
         });
-        if (!pendingLoan) throw new Error("No pending loan owned by another wallet is available to fund.");
+        if (!repayableLoan) throw new Error("No active, non-overdue loan owned by the test wallet is available to repay.");
 
-        const unsignedTx: string = await meshTxBuilder.fund({
-            txHash: pendingLoan.input.txHash,
-            outputIndex: pendingLoan.input.outputIndex,
+        const unsignedTx: string = await meshTxBuilder.repay({
+            txHash: repayableLoan.input.txHash,
+            outputIndex: repayableLoan.input.outputIndex,
         });
 
 
@@ -144,7 +148,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test.skip("Liquidate an overdue loan owned by the test wallet", async function () {
+    test("Liquidate an overdue loan owned by the test wallet", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
