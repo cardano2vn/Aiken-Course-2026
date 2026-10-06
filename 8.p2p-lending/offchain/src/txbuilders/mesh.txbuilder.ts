@@ -44,15 +44,15 @@ export class MeshTxBuilder extends MeshAdapter {
                 .txOutInlineDatumValue(
                     mConStr0([
                         mPubKeyAddress(deserializeAddress(borrower).pubKeyHash, deserializeAddress(borrower).stakeCredentialHash),
-                        mPubKeyAddress("", ""),
+                        mConStr1([]),
                         principal,
                         interestRate,
                         loanDuration,
 
-                        dueDate ? mConStr0([dueDate]) : mConStr0([]),
+                        dueDate ? mConStr0([dueDate]) : mConStr1([]),
                         this.policyId,
                         stringToHex(this.name),
-                        mConStr0([]),
+                        mConStr1([]),
                     ]),
                 );
         } else {

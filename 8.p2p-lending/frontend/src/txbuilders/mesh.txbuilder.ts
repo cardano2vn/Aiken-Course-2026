@@ -1,6 +1,7 @@
 import {
     deserializeAddress,
     hexToBytes,
+    hexToString,
     mConStr0,
     mConStr1,
     mConStr2,
@@ -95,6 +96,10 @@ export class MeshTxBuilder extends MeshAdapter {
         collateralAmount: number;
     }) => {
         const { utxos, collateral, walletAddress } = await this.getWalletForTx();
+        if (deserializeAddress(borrower).pubKeyHash !== deserializeAddress(walletAddress).pubKeyHash) {
+            throw new Error("The borrower must be the connected wallet so it can authorize loan creation.");
+        }
+
         const { policyId: collateralPolicyId, assetName: collateralAssetName } = assetUnitParts(collateralUnit);
         if (collateralPolicyId === this.policyId) {
             throw new Error("A loan identity token cannot be used as its own collateral.");
@@ -103,10 +108,12 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("Collateral quantity must be a positive whole number.");
         }
 
+
         const available = utxos.reduce((total, utxo) => {
             const asset = utxo.output.amount.find((item) => item.unit === collateralUnit);
             return total + BigInt(asset?.quantity ?? "0");
         }, BigInt(0));
+
         if (available < BigInt(collateralAmount)) {
             throw new Error("Your wallet does not contain enough of the selected collateral asset.");
         }
@@ -135,14 +142,14 @@ export class MeshTxBuilder extends MeshAdapter {
             .txOutInlineDatumValue(
                 mConStr0([
                     addressToData(borrower),
-                    mConStr0([]),
+                    mConStr1([]),
                     principal,
                     interestRate,
                     collateralPolicyId,
-                    collateralAssetName,
+                    hexToString(collateralAssetName),
                     collateralAmount,
                     loanDuration,
-                    mConStr0([]),
+                    mConStr1([]),
                 ]),
             );
 

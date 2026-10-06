@@ -10,7 +10,7 @@ use mocktail.{
   tx_out_inline_datum,
 }
 use p2plending
-use types.{Cancel, Create, Datum, Fund, Liquidate, MintRedeemer, Repay}
+use types.{Cancel, Create, Datum, Fund, Liquidate, Repay}
 
 fn loan_datum(
   borrower: Address,
