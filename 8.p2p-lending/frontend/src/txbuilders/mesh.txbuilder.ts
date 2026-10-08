@@ -247,7 +247,6 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("Only the borrower can cancel a pending loan.");
         }
 
-        const currentSlot = Number(resolveSlotNo(APP_NETWORK));
         this.meshTxBuilder
             .spendingPlutusScriptV3()
             .txIn(loanUtxo.input.txHash, loanUtxo.input.outputIndex)
@@ -261,8 +260,8 @@ export class MeshTxBuilder extends MeshAdapter {
                     quantity: String(datum.collateralAmount),
                 },
             ])
-            .invalidBefore(currentSlot - 30)
-            .invalidHereafter(currentSlot + 300);
+            .invalidBefore(0)
+            .invalidHereafter(Number(resolveSlotNo(APP_NETWORK)) + 300);
 
         this.burnIdentityToken(loanUtxo);
         return this.completeWithWallet({ utxos, collateral, walletAddress });
@@ -277,7 +276,7 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const dueDateSlot = Number(resolveSlotNo(APP_NETWORK, datum.dueDate));
-        const lowerSlot = Math.max(Number(resolveSlotNo(APP_NETWORK)) - 30, dueDateSlot + 1);
+        const currentSlot = Number(resolveSlotNo(APP_NETWORK));
         this.meshTxBuilder
             .spendingPlutusScriptV3()
             .txIn(loanUtxo.input.txHash, loanUtxo.input.outputIndex)
@@ -291,8 +290,8 @@ export class MeshTxBuilder extends MeshAdapter {
                     quantity: String(datum.collateralAmount),
                 },
             ])
-            .invalidBefore(lowerSlot)
-            .invalidHereafter(lowerSlot + 300);
+            .invalidBefore(dueDateSlot + 1)
+            .invalidHereafter(currentSlot + 300);
 
         this.burnIdentityToken(loanUtxo);
         return this.completeWithWallet({ utxos, collateral, walletAddress });
