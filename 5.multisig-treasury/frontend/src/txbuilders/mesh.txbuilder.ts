@@ -163,17 +163,20 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+        if (!datum.owners.includes(voterPubKeyHash)) {
+            throw new Error("Chỉ owner mới có thể vote.");
+        }
         if (datum.signers.includes(voterPubKeyHash) || datum.noSigners.includes(voterPubKeyHash)) {
             throw new Error("Owner này đã vote rồi.");
         }
 
-                const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
-                const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
-                const newDatum = approve
-                        ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
-                        : isDoomed
-                            ? { ...datum, proposal: null, signers: [], noSigners: [] }
-                            : { ...datum, noSigners: updatedNoSigners, signers: datum.signers };
+        const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+        const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
+        const newDatum = approve
+            ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
+            : isDoomed
+              ? { ...datum, proposal: null, signers: [], noSigners: [] }
+              : { ...datum, noSigners: updatedNoSigners, signers: datum.signers };
 
         const unsignedTx = this.meshTxBuilder;
 

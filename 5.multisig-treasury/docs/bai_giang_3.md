@@ -1,7 +1,14 @@
+---
+title: "Bài giảng 3: Phân tích Off-Chain MeshJS"
+description: "Đọc transaction builder, cách encode state, ký ví CIP-30 và xử lý đồng bộ treasury."
+---
+
 # Bài giảng 3: Phân tích Off-Chain MeshJS và giao diện Multisig Treasury
 
 > **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
 > **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
+>
+> **Video tương ứng:** [Bài 5.3 – Off-chain, frontend và vòng đời dApp](https://www.youtube.com/watch?v=On9ol1g5e5w&t=558s)
 
 ---
 
@@ -247,15 +254,14 @@ Một proposal bao gồm các trường như:
 Builder thực hiện:
 
 1. Query treasury UTxO và datum hiện tại.
-2. Kiểm tra proposal hiện tại đang rỗng hoặc đã đóng để không chồng chéo.
-3. Kiểm tra `amount <= balance` và `amount <= allowance` nếu có giới hạn.
-4. Chuyển `proposer` thành `public key hash` và yêu cầu signer.
-5. Tạo output mới với datum update:
+2. Kiểm tra `amount` với balance và allowance ở builder; validator buộc proposal hiện tại phải rỗng.
+3. Chuyển `proposer` thành `public key hash` và yêu cầu signer.
+4. Tạo output mới với datum update:
    - `proposal = Some({ recipient, amount })`
    - `signers = [proposer]`
    - `no_signers = []`
    - số lovelace trong treasury output được giữ nguyên
-6. Redeemer chứa `Propose` hoặc tương ứng với action logic.
+5. Redeemer chứa `Propose` hoặc tương ứng với action logic.
 
 #### Điều quan trọng
 
@@ -269,6 +275,28 @@ Trước khi gửi transaction, UI có thể cho người dùng biết "giá tr�
 Nếu không có một trong những điều đó, chain sẽ từ chối.
 
 Một ví dụ cụ thể: nếu quỹ đang có 30 ADA, allowance là 10 ADA và owner đề xuất chuyển 6 ADA, builder có thể kiểm tra sớm rằng 6 nhỏ hơn cả allowance lẫn số dư. Transaction tạo proposal chưa chuyển 6 ADA cho người nhận; nó chỉ tiêu treasury UTxO cũ và tạo UTxO mới có cùng giá trị, identity token được giữ nguyên, còn datum được cập nhật để ghi proposal và phiếu YES của proposer. Khoản thanh toán chỉ xảy ra ở bước `Execute` sau khi đủ ngưỡng.
+
+Đây là phần cốt lõi trong builder: cập nhật datum, gắn redeemer, rồi tạo continuing output giữ nguyên value của treasury:
+
+```typescript
+const newDatum = {
+    ...datum,
+    signers: [senderPubKeyHash],
+    noSigners: [],
+    proposal: { recipient, amount: Number(amount) },
+};
+
+unsignedTx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(this.redeemer.Propose(senderPubKeyHash, recipient, Number(amount)))
+    .txInScript(this.spendScriptCbor)
+    .txOut(this.spendAddress, utxo.output.amount)
+    .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+```
+
+`txInInlineDatumPresent()` nói với builder rằng datum nằm trực tiếp trong input treasury; `txInRedeemerValue(...)` chọn nhánh `Propose` và truyền các tham số mà validator sẽ kiểm tra. Output dùng lại `utxo.output.amount`, nên proposal chưa chuyển tiền. Builder này có kiểm tra allowance và balance trước đoạn trích, nhưng việc proposal đang rỗng và proposer là owner vẫn phải được validator xác nhận; kiểm tra off-chain không thể thay thế các điều kiện đó.
 
 ### 4.4. `vote`: bỏ phiếu YES hoặc NO
 
@@ -303,6 +331,20 @@ Builder nên:
 Sau đó mới dựng transaction. Đó là cách tốt để tránh lỗi sớm và giảm chance người dùng phải chờ network reject.
 
 Nếu một phiếu NO làm cho proposal không còn khả năng đạt threshold, on-chain validator yêu cầu datum output xóa proposal và reset cả hai danh sách vote. Đây là một trường hợp mà builder không thể chỉ phản chiếu phép cập nhật thông thường “thêm voter vào `no_signers`”; output phải khớp với state machine on-chain. Vì thế, sau khi tính phiếu mới, off-chain cần kiểm tra số owner còn có thể vote YES và chọn đúng state tiếp theo trước khi đưa transaction cho wallet ký.
+
+Builder cần tính state sau vote trước khi encode datum:
+
+```typescript
+const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
+const newDatum = approve
+    ? { ...datum, signers: [voterPubKeyHash, ...datum.signers] }
+    : isDoomed
+      ? { ...datum, proposal: null, signers: [], noSigners: [] }
+      : { ...datum, noSigners: updatedNoSigners };
+```
+
+Với YES, builder thêm voter vào danh sách `signers`. Với NO, nó tính số phiếu NO sau khi tính phiếu hiện tại; nếu số owner còn có thể bỏ phiếu YES thấp hơn threshold thì datum phải trở về trạng thái không có proposal. Ngay cả khi builder dựng datum đúng, validator vẫn kiểm tra voter có phải owner, có chữ ký và chưa vote hay chưa.
 
 ### 4.5. `execute`: thực thi chi tiền
 
@@ -347,6 +389,37 @@ Transaction không được "đặt amount theo cảm tính" ở UI. Validity ph
 Nói cách khác, validator là người quyết định giao dịch đó có thực thi đúng luật hay không, không phải component frontend.
 
 Đặc biệt, số tiền builder yêu cầu execute phải khớp với `proposal.amount`, vì validator xác định khoản thanh toán từ proposal đang lưu trong datum. Nếu số tiền truyền vào builder khác số tiền đã được owner biểu quyết, transaction có thể được dựng nhưng vẫn không thỏa điều kiện payment của validator. Với trường hợp rút toàn bộ, amount còn phải bằng đúng lovelace đang có trong treasury; khi đó transaction không tạo continuing treasury output và minting policy xác thực việc burn identity token.
+
+Frontend builder lấy amount trực tiếp từ proposal on-chain. Builder trong package `offchain/` nhận amount làm tham số, nên cần từ chối nếu amount được truyền vào khác proposal:
+
+```typescript
+const amountValue = BigInt(amount);
+if (amountValue !== BigInt(proposal.amount)) {
+    throw new Error("Số tiền execute phải khớp với proposal.");
+}
+```
+
+Đối với trường hợp rút hết, builder tạo payment output rồi yêu cầu mint `-1` identity token:
+
+```typescript
+unsignedTx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex)
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(this.redeemer.Execute())
+    .txInScript(this.spendScriptCbor)
+    .txOut(proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
+
+if (amountValue === ownLovelace) {
+    unsignedTx
+        .mintPlutusScriptV3()
+        .mint("-1", this.policyId, stringToHex(this.name))
+        .mintingScript(this.mintScriptCbor)
+        .mintRedeemerValue(mConStr1([]));
+}
+```
+
+Payment lấy địa chỉ nhận từ proposal đã lưu trong datum, còn số tiền phải được đối chiếu với chính `proposal.amount`. Khi chi toàn bộ balance, builder không tạo continuing treasury output; nhánh `End` của minting policy được gọi cùng thao tác burn. Nếu còn dư, builder đi nhánh khác: tạo output treasury mới với balance còn lại và reset proposal/vote.
 
 ---
 

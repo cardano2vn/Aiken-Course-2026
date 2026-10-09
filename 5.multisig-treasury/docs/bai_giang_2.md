@@ -1,7 +1,14 @@
+---
+title: "Bài giảng 2: Smart Contract On-Chain với Aiken"
+description: "Phân tích datum, redeemer, minting policy và các action của validator Multisig Treasury."
+---
+
 # Bài giảng 2: Phân tích Smart Contract On-Chain Aiken cho Multisig Treasury
 
 > **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
 > **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
+>
+> **Video tương ứng:** [Bài 5.2 – On-chain code và cơ chế multi-signature](https://www.youtube.com/watch?v=80_qSGSpOtQ)
 
 ---
 
@@ -221,6 +228,19 @@ Một invariant rất quan trọng là treasury không được chứa bất k�
 
 Đây nghĩa là: ngày nào bạn muốn mở rộng treasury để quản lý nhiều asset, bạn phải sửa lại invariant và logic. Thêm asset mà không sửa validator là cách dễ tạo lỗ hổng hoặc trả sai trạng thái.
 
+Phần code dưới đây loại lovelace khỏi `Value`, làm phẳng các native asset còn lại, rồi chỉ chấp nhận đúng một policy/token với quantity bằng `1`:
+
+```aiken
+fn has_only_identity_token(value: Value, policy_id: PolicyId) -> Bool {
+  when assets.flatten(assets.without_lovelace(value)) is {
+    [(p, _name, q)] -> p == policy_id && q == 1
+    _ -> False
+  }
+}
+```
+
+Mẫu `[item]` buộc danh sách phải có đúng một phần tử; nhánh `_ -> False` từ chối cả danh sách rỗng lẫn nhiều asset. Hàm này kiểm tra identity token trong chính treasury input/output, còn các điều kiện action bên dưới kiểm tra datum và chữ ký. Không nên nhầm việc có token với việc transaction đã được phê duyệt.
+
 ### 5.3. Chữ ký nằm trong transaction context
 
 Validator không tiếp cận private key hoặc wallet. Nó chỉ xem `tx.extra_signatories` và `tx.signatories` như dữ liệu được cấp trong context của transaction.
@@ -284,6 +304,34 @@ Nói cách khác, propose không chỉ là “thêm mô tả” vào UI, mà là
 
 Một chi tiết đáng chú ý là proposal mới bắt đầu với proposer trong `signers`, còn `no_signers` được làm trống. Validator yêu cầu output treasury giữ nguyên số lovelace và identity token trong bước này, vì việc đề xuất chưa chuyển tiền cho recipient. Người học có thể tự kiểm tra bằng cách so datum trước và sau: thay đổi hợp lệ là `proposal`, `signers` và `no_signers`; các quy tắc quản trị còn lại phải tiếp tục được bảo toàn.
 
+Đoạn validator sau cho thấy các ràng buộc được kiểm tra trên transaction thật, không chỉ ở form:
+
+```aiken
+Propose { proposer, recipient, amount } -> {
+  expect None = datum.proposal
+  expect [out] = treasury_outputs
+  expect Some(datum_out) = read_treasury_datum(out)
+  and {
+    has_valid_treasury_input,
+    list.has(datum.owners, proposer),
+    list.has(tx.extra_signatories, proposer),
+    amount > 0,
+    amount <= datum.allowance,
+    amount <= own_lovelace,
+    has_only_identity_token(out.value, datum.policy_id),
+    lovelace_of(out.value) == own_lovelace,
+    datum_out == Datum {
+      ..datum,
+      proposal: Some(Proposal { recipient, amount }),
+      signers: [proposer],
+      no_signers: [],
+    },
+  }
+}
+```
+
+Hai dòng `expect` dừng transaction nếu đã có proposal hoặc không tìm được đúng một continuing treasury output có inline datum. Các điều kiện tiếp theo yêu cầu proposer vừa thuộc `owners` vừa có mặt trong `extra_signatories`; chỉ ghi hash vào datum không thể giả lập chữ ký ví. So sánh toàn bộ `datum_out` với bản dựng từ `..datum` giúp giữ nguyên các trường quản trị khác, đồng thời buộc proposal, YES đầu tiên và danh sách NO có đúng giá trị.
+
 ### 6.3. Vote
 
 `Vote` kiểm tra đến trạng thái hiện tại của proposal. Nếu proposal không tồn tại, không thể vote. Nếu voter không phải owner, vote bị từ chối.
@@ -300,6 +348,22 @@ Cách validator xử lý:
 Đây là bước quan trọng để tránh voting spam và đảm bảo mối quan hệ giữa số lượng owner và threshold luôn đúng.
 
 Trường hợp vote NO cuối cùng làm proposal chắc chắn không thể đạt ngưỡng cũng cần được mô hình hóa rõ. Nếu số owner chưa bỏ phiếu còn lại không đủ để bù phần thiếu so với `threshold`, validator yêu cầu output mới xóa proposal đồng thời xóa cả hai danh sách vote. Như vậy, proposal thất bại được dọn khỏi state ngay trong transaction vote; UI và builder cần dựng datum sau giao dịch đúng với quy tắc đó, thay vì chỉ thêm một phần tử vào `no_signers`.
+
+Đây là phép tính và state output mà nhánh NO của validator áp dụng:
+
+```aiken
+let updated_no = [voter, ..datum.no_signers]
+let is_doomed =
+  list.length(datum.owners) - list.length(updated_no) < datum.threshold
+let expected_datum_out =
+  if is_doomed {
+    Datum { ..datum, proposal: None, signers: [], no_signers: [] }
+  } else {
+    Datum { ..datum, no_signers: updated_no }
+  }
+```
+
+`updated_no` đã bao gồm phiếu NO hiện tại, nên phép trừ xác định số owner tối đa còn có thể bỏ phiếu YES. Nếu con số này nhỏ hơn threshold thì không giao dịch nào có thể cứu proposal; output phải reset proposal và cả hai danh sách vote. Nếu proposal vẫn có thể đạt ngưỡng, output chỉ thêm voter vào `no_signers`. Validator còn kiểm tra voter là owner, đã ký và chưa vote trước đó trước khi chấp nhận state này.
 
 ### 6.4. Execute
 
@@ -319,6 +383,37 @@ Validator cần:
 Điều rất quan trọng là validator không “tin” amount từ frontend. Họ phải kiểm tra dữ liệu trên chain và output dựa trên state hiện tại. Nếu amount sai, hoặc output recipient sai, hoặc output cuối không khớp, giao dịch bị từ chối.
 
 Với trường hợp còn dư, số lovelace của continuing treasury output phải bằng số dư đầu vào trừ đúng `proposal.amount`, đồng thời datum được reset về trạng thái chưa có proposal. Với trường hợp đóng quỹ, output thanh toán cho recipient phải có đúng số lovelace đề xuất, không có continuing treasury output, khoản chi phải bằng toàn bộ số dư treasury và identity token phải được burn. Những kiểm tra cụ thể này ngăn giao dịch vừa trả sai khoản chi vừa giữ một state không nhất quán.
+
+Điểm rẽ nhánh dưới đây phân biệt đóng quỹ với tiếp tục giữ treasury:
+
+```aiken
+when treasury_outputs is {
+  [] -> and {
+    has_enough_signatures,
+    has_exact_recipient_payment,
+    proposal.amount == own_lovelace,
+    dict.values(assets.tokens(tx.mint, datum.policy_id)) == [-1],
+  }
+  [out] -> {
+    expect Some(datum_out) = read_treasury_datum(out)
+    and {
+      has_enough_signatures,
+      has_exact_recipient_payment,
+      proposal.amount < own_lovelace,
+      lovelace_of(out.value) == own_lovelace - proposal.amount,
+      datum_out == Datum {
+        ..datum,
+        signers: [],
+        no_signers: [],
+        proposal: None,
+      },
+    }
+  }
+  _ -> False
+}
+```
+
+Danh sách rỗng nghĩa là không còn output treasury tại địa chỉ script; trường hợp đó chỉ hợp lệ khi khoản chi bằng toàn bộ số dư và identity token được burn `-1`. Một output tiếp tục chỉ hợp lệ khi số dư còn dương sau chi và datum reset. Nhánh `_ -> False` từ chối trường hợp tạo nhiều treasury output, tránh nhân bản state.
 
 ---
 

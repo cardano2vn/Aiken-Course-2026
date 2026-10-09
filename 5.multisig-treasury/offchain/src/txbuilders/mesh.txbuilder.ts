@@ -158,13 +158,20 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+        if (!datum.owners.includes(voterPubKeyHash)) {
+            throw new Error("Chỉ owner mới có thể vote.");
+        }
         if (datum.signers.includes(voterPubKeyHash) || datum.noSigners.includes(voterPubKeyHash)) {
             throw new Error("Owner này đã vote rồi.");
         }
 
+        const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+        const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
         const newDatum = approve
             ? { ...datum, signers: [voterPubKeyHash, ...datum.signers], noSigners: datum.noSigners }
-            : { ...datum, noSigners: [voterPubKeyHash, ...datum.noSigners], signers: datum.signers };
+            : isDoomed
+              ? { ...datum, proposal: null, signers: [], noSigners: [] }
+              : { ...datum, noSigners: updatedNoSigners, signers: datum.signers };
 
         const unsignedTx = this.meshTxBuilder;
 
@@ -204,6 +211,11 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("Chưa đủ chữ ký YES.");
         }
 
+        const amountValue = BigInt(amount);
+        if (amountValue !== BigInt(proposal.amount)) {
+            throw new Error("Số tiền execute phải khớp với proposal.");
+        }
+
         const changeAddress =
             walletAddress === proposal.recipient
                 ? (await this.meshWallet.getUnusedAddresses()).find((address) => address !== proposal.recipient)
@@ -211,9 +223,7 @@ export class MeshTxBuilder extends MeshAdapter {
         if (!changeAddress) {
             throw new Error("Recipient matches the wallet change address and no alternate wallet address is available.");
         }
-
         const ownLovelace = BigInt(utxo.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? "0");
-        const amountValue = BigInt(amount);
         if (amountValue > ownLovelace) {
             throw new Error("amount vượt số dư treasury — dữ liệu không hợp lệ.");
         }

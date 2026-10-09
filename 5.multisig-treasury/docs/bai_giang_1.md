@@ -1,7 +1,14 @@
+---
+title: "Bài giảng 1: Tổng quan Multisig Treasury"
+description: "Giới thiệu mô hình M-of-N, EUTxO và vòng đời treasury trên Cardano."
+---
+
 # Bài giảng 1: Tổng quan Multisig Treasury và mô hình EUTxO trên Cardano
 
 > **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
 > **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
+>
+> **Video tương ứng:** [Bài 5.1 – Kiến trúc Multisig Treasury và các pattern cốt lõi](https://www.youtube.com/watch?v=35EPzGTp0jY)
 
 ---
 
@@ -179,7 +186,25 @@ Dù off-chain có thể query `script address + policy id + token name`, nhưng 
 
 Identity token vì thế nên được hiểu là dấu nhận diện của state, không phải một cơ chế tự nó phê duyệt giao dịch. Nếu một giao dịch tiêu treasury input nhưng không tạo đúng continuing output có token và datum hợp lệ, spending validator vẫn có thể từ chối. Khi đóng quỹ, token cần được burn theo đúng policy; việc tìm thấy hoặc nắm giữ token không thay thế các điều kiện về owner, ngưỡng phê duyệt hay khoản thanh toán.
 
-### 3.3. Một giao dịch đồng nghĩa với một state transition
+### 3.3. Parameterized validator và một treasury cụ thể
+
+Parameterized validator cho phép cùng một định nghĩa script tạo ra các instance treasury khác nhau. Trong Aiken, identity factory được tham số hóa bởi `utxo_ref`, `treasury` và `token_name`. Off-chain áp các giá trị cụ thể vào script:
+
+```typescript
+this.mintCompileCode = this.readValidator(plutus, title.identityFactory);
+this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
+    mOutputReference(utxoRef.txHash, utxoRef.outputIndex),
+    deserializeAddress(this.spendAddress).scriptHash,
+    this.name,
+]);
+this.policyId = resolveScriptHash(this.mintScriptCbor, "V3");
+```
+
+`utxo_ref` làm cơ sở cho lần mint one-shot khi `Init`; `treasury` xác định script address mà token phải gắn với; `token_name` khóa tên của identity token. Khi off-chain gọi `applyParamsToScript`, các giá trị này được áp vào script trước khi tính `policy_id` và địa chỉ. Vì vậy, thay một tham số sẽ tạo script instance và identity khác; các tham số không phải giá trị mà người dùng có thể tùy ý đổi giữa những giao dịch của cùng một treasury.
+
+Pattern này nối các khái niệm của video thành một luồng: state được nhận diện bằng token, token gắn với đúng script instance, rồi validator kiểm tra các chuyển đổi state. Lúc `Init`, policy mint một token cho treasury; lúc đóng quỹ, `End` burn token đó. Spending validator vẫn chịu trách nhiệm kiểm tra proposal, chữ ký và khoản chi.
+
+### 3.4. Một giao dịch đồng nghĩa với một state transition
 
 Khi treasury thay đổi trạng thái, ta không "sửa" UTxO cũ. Ta thực hiện:
 
@@ -193,7 +218,7 @@ Vì vậy, mọi hành động như `deposit`, `propose`, `vote`, `execute` đ�
 
 Có thể theo dõi state bằng một ví dụ đơn giản. Ban đầu UTxO chứa 30 ADA, identity token và datum chưa có proposal. Sau khi owner tạo đề xuất 6 ADA, UTxO cũ bị tiêu và UTxO mới vẫn chứa 30 ADA cùng token, nhưng datum đã ghi recipient, amount và phiếu YES của proposer. Khi proposal được thực thi, transaction trả 6 ADA cho recipient và tạo UTxO treasury mới chứa 24 ADA, token vẫn còn, còn proposal và danh sách vote được đặt lại. Mỗi bước đều tạo bằng chứng giao dịch công khai cho sự thay đổi trước-sau.
 
-### 3.4. Tại sao EUTxO lại phù hợp với multisig?
+### 3.5. Tại sao EUTxO lại phù hợp với multisig?
 
 Sự phù hợp ở đây là nhờ vào tính an toàn và có thể phân tích được:
 

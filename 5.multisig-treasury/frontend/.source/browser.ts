@@ -7,6 +7,11 @@ const create = browser<typeof Config, import("fumadocs-mdx/runtime/types").Inter
   }
 }>();
 const browserCollections = {
-  docs: create.doc("docs", {"index.mdx": () => import("../content/docs/index.mdx?collection=docs"), }),
+  docs: create.doc("docs", {
+    "index.md": () => import("../../docs/index.md?collection=docs"),
+    "bai_giang_1.md": () => import("../../docs/bai_giang_1.md?collection=docs"),
+    "bai_giang_2.md": () => import("../../docs/bai_giang_2.md?collection=docs"),
+    "bai_giang_3.md": () => import("../../docs/bai_giang_3.md?collection=docs"),
+  }),
 };
 export default browserCollections;
