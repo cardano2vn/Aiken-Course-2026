@@ -3,15 +3,6 @@ title: "Bài giảng 2: Smart Contract On-Chain với Aiken"
 description: "Phân tích datum, redeemer, minting policy và các action của validator Multisig Treasury."
 ---
 
-# Bài giảng 2: Phân tích Smart Contract On-Chain Aiken cho Multisig Treasury
-
-> **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
-> **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
->
-> **Video tương ứng:** [Bài 5.2 – On-chain code và cơ chế multi-signature](https://www.youtube.com/watch?v=80_qSGSpOtQ)
-
----
-
 ## Mục lục
 
 1. [Smart contract trên Cardano và vai trò của Aiken](#1-smart-contract-trên-cardano-và-vai-trò-của-aiken)
@@ -82,6 +73,25 @@ Vì khởi tạo treasury và đóng treasury là hai thao tác khác nhau về 
 Nếu cả hai logic nằm trong cùng một validator, bạn có thể tạo ra khó khăn trong kiểm soát chính xác, đặc biệt khi cần tính toán token conservation và state validity. Tách `minting policy` với `spending validator` giúp đóng vai trò phân quyền rõ ràng trong một hệ thống dùng EUTxO.
 
 Hai script phối hợp với nhau nhưng không làm cùng một việc. Spending validator quyết định một state transition của treasury có hợp lệ không, chẳng hạn proposal đủ YES hay khoản chi đúng người nhận. Minting policy kiểm tra việc tạo hoặc hủy identity token có tuân thủ quy tắc token hay không. Khi đóng treasury bằng một transaction `Execute`, spending validator xác nhận các điều kiện chi và việc không còn continuing treasury output; minting policy đồng thời xác nhận token của treasury được burn đúng lượng và đến từ treasury address. Nếu chỉ nhìn một trong hai script, ta sẽ không thấy đầy đủ các kiểm tra áp dụng cho toàn bộ hành động.
+
+### 2.4. Hình dung lifecycle của treasury bằng state machine
+
+Nói đơn giản, treasury trong Aiken là một state machine kiểu UTxO. Mỗi trạng thái là một UTxO treasury đang chứa:
+
+- identity token
+- datum hiện tại
+- giá trị ADA và asset tương ứng
+- danh sách proposal / vote nếu có
+
+Mỗi action đều là một “state transition”:
+
+1. `Init`: từ không có treasury, tạo một UTxO treasury mới với `datum` khởi tạo, `proposal = None`, `signers = []`, `no_signers = []`, và `policy_id` được mint vào `+1`.
+2. `Deposit`: giữ nguyên `datum`, chỉ tăng `lovelace` hoặc thêm asset vào treasury UTxO; không chỉnh sửa state governance.
+3. `Propose`: chuyển `proposal` từ `None` sang `Some { recipient, amount }`, đồng thời khởi tạo `signers = [proposer]` và `no_signers = []`.
+4. `Vote`: cập nhật danh sách vote. Một `YES` sẽ thêm voter vào `signers`; một `NO` thêm vào `no_signers` và có thể khiến proposal thất bại nếu không còn khả năng đạt ngưỡng.
+5. `Execute`: áp dụng proposal. Nếu quỹ còn dư, treasury output mới được reset về trạng thái rỗng; nếu quỹ hết, treasury UTxO bị tiêu và identity token bị burn.
+
+Điểm quan trọng là mỗi bước không chỉ đổi “dữ liệu trên màn hình”, mà là đổi output UTxO trên chain. Trong UTxO, không có “bản ghi state chung” mà chỉ có những output mới được tạo ra và ký bởi validator. Vì vậy, mỗi giao dịch phải mô tả rõ state cũ, state mới và điều kiện chuyển tiếp. Đây là lý do Aiken và Cardano rất nhạy với correctness và state consistency.
 
 ---
 
@@ -160,6 +170,18 @@ Trong smart contract, trạng thái chỉ thực sự là dữ liệu trên chai
 
 Ví dụ, frontend có thể lưu tạm nội dung người dùng vừa nhập trước khi transaction được gửi, nhưng nội dung đó mới chỉ là bản nháp cục bộ. Chỉ sau khi transaction ghi proposal vào output treasury và được mạng chấp nhận, các owner khác mới có thể đọc proposal ấy từ state on-chain để bỏ phiếu. Điều này cũng giải thích vì sao dữ liệu từ component hay bộ nhớ trình duyệt không thể dùng làm căn cứ duy nhất cho `Vote` hoặc `Execute`.
 
+### 3.5. Một ví dụ thực tế để hình dung state transition
+
+Giả sử treasury có 3 owner: A, B, C và `threshold = 2`.
+
+- Bước 1: `Init` tạo treasury với `owners = [A,B,C]`, `threshold = 2`, `proposal = None`, `signers = []`, `no_signers = []`.
+- Bước 2: A và B cùng nạp tiền vào treasury, không làm thay đổi datum.
+- Bước 3: B tạo proposal `recipient = D, amount = 100`. Khi `Propose` chạy, treasury output mới sẽ có `proposal = Some { recipient: D, amount: 100 }`, `signers = [B]`, `no_signers = []`.
+- Bước 4: A vote YES. Output mới cập nhật `signers = [B, A]`, `threshold = 2` đã đạt, nhưng proposal chưa execute. Nếu C vote NO, output mới cộng C vào `no_signers` nhưng vẫn chưa đủ để hủy proposal vì còn tối thiểu 2/3 owner có thể vote YES.
+- Bước 5: execute, với `signers` chứa đủ YES, transaction tạo output trả 100 cho D và reset `proposal = None`, `signers = []`, `no_signers = []`. Nếu treasury còn dư, output treasury mới sẽ còn lại `balance - amount`.
+
+Đây là cách state của treasury “di chuyển” từ một UTxO sang UTxO khác. Mỗi update đều phải là một transaction hợp lệ, không có kênh nào cho phía client tự do đổi trạng thái ngoài validator. Khi bạn hiểu được ý tưởng này, bạn sẽ thấy các lỗi về smart contract thường không nằm ở UI mà nằm ở chỗ state transition không được kiểm tra đúng trong validator.
+
 ---
 
 ## 4. Identity factory: Init và End
@@ -221,6 +243,20 @@ Spending validator không thể phán đoán theo cảm tính. Nó phải dựa 
 5. Value của treasury phải bảo toàn, trừ khi có payment tới recipient hoặc quỹ đóng
 
 Invariant là những điều kiện phải đúng với mọi transaction thuộc một action cụ thể, không chỉ với trường hợp thành công lý tưởng trong ví dụ. Khi kiểm tra, hãy lần lượt so sánh state đầu vào với output: UTxO nào bị tiêu, có bao nhiêu continuing output, token identity có được giữ hoặc burn đúng lúc không, và datum mới khác datum cũ ở chính những trường mà action đó được phép thay đổi hay không. Cách suy nghĩ này giúp phát hiện các lỗi “bỏ quên trường” tốt hơn là chỉ xác nhận rằng số phiếu hoặc số tiền nhìn có vẻ hợp lý.
+
+### 5.1.1. Cách suy nghĩ “so sánh state trước và sau”
+
+Khi đọc một validator Aiken, người học nên đặt câu hỏi 5 bước sau:
+
+1. `input` nào đang được tiêu? Đây có phải là treasury UTxO hợp lệ không?
+2. `output` nào đang tiếp tục state? Bao nhiêu output treasury đang được tạo ra? Có đúng một không?
+3. `datum` ở output mới có giữ nguyên các trường không liên quan đến action không?
+4. `value` ở output có giữ identity token đúng cách không? Nếu action là deposit, token không thay đổi; nếu action là execute với close treasury, token phải được burn.
+5. `recipient` và `amount` trong payment output có khớp với proposal và với `threshold` không?
+
+Ví dụ, nếu `Propose` cho phép output treasury mới đổi `owners` hoặc `threshold` mà không bị kiểm soát, thì đây là lỗi logic rất nguy hiểm. Khi bạn viết điều kiện `datum_out == Datum { ..datum, proposal: ..., signers: ... }`, bạn đang giải thích rõ: “ngoài proposal và các trường vote, mọi thứ phải giữ nguyên”. Đây là phong cách rất quan trọng trong validator: không chấp nhận “tốt như dự kiến” mà phải khẳng định `state transition` theo đúng model.
+
+Một cách diễn giải khác là: validator phải đóng vai trò như một “đầu vào / đầu ra” của state machine. `input` là trạng thái cũ và `output` là trạng thái mới. Nếu đầu vào và đầu ra không khớp với action, chúng ta reject.
 
 ### 5.2. `has_only_identity_token`
 
@@ -515,4 +551,116 @@ Một hợp đồng đúng không chỉ phải “chạy”, mà phải là hợ
 
 ---
 
-> Bài giảng này giúp bạn hiểu sâu hơn về phần trên chuỗi của một dApp treasury, nơi logic thật sự được kiểm chứng bởi validator và không thể bị thay đổi bằng cách chỉnh frontend.
+### 8.5. Ví dụ phân tích dài: từ `Init` đến `Execute` và `Close`
+
+Để khép lại phần trên chuỗi, hãy xem một chuỗi hành động hoàn chỉnh với 3 owner: A, B, C; `threshold = 2`; `allowance = 5 ADA`; treasury balance ban đầu = 12 ADA.
+
+#### Bước 1: `Init`
+
+- A tạo treasury mới, mint `+1` identity token.
+- `Datum` lúc đầu:
+  - `policy_id = treasury_policy`
+  - `owners = [A, B, C]`
+  - `threshold = 2`
+  - `allowance = 5 ADA`
+  - `proposal = None`
+  - `signers = []`
+  - `no_signers = []`
+- Cả `spending validator` và `minting policy` đều phải đồng ý với giao dịch. Nếu `policy_id` sai hoặc treasury output không chứa đúng `Datum`, transaction không hợp lệ.
+
+#### Bước 2: `Deposit`
+
+- B gửi 4 ADA vào quỹ.
+- Không đổi `owners`, `threshold`, `allowance`, proposal.
+- `Value` treasury tăng từ 12 ADA lên 16 ADA.
+- Identity token vẫn là 1.
+
+Tại đây, validator chỉ cần kiểm tra output treasury giữ nguyên `datum` và identity token, nhưng `Value` tăng lên. Đây là hành vi an toàn vì deposit không thay đổi quyền quản trị.
+
+#### Bước 3: `Propose`
+
+- A tạo proposal `recipient = D`, `amount = 3 ADA`.
+- `Propose` yêu cầu:
+  - `datum.proposal == None`
+  - `A` thuộc owners
+  - `A` chứa trong `tx.extra_signatories`
+  - `amount > 0`
+  - `amount <= allowance`
+  - `amount <= own_lovelace`
+  - output treasury giữ identity token
+  - output datum mới:
+
+```aiken
+Datum {
+  ..datum,
+  proposal: Some(Proposal { recipient: D, amount: 3_000_000 }),
+  signers: [A],
+  no_signers: [],
+}
+```
+
+Tại thời điểm này, quỹ vẫn chưa rút tiền; chỉ có proposal được mở và A được ghi vào `signers` như vote YES đầu tiên.
+
+#### Bước 4: `Vote YES`
+
+- B vote YES.
+- Giao dịch output mới:
+
+```aiken
+Datum {
+  ..datum,
+  proposal: Some(...),
+  signers: [A, B],
+  no_signers: [],
+}
+```
+
+Đây là trạng thái đã đạt `threshold = 2`. Nếu execute được dựng đúng, propose có thể được thực hiện mà không cần thêm vote nữa.
+
+#### Bước 5: `Execute` còn dư
+
+- Executor gửi transaction `Execute` với `proposal.amount = 3 ADA`.
+- Output trả cho D = 3 ADA.
+- Output treasury còn lại = 13 ADA.
+- `datum` mới:
+
+```aiken
+Datum {
+  ..datum,
+  proposal: None,
+  signers: [],
+  no_signers: [],
+}
+```
+
+Nếu số dư còn lại lớn hơn 0, treasury vẫn hoạt động và identity token vẫn còn. Điều này tương ứng với state machine `Voting -> Ready` sau khi execute. Đây là một trường hợp rất quan trọng vì nó chứng minh rằng execute không phải “xóa treasury”, mà là “được phép thực hiện proposal và reset state”.
+
+#### Bước 6: `Execute` đóng treasury
+
+Giả sử sau đó A tạo proposal 15 ADA và quỹ chỉ còn 15 ADA. Khi execute:
+
+- output thanh toán = 15 ADA cho recipient
+- không còn continuing treasury output
+- `tx.mint` chứa `-1` identity token
+- `root` state kết thúc
+
+Validator chấp nhận nếu:
+
+- `proposal.amount == own_lovelace`
+- `dict.values(assets.tokens(tx.mint, datum.policy_id)) == [-1]`
+- không còn treasury output tại script address
+
+Điều này cho thấy minting policy và spending validator không phải “hai thứ chức năng lặp lại”, mà là hai lớp kiểm tra bổ sung cho nhau. Một script xác nhận state transition hợp lệ, script còn lại xác nhận token định danh đã được burn đúng cách.
+
+#### Vì sao đây là state machine tốt?
+
+Vì nó tuân thủ các quy tắc rõ ràng:
+
+- state trước và sau luôn có thể mô tả bằng `Datum` và `Value`
+- mỗi action đều có một output mới tương ứng
+- mỗi ràng buộc được validator kiểm tra dựa trên dữ liệu trên chain
+- không có “sửa state trong frontend” hay “đổi biến trong memory” có thể bỏ qua contract
+
+Đó là cách thức Aiken đối phó với dữ liệu không tin cậy và đảm bảo treasury không bị biến dạng bởi input sai hoặc transaction giả mạo.
+
+---

@@ -3,15 +3,6 @@ title: "Bài giảng 1: Tổng quan Multisig Treasury"
 description: "Giới thiệu mô hình M-of-N, EUTxO và vòng đời treasury trên Cardano."
 ---
 
-# Bài giảng 1: Tổng quan Multisig Treasury và mô hình EUTxO trên Cardano
-
-> **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
-> **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
->
-> **Video tương ứng:** [Bài 5.1 – Kiến trúc Multisig Treasury và các pattern cốt lõi](https://www.youtube.com/watch?v=35EPzGTp0jY)
-
----
-
 ## Mục lục
 
 1. [Vì sao cần quỹ chung đa chữ ký](#1-vì-sao-cần-quỹ-chung-đa-chữ-ký)
@@ -537,6 +528,132 @@ Nếu B build tx vote dựa trên data cũ, nhưng A vừa execute trước đó
 3. So sánh 1-of-1 và 2-of-3 về rủi ro, độ phức tạp và trải nghiệm người dùng.
 4. Lấy một ví dụ cụ thể: 4 owners, threshold 3, proposal 5 ADA, quỹ 20 ADA, và mô tả chuỗi vote YES/NO dẫn đến execute.
 5. Xác định rõ trong một transaction, phần nào của dApp là off-chain và phần nào là on-chain, và vì sao không thể gộp hai phần đó vào một lớp duy nhất.
+
+---
+
+## 9. Ví dụ mô phỏng dài: từ khởi tạo treasury đến execute và đóng quỹ
+
+Để hiểu sâu hơn, hãy xem một trường hợp thực tế dưới dạng “bản mô phỏng vòng đời treasury” với 4 owner: A, B, C, D; `threshold = 3`; `allowance = 10 ADA`.
+
+### 9.1. Bước 0: thiết lập ban đầu
+
+- owners = [A, B, C, D]
+- threshold = 3
+- allowance = 10 ADA
+- treasury balance = 25 ADA
+- identity token = 1 token định danh Treasury #42
+- proposal = None
+- signers = []
+- no_signers = []
+
+Tại thời điểm này, treasury đang ở trạng thái `Ready`. Không có proposal nào đang mở, nên mọi owner đều có thể nạp thêm tiền hoặc đợi. Nếu không có proposal, quỹ vẫn an toàn vì chưa có hành vi chi tiêu nào.
+
+### 9.2. Bước 1: khởi tạo treasury
+
+A muốn tạo treasury cho nhóm. A tạo giao dịch `Init` và mint token định danh `+1`. Output mới sẽ chứa:
+
+- `Value`: 25 ADA + 1 identity token
+- `Datum`: `owners=[A,B,C,D]`, `threshold=3`, `allowance=10 ADA`, `proposal=None`, `signers=[]`, `no_signers=[]`
+- `Address`: script address của treasury
+
+Nếu transaction này không mint đúng `+1` token, hoặc output treasury không nằm ở script address đúng, hoặc owner list không hợp lệ, validator sẽ từ chối. Đây là bước bắt buộc vì từ đây treasury mới trở thành một state machine hoạt động.
+
+### 9.3. Bước 2: deposit
+
+B và C cùng nạp thêm 15 ADA vào treasury. Giao dịch deposit chỉ thay đổi `Value` của treasury, không thay đổi `Datum`.
+
+Sau deposit:
+
+- treasury balance = 40 ADA
+- identity token vẫn là 1
+- `proposal = None`
+- `owners` vẫn [A,B,C,D]
+- `threshold` vẫn 3
+
+Ở đây rất quan trọng: deposit không tạo proposal nào, cũng không làm thay đổi quyền chi hoặc số lượng vote. Đó là một “transition” đơn giản nhưng rất phổ biến trong treasury.
+
+### 9.4. Bước 3: proposer mở proposal
+
+A đề xuất gửi 8 ADA đến địa chỉ E. Proposal này hợp lệ vì:
+
+- A là owner
+- A ký transaction
+- không có proposal đang mở
+- 8 ADA <= allowance = 10 ADA
+- 8 ADA <= balance = 40 ADA
+
+Output treasury mới trở thành:
+
+- `proposal = Some { recipient: E, amount: 8 ADA }`
+- `signers = [A]`
+- `no_signers = []`
+- `owners` vẫn không đổi
+
+Ở giai đoạn này, treasury vẫn còn 40 ADA. Chỉ có proposal được ghi trên chain; tiền không được gửi cho E ngay. Tài sản vẫn nằm trong treasury output, và A chỉ vừa tạo “đề xuất” chứ chưa có “thực thi”.
+
+### 9.5. Bước 4: vote YES
+
+B bình chọn YES. Transaction mới cập nhật treasury output:
+
+- `signers = [A, B]`
+- `proposal` vẫn open
+- `no_signers` không đổi
+
+Giờ còn thiếu một phiếu YES nữa để đạt threshold. Treasury vẫn chưa chi tiền, chỉ đã ghi lại trạng thái vote.
+
+### 9.6. Bước 5: vote NO
+
+C bình chọn NO. Output mới:
+
+- `signers = [A, B]`
+- `no_signers = [C]`
+- `proposal` vẫn mở
+
+Vì còn 2 owner có thể có thể vote YES là A và B, còn D chưa vote; tổng cả 4 owners có thể đạt threshold của 3, nên proposal vẫn còn khả năng thành công. Đến đây, lỗi thường gặp là UI hiển thị `A: YES, B: YES, C: NO` nhưng không cập nhật đúng `no_signers` hoặc quên tính số owner còn lại. Validator on-chain mới là nơi quyết định xem proposal có còn khả năng đạt `threshold` không.
+
+### 9.7. Bước 6: vote YES cuối cùng
+
+D vote YES. Output mới:
+
+- `signers = [A, B, D]`
+- `no_signers = [C]`
+- `proposal` vẫn open
+
+Bởi vì threshold = 3, số YES hiện tại là 3/4 owner, đủ điều kiện để execute. Giao dịch `Execute` có thể được dựng ngay. Lúc này, `D` hoặc `A` có thể là người gửi transaction execute; chủ thể người gửi không cần phải là proposer hay vote cuối cùng, miễn là transaction chứa đúng các chữ ký cần thiết.
+
+### 9.8. Bước 7: execute
+
+Transaction `Execute` kiểm tra:
+
+- `proposal` đang tồn tại
+- `amount = 8 ADA`
+- `threshold = 3` đã đạt
+- `recipient = E`
+- output tới E = 8 ADA
+- treasury output còn lại = 32 ADA (nếu không rút hết)
+- `datum` mới reset: `proposal=None`, `signers=[]`, `no_signers=[]`
+
+Kết quả:
+
+- E nhận 8 ADA
+- treasury vẫn còn hoạt động với 32 ADA
+- identity token được giữ nguyên
+- state quay về `Ready`
+
+### 9.9. Bước 8: đóng quỹ khi chi hết
+
+Nếu proposal lần sau request 40 ADA và treasury chỉ còn 40 ADA, transaction `Execute` có thể đi vào nhánh close treasury:
+
+- output thanh toán tới recipient = toàn bộ 40 ADA
+- không còn continuing treasury output
+- treasury UTxO bị tiêu
+- identity token bị burn `-1`
+
+Đây là trạng thái cuối cùng của state machine. Treasury không còn khai thác được nữa; nếu muốn mở lại, cần khởi tạo một treasury mới và mint lại identity token mới.
+
+### 9.10. Tại sao quy trình này quan trọng?
+
+Vì nó cho thấy rằng một treasury không phải “cái túi tiền có thể rút tùy ý”. Mỗi giao dịch phải là một state transition hợp lệ. Nếu một người cố thay đổi `datum` mà không giữ output đúng, hoặc đưa recipient sai, hoặc tạo thêm output treasury, hoặc không burn identity token khi close treasury, validator sẽ reject. Đây chính là tâm lý cốt lõi của Cardano: “không có trạng thái chung, chỉ có state transition xác thực trên chain.”
 
 ---
 

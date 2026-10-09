@@ -3,15 +3,6 @@ title: "Bài giảng 3: Phân tích Off-Chain MeshJS"
 description: "Đọc transaction builder, cách encode state, ký ví CIP-30 và xử lý đồng bộ treasury."
 ---
 
-# Bài giảng 3: Phân tích Off-Chain MeshJS và giao diện Multisig Treasury
-
-> **Khóa học:** Lập trình Smart Contract trên Cardano với Aiken  
-> **Module 5:** Multisig Treasury (Quỹ chung đa chữ ký)
->
-> **Video tương ứng:** [Bài 5.3 – Off-chain, frontend và vòng đời dApp](https://www.youtube.com/watch?v=On9ol1g5e5w&t=558s)
-
----
-
 ## Mục lục
 
 1. [Vai trò của off-chain trong dApp Cardano](#1-vai-trò-của-off-chain-trong-dapp-cardano)
@@ -610,8 +601,106 @@ Một số ví yêu cầu `collateral` cho transaction có Plutus script. Nếu 
 
 ---
 
-> Lưu ý: Đây là bài giảng về tư duy lập trình trên Cardano, không chỉ là cách "viết code chạy được". Trên blockchain, điều quan trọng nhất là làm sao hệ thống vẫn đúng khi mọi người cùng tương tác, thậm chí có dữ liệu stale hoặc có hành vi sai từ phía client.
+## 9. Ví dụ thực thi end-to-end: frontend, wallet, transaction và chain
+
+Giả sử một nhóm có 3 owner: A, B, C; treasury `threshold = 2`; balance hiện tại là 20 ADA; proposal đang mở để chi 7 ADA cho bên D.
+
+### 9.1. Frontend đọc state
+
+Khi người dùng vào màn hình treasury, frontend cần:
+
+1. tìm script address của treasury
+2. tìm output treasury bằng identity token
+3. đọc `inline datum`
+4. giải mã `owners`, `threshold`, `proposal`, `signers`, `no_signers`
+5. đọc `lovelace` và native assets trong value
+
+Giả sử UI hiển thị:
+
+- owners: A, B, C
+- threshold: 2
+- allowance: 10 ADA
+- proposal: `recipient = D`, `amount = 7 ADA`
+- signers: [A, B]
+- no_signers: [C]
+
+Nhìn ở đây, proposal đã đạt threshold. Tuy nhiên, frontend chỉ đã đọc được state từ chain. Nó chưa quyền “đi đến” bước execute; trước đó nó còn phải đảm bảo user hiện tại có thể ký hoặc transaction đúng lúc không bị stale state.
+
+### 9.2. Builder dựng transaction `Execute`
+
+Để build `Execute`, off-chain cần:
+
+- treasury input hiện tại
+- redeemer tương ứng với action execute
+- output gửi cho D 7 ADA
+- output treasury mới reset proposal và vote list
+- identity token giữ nguyên trong treasury output nếu còn dư
+
+Ví dụ output mới:
+
+- treasury output còn lại = 13 ADA
+- `datum_out = { owners, threshold, allowance, proposal: None, signers: [], no_signers: [] }`
+- `recipient` output = 7 ADA
+
+Builder cũng phải tính toán phí giao dịch. Nếu quỹ có 20 ADA và proposal 7 ADA, còn 13 ADA dư; nhưng nếu trong bước execute, phần còn lại được giữ lại trong treasury output, phí mạng không được lấy từ quỹ mà phải lấy từ input phụ của người ký hoặc từ change của người ký. Nếu không tính đúng, transaction có thể fail vì không đủ ADA để trả phí, dù proposal và state đủ điều kiện.
+
+### 9.3. Wallet ký transaction
+
+Wallet sẽ nhận unsigned transaction từ browser. Khi wallet yêu cầu ký, nó cần:
+
+- hiểu đây là script spending transaction
+- biết ví này có khóa nào tương ứng với owner đang ký
+- biết transaction có đủ `required signers` theo `extra_signatories`
+- xác định có đủ collateral hay không
+
+Nếu A hoặc B ký vào tx nhưng không có `extra_signatories` đúng với owner được lập trong redeemer hoặc `datum`, transaction vẫn bị từ chối. Đây là điểm mà ứng dụng không thể “làm giả” bằng cách tự thêm `public key hash` vào UI; chỉ wallet và runtime mới có khả năng cung cấp chữ ký hợp pháp.
+
+### 9.4. Network xác minh
+
+Sau khi wallet ký, transaction đi lên chain và node tới validator để xác minh.
+
+Validator sẽ kiểm tra:
+
+- có đúng treasury input
+- output thứ nhất là payment output tới D với `amount = 7 ADA`
+- proposal phải still open và đủ YES
+- `lovelace` của continuing treasury output = 13 ADA
+- `datum_out` reset đúng cách
+- identity token vẫn ở treasury output
+
+Nếu builder dựng output sai hoặc không reset proposal, validator reject. Đây là nơi logic on-chain đóng vai trò cuối cùng, nhưng không phải lúc nào cũng thấy rõ trong frontend nếu người dùng chỉ nhìn vào UI.
+
+### 9.5. Điều gì xảy ra nếu dữ liệu stale?
+
+Một lỗi rất phổ biến là:
+
+- UI đọc proposal open với `signers=[A,B]`
+- A hoặc B mở thêm transaction khác
+- Cùng lúc, D đã thực thi proposal trên chain và state đã thay đổi
+- Browser người dùng vẫn giữ dữ liệu cũ
+
+Lúc này, transaction mới sẽ thất bại vì UTxO treasury cũ đã bị tiêu. Trải nghiệm người dùng là:
+
+- giao diện báo “transaction failed”
+- cần refresh lại dữ liệu
+- tìm state mới và dựng transaction lại
+
+Bạn không thể “gửi lại cùng tx bytes cũ” vì các input đã thay đổi. Đây là ví dụ trực tiếp về `stale state` trong EUTxO.
+
+### 9.6. Bản chất của off-chain developer trong Cardano
+
+Một developer off-chain muốn làm tốt cần có tư duy gồm:
+
+- biết cách đọc state từ chain, không chỉ từ cache
+- hiểu từng action và state transition
+- biết khi nào cần refetch dữ liệu
+- biết transaction builder phải tương ứng với output và redeemer
+- biết wallet là nơi chứng thực chữ ký, không phải nơi “đẩy state”
+
+Đây là lý do phần off-chain khó hơn nhiều người nghĩ: không chỉ là “call API rồi gửi tx”. Đó là cả một chuỗi định nghĩa quyền, trạng thái và thời gian.
 
 ---
 
-_Dịch và tổng hợp nội dung giảng dạy cho Module 5 - Multisig Treasury_
+> Lưu ý: Đây là bài giảng về tư duy lập trình trên Cardano, không chỉ là cách "viết code chạy được". Trên blockchain, điều quan trọng nhất là làm sao hệ thống vẫn đúng khi mọi người cùng tương tác, thậm chí có dữ liệu stale hoặc có hành vi sai từ phía client.
+
+---
