@@ -414,47 +414,89 @@ Từ đây ta thấy rõ: trạng thái treasury không phải “điều khiể
 
 ## 4. Identity factory: Init và End
 
-### 4.1. Init: khởi tạo treasury
+Redeemer của identity factory có kiểu `Mint` và chỉ có hai giá trị:
 
-Trong nhánh `Init`, minting policy cần kiểm tra nhiều điều kiện trước khi mint `+1` identity token.
+```aiken
+pub type Mint {
+  Init
+  End
+}
+```
 
-Các bước logic chính:
+Đây là redeemer của **minting policy**, không phải `Action` của spending validator. `Init` yêu cầu policy xác thực việc tạo identity token và treasury ban đầu; `End` yêu cầu policy xác thực việc burn identity token. Hai redeemer không mang thêm trường dữ liệu. Các thông tin cần thiết còn lại đến từ tham số policy (`utxo_ref`, `treasury`, `token_name`) và transaction context (`inputs`, `outputs`, `mint`).
 
-1. UTxO one-shot phải được tham chiếu trong transaction
-2. Số lượng token mint phải đúng `+1`
-3. Output treasury phải đến đúng script address
-4. Output treasury phải chứa inline datum hợp lệ
-5. `threshold` phải dương và không vượt số lượng owners
-6. Danh sách owners không trùng
-7. `proposal` phải rỗng; `signers` và `no_signers` rỗng
-8. `allowance` phải hợp lệ
+Trước khi rẽ nhánh theo redeemer, policy lấy danh sách token được mint/burn dưới `policy_id` hiện tại:
 
-Nếu không thỏa, contract reject.
+```aiken
+expect [Pair(asset_name, amount)] =
+  mint
+    |> assets.tokens(policy_id)
+    |> dict.to_pairs()
+```
 
-### 4.2. Vì sao cần one-shot UTxO?
+`expect` yêu cầu danh sách này có đúng một cặp asset name và quantity. Vì vậy, policy không chấp nhận trường hợp mint/burn nhiều token name khác nhau dưới cùng policy ID. Hai nhánh sau tiếp tục kiểm tra asset name đó đúng là `token_name` và quantity đúng với hành động yêu cầu.
 
-Một smart contract nên tránh việc ai đó có thể mint quyền sở hữu treasury mới chỉ bằng cách nội suy dữ liệu. One-shot UTxO giúp mở khóa minting policy dựa trên một input đặc biệt, gắn với transaction khởi tạo. Đây là cách tạo lịch sử minh bạch và không dễ bị abuse bởi người khác tạo treasury giả.
+### 4.1. `Init`: xác thực việc tạo treasury
 
-“One-shot” ở đây có nghĩa là policy được tham số hóa bằng một UTxO cụ thể và việc UTxO đó được tiêu trong giao dịch khởi tạo tạo ra điều kiện mint gắn với một sự kiện duy nhất. Minting policy kiểm tra đúng reference ấy có mặt trong inputs cùng với số lượng và token name mong đợi. Nhờ vậy, token identity không thể được tạo lại tùy ý chỉ bằng cách gọi lại cùng một nhánh `Init` ở một transaction khác.
+Khi redeemer là `Init`, transaction phải vừa tiêu UTxO one-shot đã cấu hình, vừa mint đúng một identity token và gửi token đó vào output treasury hợp lệ.
 
-### 4.3. End: đóng treasury
+Đầu tiên, policy tìm output đang giữ đúng một identity token:
 
-Khi treasury cần bị đóng, state token phải bị burn. Trong nhánh `End`:
+```aiken
+let holds_token =
+  fn(value) { quantity_of(value, policy_id, token_name) == 1 }
 
-- quantity token phải là `-1`
-- token phải là identity token của treasury
-- hợp đồng phải xác nhận quỹ đang ở trạng thái đóng hợp lệ
-- thường chỉ cho phép đóng khi proposal rút hết quyền hoặc state đã hoàn tất
+expect [token_output] =
+  list.filter(outputs, fn(o) { holds_token(o.value) })
+expect InlineDatum(raw) = token_output.datum
+expect datum: Datum = raw
+```
 
-Nếu không có burn token, chain không có cách nào biết treasury đã kết thúc. Điều này rất quan trọng từ góc độ conservation: bạn không muốn có treasury "trôi nổi" mà không có token định danh.
+- `list.filter` giữ lại các output có quantity của token này bằng `1`; `expect [token_output]` buộc phải có đúng một output như vậy.
+- `InlineDatum(raw)` yêu cầu datum được đặt inline trong output, không chỉ tham chiếu tới datum hash.
+- `expect datum: Datum = raw` giải mã dữ liệu thành kiểu `Datum`. Nếu dữ liệu không mang đúng cấu trúc, policy từ chối.
 
-Ở đây cần phân biệt kiểm tra của hai script. Nhánh `End` trong minting policy kiểm tra việc burn đúng một identity token của policy đó và token input đến từ treasury address. Spending validator kiểm tra điều kiện `Execute`, bao gồm ngưỡng YES, khoản thanh toán đúng với proposal và trường hợp không tạo continuing output chỉ khi amount bằng toàn bộ lovelace của treasury. Off-chain builder có thể kiểm tra trước để đưa thông báo thân thiện, nhưng không thay thế hai bộ kiểm tra on-chain này.
+Sau đó, điều kiện `and` xác minh các thuộc tính của transaction và state khởi tạo:
 
-### 4.4. Tại sao burn token là quan trọng?
+1. **One-shot UTxO đã được tiêu**: phải có input có `output_reference == utxo_ref`. Đây là điều kiện gắn lần mint khởi tạo với UTxO được chọn trước.
+2. **Mint đúng token**: `amount == 1` và `asset_name == token_name`. Kết hợp với phần lấy cặp ở đầu validator, không thể thay quantity bằng `2`, `-1`, hoặc đổi sang token name khác.
+3. **Token nằm ở treasury đúng**: `token_output.address == treasury_address`. Policy tạo địa chỉ này từ tham số `treasury` bằng `from_script(treasury)`.
+4. **Output không kèm native asset ngoài dự kiến**: `assets.without_lovelace(token_output.value)` phải bằng đúng một identity token. Phần ADA được phép; các asset khác thì không.
+5. **Datum thuộc đúng policy**: `datum.policy_id == policy_id`.
+6. **Tham số quản trị có ý nghĩa**: `threshold > 0`, `allowance > 0` và số owners ít nhất bằng threshold. Như vậy owners không thể rỗng, threshold không thể bằng 0 hoặc lớn hơn số người có quyền biểu quyết.
+7. **Không có owner trùng lặp**: độ dài danh sách sau `list.unique` phải bằng độ dài danh sách ban đầu.
+8. **State bắt đầu sạch**: `signers` và `no_signers` phải rỗng, `proposal == None`.
 
-Burn token là cách gán trạng thái "đã đóng" cho treasury. Nếu không burn, state token vẫn còn, và quỹ có thể bị hiểu nhầm là state còn hoạt động dù vô hiệu hóa.
+Chỉ khi tất cả điều kiện đều đúng thì nhánh `Init` mới trả về thành công. Lưu ý, policy không áp đặt một con số cụ thể cho `threshold` hay `allowance`; người tạo treasury chọn các giá trị đó, còn policy chỉ yêu cầu chúng hợp lệ.
 
-Trong hầu hết các state machine, một token định danh kiểu này là dấu hiệu của trạng thái active/inactive. Khi token biến mất, treasury không còn state hiện tại để được thao tác tiếp.
+### 4.2. One-shot UTxO trong `Init`
+
+`utxo_ref` là tham số của minting policy và xác định một UTxO cụ thể. Kiểm tra `list.any(inputs, fn(i) { i.output_reference == utxo_ref })` yêu cầu transaction khởi tạo phải tiêu đúng UTxO này. Sau khi đã tiêu, UTxO đó không thể được tiêu lần thứ hai, nên cùng điều kiện one-shot không thể được dùng để khởi tạo lặp lại.
+
+Điều kiện này tạo tính duy nhất cho lần mint của một policy instance; nó không thay thế các kiểm tra còn lại. Policy vẫn cần xác nhận token name, quantity, địa chỉ nhận và datum vì tiêu đúng UTxO thôi chưa đủ để chứng minh treasury output được tạo đúng cấu hình.
+
+### 4.3. `End`: xác thực việc burn identity token
+
+Khi redeemer là `End`, policy tìm input treasury đang giữ đúng một identity token:
+
+```aiken
+expect [token_input] =
+  list.filter(inputs, fn(i) { holds_token(i.output.value) })
+```
+
+`expect [token_input]` yêu cầu có đúng một input như vậy. Nhánh `End` sau đó chỉ chấp nhận khi:
+
+- `amount == -1`: transaction burn đúng một token dưới policy này.
+- `asset_name == token_name`: token bị burn đúng là identity token được cấu hình.
+- `token_input.output.address == treasury_address`: token được lấy từ input tại địa chỉ treasury tương ứng.
+
+Đáng chú ý, nhánh `End` **không tự kiểm tra** datum có proposal hay không, đã đủ YES hay khoản thanh toán có bằng toàn bộ số dư hay chưa. Đây là ranh giới trách nhiệm giữa hai script: spending validator xác minh nhánh `Execute` có đủ chữ ký, trả đúng recipient/amount và không tạo continuing treasury output khi đóng quỹ; minting policy xác minh identity token bị burn đúng số lượng, đúng loại và lấy từ treasury address. Một transaction đóng quỹ chỉ hợp lệ khi thỏa các kiểm tra áp dụng của cả hai script.
+
+### 4.4. Vì sao `Init` và `End` cần những kiểm tra khác nhau?
+
+`Init` tạo một state mới nên policy phải xác thực output treasury và datum khởi tạo. `End` kết thúc vòng đời của identity token nên policy tập trung xác thực input chứa token và lượng token bị burn. Không nên hiểu riêng redeemer `End` là bằng chứng rằng toàn bộ treasury đã đóng đúng quy tắc: việc chi tiền và chuyển tiếp state vẫn thuộc trách nhiệm của spending validator.
+
+Burn token giúp không còn identity token đại diện cho treasury active sau khi đóng. Khi kết hợp với spending validator, identity token vừa đánh dấu state treasury đang tồn tại, vừa được loại bỏ trong transaction kết thúc hợp lệ.
 
 ---
 
@@ -897,8 +939,14 @@ Vì nó tuân thủ các quy tắc rõ ràng:
 
 Trong `onchain/aiken.toml`, dự án khai báo dependency `sidan-lab/vodka` phiên bản `0.1.22`. Đây là thư viện hỗ trợ phát triển Aiken, gồm hai phần chính:
 
-- **Cocktail**: các hàm tiện ích dùng trong validator on-chain, ví dụ đọc và lọc inputs/outputs, kiểm tra chữ ký, kiểm tra mint và thao tác với `Value`. Các module thường có tiền tố `vodka_`, chẳng hạn `cocktail/vodka_inputs` và `cocktail/vodka_value`.
-- **Mocktail**: các hàm dựng dữ liệu transaction giả để kiểm thử validator, được import qua module `mocktail`. Nhờ đó, testcase có thể khai báo input, output, datum, chữ ký và token cần thiết mà không phải tạo giao dịch thật trên mạng.
+Khi viết smart contract, ta thường phải làm hai việc bổ trợ cho nhau: tạo các phép kiểm tra transaction trong validator và chuẩn bị nhiều transaction mẫu để kiểm thử các phép kiểm tra đó. Vodka cung cấp tiện ích cho cả hai nhu cầu này, giúp giảm phần mã dựng dữ liệu lặp lại và làm cho ý định của validator/test dễ đọc hơn. Đây là thư viện hỗ trợ cho Aiken; nó không thay thế validator, cũng không tự gửi hay xác thực giao dịch trên mạng Cardano.
+
+Vodka được chia thành hai nhóm chức năng:
+
+- **Cocktail** dành cho mã on-chain. Nhóm này cung cấp các helper thao tác với dữ liệu Cardano thường gặp như address, `Value`, inputs, outputs, mint và danh sách chữ ký (`extra_signatories`). Các module được chia theo loại dữ liệu hoặc phần của transaction, thường mang tên `vodka_*`, ví dụ `cocktail/vodka_inputs` và `cocktail/vodka_value`. Thay vì viết lại những thao tác lọc hoặc đối chiếu phổ biến trong mỗi validator, ta có thể dùng helper phù hợp và tập trung vào các quy tắc riêng của hợp đồng.
+- **Mocktail** dành cho unit test. Nhóm này cung cấp builder và helper để dựng transaction giả có inputs, outputs, datum, mint và chữ ký cụ thể. Test có thể truyền transaction đó trực tiếp vào validator để kiểm tra trường hợp được chấp nhận hoặc bị từ chối, mà không cần tạo giao dịch thật, kết nối ví hay gửi lên blockchain.
+
+Trong module multisig treasury này, các testcase import `mocktail` để dựng transaction và dữ liệu giả. Đoạn test không gọi các helper Cocktail; phần kiểm tra on-chain vẫn được thực hiện bởi validator của dự án. Sự phân chia đó giúp phân biệt rõ: Cocktail hỗ trợ viết logic validator, còn Mocktail hỗ trợ kiểm chứng logic ấy bằng các transaction mẫu.
 
 Testcase đầu tiên của spending validator nằm trong [`validators/tests/multisig-treasury.ak`](../onchain/validators/tests/multisig-treasury.ak), với mục tiêu xác nhận rằng `Deposit` giữ nguyên datum và làm tăng số dư:
 
