@@ -892,3 +892,83 @@ Vì nó tuân thủ các quy tắc rõ ràng:
 Đó là cách thức Aiken đối phó với dữ liệu không tin cậy và đảm bảo treasury không bị biến dạng bởi input sai hoặc transaction giả mạo.
 
 ---
+
+## 9. Thư viện `sidan-lab/vodka` và cách đọc testcase đầu tiên
+
+Trong `onchain/aiken.toml`, dự án khai báo dependency `sidan-lab/vodka` phiên bản `0.1.22`. Đây là thư viện hỗ trợ phát triển Aiken, gồm hai phần chính:
+
+- **Cocktail**: các hàm tiện ích dùng trong validator on-chain, ví dụ đọc và lọc inputs/outputs, kiểm tra chữ ký, kiểm tra mint và thao tác với `Value`. Các module thường có tiền tố `vodka_`, chẳng hạn `cocktail/vodka_inputs` và `cocktail/vodka_value`.
+- **Mocktail**: các hàm dựng dữ liệu transaction giả để kiểm thử validator, được import qua module `mocktail`. Nhờ đó, testcase có thể khai báo input, output, datum, chữ ký và token cần thiết mà không phải tạo giao dịch thật trên mạng.
+
+Testcase đầu tiên của spending validator nằm trong [`validators/tests/multisig-treasury.ak`](../onchain/validators/tests/multisig-treasury.ak), với mục tiêu xác nhận rằng `Deposit` giữ nguyên datum và làm tăng số dư:
+
+```aiken
+test test_deposit_keeps_datum_and_increases_balance() {
+  let policy_id = mock_policy_id(0)
+  let token_name: AssetName = "identity"
+  let datum_in = datum(policy_id, None, [], [])
+  let tx =
+    base(datum_in, policy_id, token_name, 30_000_000)
+      |> complete()
+      |> add_input(
+          True,
+          treasury_input(
+            mock_utxo_ref(0, 0),
+            mock_script_address(0, None),
+            policy_id,
+            token_name,
+            datum_in,
+            20_000_000,
+          ),
+        )
+
+  multisig_treasury.multisig_treasury.spend(
+    Some(datum_in),
+    Deposit,
+    mock_utxo_ref(0, 0),
+    tx,
+  )
+}
+```
+
+### 9.1. Dữ liệu nền và fixture
+
+Các giá trị đầu tiên thiết lập định danh token và trạng thái treasury:
+
+- `mock_policy_id(0)` tạo một policy ID giả có thể lặp lại trong test. Số `0` chỉ là giá trị để tạo fixture xác định, không phải policy ID dùng trên mạng.
+- `token_name` đặt tên asset là `"identity"`.
+- `datum(policy_id, None, [], [])` gọi helper của file test để tạo datum với policy ID này, proposal đang rỗng, chưa có YES signer và chưa có NO signer. Helper `datum` đồng thời đặt ba owners giả, `threshold = 2` và `allowance = 5_000_000`.
+
+Những helper như `datum`, `owners`, `treasury_input` và `base` được viết ngay trong file test để tránh lặp dữ liệu giữa các testcase. Chúng không thuộc thư viện Vodka; các hàm `mock_*`, `mocktail_tx`, `tx_out`, `complete` và `add_input` mới là API được cung cấp qua module `mocktail`.
+
+### 9.2. Dựng transaction bằng Mocktail
+
+Helper `base(...)` dựng phần output treasury sau giao dịch. Với testcase này, output có:
+
+- cùng script address giả được dùng cho treasury input
+- một identity token
+- `30_000_000` lovelace
+- inline datum bằng `datum_in`
+
+Trong helper, `mocktail_tx()` khởi tạo transaction builder. `tx_out(True, address, value)` thêm output; tham số `True` là điều kiện bật thao tác này. Sau đó `tx_out_inline_datum(True, datum_out)` gắn datum vào output vừa tạo. Các hàm Mocktail có thể nối bằng `|>` để lần lượt cấu hình transaction.
+
+`complete()` kết thúc bước dựng transaction từ builder và trả về một `Transaction`. Sau đó `add_input(True, treasury_input(...))` gắn input treasury cụ thể vào transaction đã dựng. `treasury_input(...)` tạo input có output reference giả, script address, identity token, `20_000_000` lovelace và inline datum đầu vào. Tách riêng helper này giúp testcase thể hiện rõ state trước giao dịch mà validator sẽ kiểm tra.
+
+### 9.3. Ý nghĩa của lời gọi validator
+
+Cuối test, mã gọi trực tiếp:
+
+```aiken
+multisig_treasury.multisig_treasury.spend(
+  Some(datum_in),
+  Deposit,
+  mock_utxo_ref(0, 0),
+  tx,
+)
+```
+
+Bốn đối số tương ứng với datum của treasury input, redeemer `Deposit`, reference của input đang được tiêu và transaction context giả. Kết quả của hàm `spend` là điều kiện Bool của testcase: biểu thức phải trả về `True` thì test mới đạt; nếu validator trả về `False`, test thất bại.
+
+Khi xét transaction, validator so sánh input treasury có `20 ADA` với continuing output có `30 ADA`. Output vẫn giữ identity token và datum không đổi. Vì vậy, testcase xác nhận đúng invariant của `Deposit`: state governance được giữ nguyên trong khi balance tăng. Nó không kiểm tra một giao dịch trên blockchain thực, mà kiểm tra logic validator với transaction giả được Mocktail dựng trong bộ nhớ.
+
+Nếu muốn kiểm tra chiều ngược lại, có thể viết thêm testcase làm output giữ nguyên hoặc giảm balance, hoặc đổi datum. Những giao dịch giả đó phải khiến validator từ chối; dạng test này bảo đảm testcase không chỉ chứng minh đường hợp lệ mà còn bao phủ các điều kiện reject.
