@@ -1,21 +1,3 @@
----
-title: "Bài giảng 2: Smart Contract On-Chain với Aiken"
-description: "Phân tích datum, redeemer, minting policy và các action của validator Multisig Treasury."
----
-
-## Mục lục
-
-1. [Smart contract trên Cardano và vai trò của Aiken](#1-smart-contract-trên-cardano-và-vai-trò-của-aiken)
-2. [Validator, minting policy và phân tách trách nhiệm](#2-validator-minting-policy-và-phân-tách-trách-nhiệm)
-3. [Datum, redeemer và cấu trúc state treasury](#3-datum-redeemer-và-cấu-trúc-state-treasury)
-4. [Identity factory: Init và End](#4-identity-factory-init-và-end)
-5. [Spending validator: invariant và model kiểm tra](#5-spending-validator-invariant-và-model-kiểm-tra)
-6. [Phân tích từng action: Deposit, Propose, Vote, Execute](#6-phân-tích-từng-action-deposit-propose-vote-execute)
-7. [Unit test, ca kiểm thử và bảo mật](#7-unit-test-ca-kiểm-thử-và-bảo-mật)
-8. [Những nguyên tắc thiết kế và bài tập thực hành](#8-những-nguyên-tắc-thiết-kế-và-bài-tập-thực-hành)
-
----
-
 ## 1. Smart contract trên Cardano và vai trò của Aiken
 
 Cardano khác với nhiều blockchain khác ở chỗ smart contract không chạy như một máy ảo chung, không quản lý state theo cách biến toàn cục. Cardano dựa trên mô hình UTxO, trong đó mỗi giao dịch tiêu các input cũ và tạo các output mới. Hợp đồng được gọi là validator, và validator chỉ kiểm tra xem một giao dịch có phù hợp với rules đã định nghĩa hay không.
@@ -52,6 +34,82 @@ Vai trò của policy mint/burn:
 - ngăn việc sao chép hoặc tạo token giả mạo
 - kết hợp với spending validator để xác nhận đóng quỹ hợp lệ
 
+Nếu không có identity token, một treasury giống như một thùng chứa giá trị không có “nhãn” để phân biệt với các UTxO khác cùng script address. Một dApp có thể tìm được địa chỉ script nhưng không biết chính xác output nào đang đại diện cho state hiện tại. Chính vì vậy, identity token không chỉ là token đẹp mắt để hiển thị; nó là phần bắt buộc của mô hình state machine. Nói cách đơn giản, token này cho phép system “biết” treasury nào đang active, treasury nào đã đóng, và output nào đang là phiên bản mới nhất của state.
+
+#### Mã nguồn thực tế: `identity_factory.ak`
+
+Đây là minting policy quyết định khi nào treasury được khởi tạo và khi nào treasury được đóng. Các điều kiện trong hai nhánh `Init` và `End` sẽ được phân tích chi tiết ở mục 4.
+
+```aiken
+use aiken/collection/dict
+use aiken/collection/list
+use aiken/crypto.{ScriptHash}
+use cardano/address.{from_script}
+use cardano/assets.{AssetName, PolicyId, quantity_of}
+use cardano/transaction.{InlineDatum, OutputReference, Transaction}
+use contract/types.{Datum, End, Init, Mint}
+
+validator identity_factory(
+  utxo_ref: OutputReference,
+  treasury: ScriptHash,
+  token_name: AssetName,
+) {
+  mint(redeemer: Mint, policy_id: PolicyId, transaction: Transaction) {
+    let Transaction { inputs, outputs, mint, .. } = transaction
+    expect [Pair(asset_name, amount)] =
+      mint
+        |> assets.tokens(policy_id)
+        |> dict.to_pairs()
+    let treasury_address = from_script(treasury)
+    let holds_token =
+      fn(value) { quantity_of(value, policy_id, token_name) == 1 }
+
+    when redeemer is {
+      Init -> {
+        expect [token_output] =
+          list.filter(outputs, fn(o) { holds_token(o.value) })
+        expect InlineDatum(raw) = token_output.datum
+        expect datum: Datum = raw
+
+        and {
+          list.any(inputs, fn(i) { i.output_reference == utxo_ref }),
+          amount == 1,
+          asset_name == token_name,
+          token_output.address == treasury_address,
+          assets.without_lovelace(token_output.value) == assets.from_asset(
+            policy_id,
+            token_name,
+            1,
+          ),
+          datum.policy_id == policy_id,
+          datum.threshold > 0,
+          datum.allowance > 0,
+          list.length(datum.owners) >= datum.threshold,
+          list.length(list.unique(datum.owners)) == list.length(datum.owners),
+          list.is_empty(datum.signers),
+          list.is_empty(datum.no_signers),
+          datum.proposal == None,
+        }
+      }
+      End -> {
+        expect [token_input] =
+          list.filter(inputs, fn(i) { holds_token(i.output.value) })
+
+        and {
+          amount == -1,
+          asset_name == token_name,
+          token_input.output.address == treasury_address,
+        }
+      }
+    }
+  }
+
+  else(_) {
+    fail
+  }
+}
+```
+
 ### 2.2. Spending validator
 
 Spending validator quan tâm tới các action:
@@ -74,6 +132,8 @@ Nếu cả hai logic nằm trong cùng một validator, bạn có thể tạo ra
 
 Hai script phối hợp với nhau nhưng không làm cùng một việc. Spending validator quyết định một state transition của treasury có hợp lệ không, chẳng hạn proposal đủ YES hay khoản chi đúng người nhận. Minting policy kiểm tra việc tạo hoặc hủy identity token có tuân thủ quy tắc token hay không. Khi đóng treasury bằng một transaction `Execute`, spending validator xác nhận các điều kiện chi và việc không còn continuing treasury output; minting policy đồng thời xác nhận token của treasury được burn đúng lượng và đến từ treasury address. Nếu chỉ nhìn một trong hai script, ta sẽ không thấy đầy đủ các kiểm tra áp dụng cho toàn bộ hành động.
 
+Trong EUTxO, cách tách logic này rất quan trọng bởi vì các script không khác nhau ở chỗ “một script phải xử lý tất cả”; thực tế bạn tối ưu hóa trên nguyên tắc: mỗi script nên thực hiện đúng loại chứng minh mà nó cần. Minting policy trả lời câu hỏi “token này có hợp lệ để sinh ra hay tiêu hủy không?”. Spending validator trả lời câu hỏi “state của treasury này có được phép chuyển từ A sang B không?”. Cách chia ranh giới trách nhiệm này làm cho code dễ đọc hơn, dễ audit hơn và ít dễ mắc bug hơn.
+
 ### 2.4. Hình dung lifecycle của treasury bằng state machine
 
 Nói đơn giản, treasury trong Aiken là một state machine kiểu UTxO. Mỗi trạng thái là một UTxO treasury đang chứa:
@@ -92,6 +152,8 @@ Mỗi action đều là một “state transition”:
 5. `Execute`: áp dụng proposal. Nếu quỹ còn dư, treasury output mới được reset về trạng thái rỗng; nếu quỹ hết, treasury UTxO bị tiêu và identity token bị burn.
 
 Điểm quan trọng là mỗi bước không chỉ đổi “dữ liệu trên màn hình”, mà là đổi output UTxO trên chain. Trong UTxO, không có “bản ghi state chung” mà chỉ có những output mới được tạo ra và ký bởi validator. Vì vậy, mỗi giao dịch phải mô tả rõ state cũ, state mới và điều kiện chuyển tiếp. Đây là lý do Aiken và Cardano rất nhạy với correctness và state consistency.
+
+Nếu ta tách riêng từng state transition ra, sẽ thấy rõ lý do vì sao treasury lại là mô hình rất hợp với blockchain trên Cardano. Ban đầu, trạng thái là “vault chưa có proposal”. Nếu người dùng nạp tiền, state mới vẫn là “vault chưa có proposal” nhưng balance tăng. Nếu user tạo proposal, state mới phải có `proposal` và `signers` chứa proposer. Nếu có owner vote NO và làm proposal mất khả năng pass, state mới có thể là `proposal = None`, nghĩa là vòng đề xuất bị đóng ngay. Tất cả những thay đổi này không phải là một trạng thái tạm thời có thể “chỉnh sửa lại bằng UI” mà phải được hoàn tất bằng một transaction xác minh trên chain. Đây là một ví dụ điển hình về state machine trong hệ thống UTxO: mỗi trạng thái là một output duy nhất, và mỗi transaction là một bước chuyển đổi từ output cũ sang output mới.
 
 ---
 
@@ -181,6 +243,172 @@ Giả sử treasury có 3 owner: A, B, C và `threshold = 2`.
 - Bước 5: execute, với `signers` chứa đủ YES, transaction tạo output trả 100 cho D và reset `proposal = None`, `signers = []`, `no_signers = []`. Nếu treasury còn dư, output treasury mới sẽ còn lại `balance - amount`.
 
 Đây là cách state của treasury “di chuyển” từ một UTxO sang UTxO khác. Mỗi update đều phải là một transaction hợp lệ, không có kênh nào cho phía client tự do đổi trạng thái ngoài validator. Khi bạn hiểu được ý tưởng này, bạn sẽ thấy các lỗi về smart contract thường không nằm ở UI mà nằm ở chỗ state transition không được kiểm tra đúng trong validator.
+
+### 3.6. Mã nguồn thực tế: `multisig_treasury.ak`
+
+Đây là phần validator chính của treasury. Nó định nghĩa không chỉ state structure mà còn logic của từng hành động `Deposit`, `Propose`, `Vote` và `Execute`.
+
+```aiken
+validator multisig_treasury {
+  spend(
+    datum_opt: Option<Datum>,
+    redeemer: Action,
+    own_ref: OutputReference,
+    tx: Transaction,
+  ) {
+    expect Some(datum) = datum_opt
+    expect Some(own_input) = transaction.find_input(tx.inputs, own_ref)
+    let own_address = own_input.output.address
+    let own_value = own_input.output.value
+    let own_lovelace = lovelace_of(own_value)
+    let treasury_outputs =
+      list.filter(tx.outputs, fn(o) { o.address == own_address })
+
+    let has_valid_treasury_input = and {
+        list.count(tx.inputs, fn(i) { i.output.address == own_address }) == 1,
+        has_only_identity_token(own_value, datum.policy_id),
+      }
+
+    when redeemer is {
+      Deposit -> {
+        expect [out] = treasury_outputs
+        expect Some(datum_out) = read_treasury_datum(out)
+        and {
+          has_valid_treasury_input,
+          has_only_identity_token(out.value, datum.policy_id),
+          datum_out == datum,
+          lovelace_of(out.value) > own_lovelace,
+        }
+      }
+
+      Propose { proposer, recipient, amount } -> {
+        expect None = datum.proposal
+        expect [out] = treasury_outputs
+        expect Some(datum_out) = read_treasury_datum(out)
+        and {
+          has_valid_treasury_input,
+          list.has(datum.owners, proposer),
+          list.has(tx.extra_signatories, proposer),
+          amount > 0,
+          amount <= datum.allowance,
+          amount <= own_lovelace,
+          has_only_identity_token(out.value, datum.policy_id),
+          lovelace_of(out.value) == own_lovelace,
+          datum_out == Datum {
+            ..datum,
+            proposal: Some(Proposal { recipient, amount }),
+            signers: [proposer],
+            no_signers: [],
+          },
+        }
+      }
+
+      Vote { voter, approve } -> {
+        expect Some(_) = datum.proposal
+        expect [out] = treasury_outputs
+        expect Some(datum_out) = read_treasury_datum(out)
+        let is_owner = list.has(datum.owners, voter)
+        let has_signed = list.has(tx.extra_signatories, voter)
+        let not_voted_yet =
+          !list.has(datum.signers, voter) && !list.has(datum.no_signers, voter)
+
+        if approve {
+          and {
+            has_valid_treasury_input,
+            is_owner,
+            has_signed,
+            not_voted_yet,
+            datum_out == Datum { ..datum, signers: [voter, ..datum.signers] },
+          }
+        } else {
+          let updated_no = [voter, ..datum.no_signers]
+          let is_doomed =
+            list.length(datum.owners) - list.length(updated_no) < datum.threshold
+          let expected_datum_out =
+            if is_doomed {
+              Datum { ..datum, proposal: None, signers: [], no_signers: [] }
+            } else {
+              Datum { ..datum, no_signers: updated_no }
+            }
+          and {
+            has_valid_treasury_input,
+            is_owner,
+            has_signed,
+            not_voted_yet,
+            datum_out == expected_datum_out,
+          }
+        }
+      }
+
+      Execute -> {
+        expect Some(proposal) = datum.proposal
+        let has_enough_signatures =
+          list.length(datum.signers) >= datum.threshold
+        let has_exact_recipient_payment =
+          has_exact_payment_to(tx.outputs, proposal.recipient, proposal.amount)
+
+        when treasury_outputs is {
+          [] -> and {
+              has_valid_treasury_input,
+              has_enough_signatures,
+              proposal.amount <= datum.allowance,
+              proposal.amount <= own_lovelace,
+              has_exact_recipient_payment,
+              proposal.amount == own_lovelace,
+              dict.values(assets.tokens(tx.mint, datum.policy_id)) == [-1],
+            }
+          [out] -> {
+            expect Some(datum_out) = read_treasury_datum(out)
+            and {
+              has_valid_treasury_input,
+              has_enough_signatures,
+              proposal.amount <= datum.allowance,
+              proposal.amount <= own_lovelace,
+              has_exact_recipient_payment,
+              proposal.amount < own_lovelace,
+              has_only_identity_token(out.value, datum.policy_id),
+              datum_out == Datum {
+                ..datum,
+                signers: [],
+                no_signers: [],
+                proposal: None,
+              },
+            }
+          }
+          _ -> False
+        }
+      }
+    }
+  }
+}
+```
+
+Giải thích từng phần:
+
+1. `has_valid_treasury_input`  
+   Đây là invariant chung: transaction phải tiêu đúng treasury input hiện tại và input đó phải còn giữ identity token. Nếu không có token hoặc nếu input không đúng script address, state không hợp lệ.
+
+2. `Propose`  
+   Khởi tạo proposal mới chỉ được phép khi `datum.proposal == None`. Validator bắt buộc:
+   - proposer là owner
+   - proposer phải ký giao dịch
+   - amount > 0, không vượt `allowance`, không vượt số dư treasury
+   - output mới phải giữ nguyên value, nhưng đổi `proposal`, `signers`, `no_signers`
+
+   Đó là logic rất quan trọng vì proposal không phải “đọc từ UI”, mà là dữ liệu trên output mới được validator xác nhận.
+
+3. `Vote`  
+   Một owner chỉ được vote một lần. Validator kiểm tra cả `signers` và `no_signers` để tránh vote lặp. Nếu vote NO làm cho số lượng owner còn lại không đủ threshold, proposal sẽ bị hủy ngay trong chính transaction vote đó.
+
+4. `Execute`  
+   Đây là nhánh quan trọng nhất. Validator yêu cầu:
+   - đủ `signers` theo threshold
+   - amount không vượt `allowance`
+   - payment đúng theo proposal.recipient và proposal.amount
+   - nếu chi toàn bộ treasury thì mint burn identity token `-1` trong trường hợp đóng quỹ
+   - nếu còn dư thì output mới phải reset `proposal`, `signers`, `no_signers`, còn identity token vẫn được giữ
+
+Từ đây ta thấy rõ: trạng thái treasury không phải “điều khiển bằng UI”, mà là “transitions được kiểm tra một cách khắt khe bởi validator”. Mỗi hành động là một lời hứa trên chain, không phải một click bấm trên browser.
 
 ---
 

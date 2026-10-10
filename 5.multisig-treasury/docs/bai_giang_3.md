@@ -1,21 +1,3 @@
----
-title: "Bài giảng 3: Phân tích Off-Chain MeshJS"
-description: "Đọc transaction builder, cách encode state, ký ví CIP-30 và xử lý đồng bộ treasury."
----
-
-## Mục lục
-
-1. [Vai trò của off-chain trong dApp Cardano](#1-vai-trò-của-off-chain-trong-dapp-cardano)
-2. [Kiến trúc treasury và dữ liệu state](#2-kiến-trúc-treasury-và-dữ-liệu-state)
-3. [Mesh adapter và chuẩn bị transaction](#3-mesh-adapter-và-chuẩn-bị-transaction)
-4. [Phân tích từng transaction builder](#4-phân-tích-từng-transaction-builder)
-5. [Luồng ví CIP-30 và frontend](#5-luồng-ví-cip-30-và-frontend)
-6. [Lấy dữ liệu, hiển thị lịch sử và xử lý đồng bộ](#6-lấy-dữ-liệu-hiển-thị-lịch-sử-và-xử-lý-đồng-bộ)
-7. [Những lỗi thường gặp và checklist kỹ thuật](#7-những-lỗi-thường-gặp-và-checklist-kỹ-thuật)
-8. [Tổng kết và câu hỏi tư duy](#8-tổng-kết-và-câu-hỏi-tư-duy)
-
----
-
 ## 1. Vai trò của off-chain trong dApp Cardano
 
 Trong hệ thống Cardano, một dApp thật sự gồm hai lớp bổ trợ nhau:
@@ -113,6 +95,8 @@ Một builder điển hình có các tham số như:
 
 Vai trò của adapter là gom các thao tác hạ tầng thường lặp lại vào một chỗ, để mỗi builder tập trung vào action cần thực hiện. Ví dụ, `propose` không nên tự định nghĩa một cách tìm UTxO treasury khác với `vote`, vì sự khác biệt đó có thể khiến hai luồng chọn hai state khác nhau. Adapter cung cấp cách dùng provider, script và tiện ích chuyển đổi dữ liệu nhất quán; từng builder vẫn chịu trách nhiệm tạo đúng redeemer, output và datum cho action của nó.
 
+Trong thực tế, `MeshAdapter` thực hiện vai trò giống như một “engine” cho toàn bộ off-chain layer. Từ góc nhìn kiến trúc, nó không phải phần “dễ thấy nhất” trên UI, nhưng lại là nơi tụ tập mọi thứ cần cho giao dịch chạm được vào smart contract: script compilation, parameterization, script hash, address serialization, wallet UTxO query, và logic chuyển đổi kiểu dữ liệu. Nếu không có lớp này, mỗi transaction builder phải tự viết lại những thao tác như `deserializeAddress`, `serializeAddressObj`, `applyParamsToScript`, `resolveScriptHash`, `datumToPlutusData`, và `getCollateral`. Điều này không chỉ lặp lại mà còn dễ sinh sai lệch các thứ tự dữ liệu và cấu trúc trên chain. Tích hợp đúng nơi đúng lúc là chìa khóa để off-chain không chỉ “run được” mà còn “đúng với hợp đồng”.
+
 ### 3.2. Query UTxO là bước cực kỳ quan trọng
 
 Trước khi dựng transaction, builder phải biết rõ:
@@ -150,6 +134,212 @@ Một transaction dùng validator trên Cardano thường cần các phần sau:
 Đây là lý do vì sao off-chain phải hiểu rõ về serialization, datum encoding, giá trị ADA/lovelace, và coin selection. Một giao dịch sai nhỏ ngay ở bậc encode datum cũng có thể khiến validator từ chối.
 
 Những thành phần này có quan hệ với nhau chứ không phải danh sách các trường độc lập. Redeemer phải mô tả cùng action mà builder đang thực hiện; datum output phải là state tiếp theo mà validator dự kiến; các input phụ phải đủ để thanh toán phí và tạo change; collateral được ví dùng theo quy tắc giao dịch Plutus. Chỉ cần datum được encode theo sai thứ tự constructor hoặc amount được đổi nhầm giữa ADA và lovelace, transaction có thể không còn khớp với kiểu dữ liệu và điều kiện mà Aiken kiểm tra.
+
+### 3.4. Mã nguồn thực tế: `MeshTxBuilder`
+
+Dưới đây là phần builder thực tế dùng MeshJS để dựng các transaction `init`, `deposit`, `propose`, `vote` và `execute`.
+
+```typescript
+export class MeshTxBuilder extends MeshAdapter {
+  init = async ({
+    signers,
+    noSigners,
+    owners,
+    initial,
+    threshold,
+    allowance,
+  }: {
+    owners: Array<string>;
+    signers: Array<string>;
+    noSigners: Array<string>;
+    threshold: number;
+    allowance: number;
+    initial: string;
+  }): Promise<string> => {
+    const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+    const utxo = utxos.find(
+      (u) =>
+        u.input.txHash === this.utxoRef.txHash &&
+        u.input.outputIndex === this.utxoRef.outputIndex,
+    );
+
+    unsignedTx
+      .txIn(utxo.input.txHash, utxo.input.outputIndex)
+      .mintPlutusScriptV3()
+      .mint("1", this.policyId, stringToHex(this.name))
+      .mintingScript(this.mintScriptCbor)
+      .mintRedeemerValue(mConStr0([]))
+      .txOut(this.spendAddress, [
+        { unit: "lovelace", quantity: initial },
+        { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+      ])
+      .txOutInlineDatumValue(
+        this.datumToPlutusData({
+          policyId: this.policyId,
+          owners,
+          threshold,
+          allowance,
+          signers,
+          noSigners,
+          proposal: null,
+        }),
+      );
+
+    return await unsignedTx.complete();
+  };
+
+  propose = async ({
+    recipient,
+    amount,
+  }: {
+    recipient: string;
+    amount: string;
+  }): Promise<string> => {
+    const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+    const utxo = await this.getAddressUTXOAsset(
+      this.spendAddress,
+      this.policyId + stringToHex(this.name),
+    );
+    const datum = this.convertDatum({
+      plutusData: utxo.output.plutusData as string,
+    });
+    const senderPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+    const amountValue = BigInt(amount);
+
+    if (amountValue > BigInt(datum.allowance)) {
+      throw new Error("Vượt allowance của quỹ.");
+    }
+
+    const newDatum = {
+      ...datum,
+      signers: [senderPubKeyHash],
+      noSigners: [],
+      proposal: { recipient, amount: Number(amount) },
+    };
+
+    unsignedTx
+      .spendingPlutusScriptV3()
+      .txIn(utxo.input.txHash, utxo.input.outputIndex)
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(
+        this.redeemer.Propose(senderPubKeyHash, recipient, Number(amount)),
+      )
+      .txInScript(this.spendScriptCbor)
+      .txOut(this.spendAddress, utxo.output.amount)
+      .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+
+    return await unsignedTx.complete();
+  };
+
+  vote = async ({ approve }: { approve: boolean }): Promise<string> => {
+    const datum = this.convertDatum({
+      plutusData: utxo.output.plutusData as string,
+    });
+    const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+
+    const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+    const isDoomed =
+      datum.owners.length - updatedNoSigners.length < datum.threshold;
+    const newDatum = approve
+      ? {
+          ...datum,
+          signers: [voterPubKeyHash, ...datum.signers],
+          noSigners: datum.noSigners,
+        }
+      : isDoomed
+        ? { ...datum, proposal: null, signers: [], noSigners: [] }
+        : { ...datum, noSigners: updatedNoSigners, signers: datum.signers };
+
+    unsignedTx
+      .spendingPlutusScriptV3()
+      .txIn(utxo.input.txHash, utxo.input.outputIndex)
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(this.redeemer.Vote(voterPubKeyHash, approve))
+      .txInScript(this.spendScriptCbor)
+      .txOut(this.spendAddress, utxo.output.amount)
+      .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+
+    return await unsignedTx.complete();
+  };
+
+  execute = async ({ amount }: { amount: string }): Promise<string> => {
+    const datum = this.convertDatum({
+      plutusData: utxo.output.plutusData as string,
+    });
+    const proposal = datum.proposal;
+    const amountValue = BigInt(amount);
+
+    if (amountValue !== BigInt(proposal.amount)) {
+      throw new Error("Số tiền execute phải khớp với proposal.");
+    }
+
+    unsignedTx
+      .spendingPlutusScriptV3()
+      .txIn(utxo.input.txHash, utxo.input.outputIndex)
+      .txInInlineDatumPresent()
+      .txInRedeemerValue(this.redeemer.Execute())
+      .txInScript(this.spendScriptCbor)
+      .txOut(proposal.recipient, [
+        { unit: "lovelace", quantity: amountValue.toString() },
+      ]);
+
+    if (amountValue === ownLovelace) {
+      unsignedTx
+        .mintPlutusScriptV3()
+        .mint("-1", this.policyId, stringToHex(this.name))
+        .mintingScript(this.mintScriptCbor)
+        .mintRedeemerValue(mConStr1([]));
+    } else {
+      const remaining = (ownLovelace - amountValue).toString();
+      const newDatum = { ...datum, signers: [], noSigners: [], proposal: null };
+      unsignedTx
+        .txOut(this.spendAddress, [
+          { unit: "lovelace", quantity: remaining },
+          { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+        ])
+        .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+    }
+
+    return await unsignedTx.complete();
+  };
+}
+```
+
+Giải thích chi tiết:
+
+1. `init()`  
+   Đây là bước khởi tạo treasury. Builder làm 3 việc quan trọng:
+   - chọn input ban đầu từ ví
+   - mint `+1` identity token
+   - tạo output treasury mới với inline datum gồm `owners`, `threshold`, `allowance`, `signers`, `noSigners`, `proposal: null`
+
+   Đây là nơi `one-shot UTxO` và `identity token` bắt đầu có vai trò. Nếu thiếu `utxoRef` hoặc `policyId` không đúng, transaction sẽ không khớp với policy minting của Aiken.
+
+2. `propose()`  
+   Builder đọc treasury UTxO hiện tại, decode datum, kiểm tra `amount <= allowance` và `amount <= treasuryBalance`. Nếu hợp lệ, nó tạo `newDatum` với:
+   - `signers: [senderPubKeyHash]`
+   - `noSigners: []`
+   - `proposal: { recipient, amount }`
+
+   Mỗi proposal không phải chỉ là form trên frontend; nó là state trên chain và validator đọc từ inline datum.
+
+3. `vote()`  
+   Builder xác định owner hiện đang vote, kiểm tra chưa vote, validate `proposal` đang mở. Nếu `approve = true`, thêm voter vào `signers`; nếu `false`, tính xem vote NO có khiến proposal không thể đạt threshold hay không. Nếu là trường hợp `doom`, validator yêu cầu reset state về `proposal: null`.
+
+4. `execute()`  
+   Đây là bước cuối cùng để chuyển tiền. Builder kiểm tra:
+   - `amount` phải khớp với `proposal.amount`
+   - `datum.signers.length >= threshold`
+   - tài sản/ADA đủ để chi
+   - nếu chi toàn bộ quỹ thì burn identity token `-1`
+   - nếu còn dư thì tạo continuing treasury output mới và reset proposal/vote
+
+   Lưu ý: builder không quyết định “nếu user nhập 7 ADA thì chi 7 ADA” theo cảm tính. Nó phải đọc từ `proposal` đã lưu trên chain; nếu không, transaction có thể dựng thành công ở client nhưng không hợp lệ trên chain.
+
+5. Tại sao cần `MeshAdapter`?  
+   Adapter bao bọc mọi thứ hạ tầng: đọc validator, tính `policyId`, build script address, query UTxO, chọn collateral, chuyển `datum` sang `PlutusData`. Nhờ đó, mỗi builder chỉ cần tập trung vào logic nghiệp vụ còn lại: `Deposit`, `Propose`, `Vote`, `Execute`.
+
+Tóm lại, ở đây biểu hiện rất rõ mô hình `off-chain = logic chuẩn bị + query + encode + ký`, còn `on-chain = logic xác thực cuối cùng`. Builder có thể kiểm tra sớm để giảm lỗi, nhưng không được thay thế chain validation.
 
 ---
 
@@ -271,20 +461,22 @@ Một ví dụ cụ thể: nếu quỹ đang có 30 ADA, allowance là 10 ADA v�
 
 ```typescript
 const newDatum = {
-    ...datum,
-    signers: [senderPubKeyHash],
-    noSigners: [],
-    proposal: { recipient, amount: Number(amount) },
+  ...datum,
+  signers: [senderPubKeyHash],
+  noSigners: [],
+  proposal: { recipient, amount: Number(amount) },
 };
 
 unsignedTx
-    .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    .txInInlineDatumPresent()
-    .txInRedeemerValue(this.redeemer.Propose(senderPubKeyHash, recipient, Number(amount)))
-    .txInScript(this.spendScriptCbor)
-    .txOut(this.spendAddress, utxo.output.amount)
-    .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+  .spendingPlutusScriptV3()
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(
+    this.redeemer.Propose(senderPubKeyHash, recipient, Number(amount)),
+  )
+  .txInScript(this.spendScriptCbor)
+  .txOut(this.spendAddress, utxo.output.amount)
+  .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
 ```
 
 `txInInlineDatumPresent()` nói với builder rằng datum nằm trực tiếp trong input treasury; `txInRedeemerValue(...)` chọn nhánh `Propose` và truyền các tham số mà validator sẽ kiểm tra. Output dùng lại `utxo.output.amount`, nên proposal chưa chuyển tiền. Builder này có kiểm tra allowance và balance trước đoạn trích, nhưng việc proposal đang rỗng và proposer là owner vẫn phải được validator xác nhận; kiểm tra off-chain không thể thay thế các điều kiện đó.
@@ -327,12 +519,13 @@ Builder cần tính state sau vote trước khi encode datum:
 
 ```typescript
 const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
-const isDoomed = datum.owners.length - updatedNoSigners.length < datum.threshold;
+const isDoomed =
+  datum.owners.length - updatedNoSigners.length < datum.threshold;
 const newDatum = approve
-    ? { ...datum, signers: [voterPubKeyHash, ...datum.signers] }
-    : isDoomed
-      ? { ...datum, proposal: null, signers: [], noSigners: [] }
-      : { ...datum, noSigners: updatedNoSigners };
+  ? { ...datum, signers: [voterPubKeyHash, ...datum.signers] }
+  : isDoomed
+    ? { ...datum, proposal: null, signers: [], noSigners: [] }
+    : { ...datum, noSigners: updatedNoSigners };
 ```
 
 Với YES, builder thêm voter vào danh sách `signers`. Với NO, nó tính số phiếu NO sau khi tính phiếu hiện tại; nếu số owner còn có thể bỏ phiếu YES thấp hơn threshold thì datum phải trở về trạng thái không có proposal. Ngay cả khi builder dựng datum đúng, validator vẫn kiểm tra voter có phải owner, có chữ ký và chưa vote hay chưa.
@@ -386,7 +579,7 @@ Frontend builder lấy amount trực tiếp từ proposal on-chain. Builder tron
 ```typescript
 const amountValue = BigInt(amount);
 if (amountValue !== BigInt(proposal.amount)) {
-    throw new Error("Số tiền execute phải khớp với proposal.");
+  throw new Error("Số tiền execute phải khớp với proposal.");
 }
 ```
 
@@ -394,19 +587,21 @@ if (amountValue !== BigInt(proposal.amount)) {
 
 ```typescript
 unsignedTx
-    .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex)
-    .txInInlineDatumPresent()
-    .txInRedeemerValue(this.redeemer.Execute())
-    .txInScript(this.spendScriptCbor)
-    .txOut(proposal.recipient, [{ unit: "lovelace", quantity: amountValue.toString() }]);
+  .spendingPlutusScriptV3()
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(this.redeemer.Execute())
+  .txInScript(this.spendScriptCbor)
+  .txOut(proposal.recipient, [
+    { unit: "lovelace", quantity: amountValue.toString() },
+  ]);
 
 if (amountValue === ownLovelace) {
-    unsignedTx
-        .mintPlutusScriptV3()
-        .mint("-1", this.policyId, stringToHex(this.name))
-        .mintingScript(this.mintScriptCbor)
-        .mintRedeemerValue(mConStr1([]));
+  unsignedTx
+    .mintPlutusScriptV3()
+    .mint("-1", this.policyId, stringToHex(this.name))
+    .mintingScript(this.mintScriptCbor)
+    .mintRedeemerValue(mConStr1([]));
 }
 ```
 

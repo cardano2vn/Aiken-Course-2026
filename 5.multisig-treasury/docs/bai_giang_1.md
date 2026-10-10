@@ -1,21 +1,3 @@
----
-title: "Bài giảng 1: Tổng quan Multisig Treasury"
-description: "Giới thiệu mô hình M-of-N, EUTxO và vòng đời treasury trên Cardano."
----
-
-## Mục lục
-
-1. [Vì sao cần quỹ chung đa chữ ký](#1-vì-sao-cần-quỹ-chung-đa-chữ-ký)
-2. [Mô hình M-of-N và vai trò của từng bên](#2-mô-hình-m-of-n-và-vai-trò-của-từng-bên)
-3. [Multisig Treasury trong mô hình EUTxO](#3-multisig-treasury-trong-mô-hình-eutxo)
-4. [Vòng đời của một proposal](#4-vòng-đời-của-một-proposal)
-5. [Kiến trúc ba lớp của dApp](#5-kiến-trúc-ba-lớp-của-dapp)
-6. [Ranh giới tin cậy, rủi ro và giới hạn](#6-ranh-giới-tin-cậy-rủi-ro-và-giới-hạn)
-7. [Ví dụ thực tế và phân tích luồng](#7-ví-dụ-thực-tế-và-phân-tích-luồng)
-8. [Tổng kết và câu hỏi tư duy](#8-tổng-kết-và-câu-hỏi-tư-duy)
-
----
-
 ## 1. Vì sao cần quỹ chung đa chữ ký
 
 Trong các hệ thống tài chính truyền thống, người quản lý ngân quỹ thường là một tổ chức hoặc một cá nhân duy nhất. Nhưng trong web3, đặc biệt khi khai thác tài sản trên blockchain, điều đó gây ra rủi ro rất lớn:
@@ -26,6 +8,8 @@ Trong các hệ thống tài chính truyền thống, người quản lý ngân 
 - nếu cần quản lý tài sản theo nhóm, 1 người duy nhất không đủ để chia sẻ trách nhiệm
 
 Multisig Treasury ra đời để giải quyết bài toán này. Thay vì có một khóa duy nhất, quỹ được gắn với một danh sách `owners` và một `threshold`.
+
+Nếu đọc theo góc độ quản trị, đây không chỉ là một kỹ thuật để chia tiền, mà là một cách tổ chức quyền lực trong một hệ thống phân tán. Thay vì giao toàn bộ quyền quyết định cho một cá nhân, nhóm có thể đặt ra nguyên tắc: tất cả các giao dịch rút tiền phải được xác nhận bởi một số lượng thành viên đủ lớn. Điều này tương tự với mô hình hội đồng quản trị, ban điều hành hoặc công ty có nhiều cổ đông, nhưng được mã hóa trực tiếp trên chain và không phụ thuộc vào một hệ thống server trung tâm để kiểm tra. Trong blockchain, khi không có ai “đứng ngoài” để can thiệp, nên mọi nguyên tắc cần được lưu dưới dạng logic có thể tự xác minh. Vì vậy, M-of-N không chỉ là một tính năng, mà là một mô hình quyền lực định nghĩa cách quỹ được mở, chi, và đóng theo cách hợp lệ.
 
 Ví dụ:
 
@@ -46,6 +30,8 @@ Vấn đề không phải là "ai có quyền khởi tạo quỹ" mà là "quỹ
 Hãy hình dung một nhóm ba người cùng quản lý ngân sách của một dự án cộng đồng. Nếu chỉ một người giữ khóa của ví, mọi người còn lại phải tin rằng người đó luôn hành động đúng và luôn giữ khóa an toàn. Với mô hình 2-of-3, một khoản chi cần ít nhất hai owner đồng ý; một người có thể khởi tạo đề xuất, nhưng không thể tự mình hoàn tất khoản chi nếu chưa đạt ngưỡng. Quy tắc này không loại bỏ mọi rủi ro, nhưng làm rõ ai có quyền tham gia và giảm khả năng một cá nhân đơn phương kiểm soát quỹ.
 
 Khi chọn ngưỡng, nhóm cần cân bằng giữa khả năng vận hành và mức độ kiểm soát. Ngưỡng quá thấp khiến việc chi tiền dễ dàng hơn nhưng làm giảm hiệu quả của cơ chế đa chữ ký. Ngưỡng quá cao tăng yêu cầu đồng thuận, nhưng cũng có thể làm quỹ ngừng hoạt động nếu một số owner mất ví, vắng mặt hoặc không thể ký đúng lúc. Vì vậy, M-of-N không chỉ là tham số kỹ thuật; đó còn là quyết định quản trị cần được thống nhất trước khi tạo treasury.
+
+Một cách dễ hình dung hơn: treasury multisig giống như một ngân quỹ có nhiều khóa, nhưng ở đây không phải “Ba người cùng giữ một chiếc chìa khóa vật lý”, mà là mỗi người có một khóa riêng biệt và hợp đồng xác minh xem trong một giao dịch cụ thể có đủ số lượng khóa valid hay không. Đây là yếu tố cốt lõi của mô hình multisig: nó không trao quyền cho một cơ quan trung tâm, mà gợi ra một cơ chế kiểm soát tập trung vào các luật đã được mã hóa. Người dùng trong hệ thống không cần tin rằng ai đó sẽ “làm đúng”; họ chỉ cần tin rằng mọi điều kiện logic đã được định nghĩa rõ ràng và validator trên chain sẽ từ chối nếu điều kiện không đúng.
 
 ### Khác biệt giữa ví đơn ký và treasury multisig
 
@@ -91,6 +77,8 @@ Ví dụ:
 
 Khi đó, không ai được propose số tiền vượt quá 10 ADA trong một proposal, dù quỹ có thể lớn hơn. `allowance` là một rào cản phân quyền và kiểm soát chi tiêu, không phải giá trị “tổng số tiền quỹ”.
 
+Cần hiểu rõ sự khác biệt giữa hai điều này vì nó liên quan trực tiếp đến cách quản trị hoạt động. `threshold` nói về “số vote cần có để được chấp thuận”, còn `allowance` nói về “số tiền tối đa mỗi lần xét duyệt”. Một quỹ có thể có threshold thấp nhưng allowance rất khắt khe; hoặc ngược lại, một quỹ có threshold cao nhưng allowance rộng. Đây là hai lớp kiểm soát khác nhau: một lớp kiểm soát về quyền phê duyệt, một lớp kiểm soát về giới hạn tài chính. Trên blockchain, nếu chỉ có threshold mà không có allowance, một proposal có thể phê duyệt một khoản tiền lớn bất chấp rủi ro. Nếu chỉ có allowance mà không có threshold, quỹ có thể bị chi tiêu bởi một cá nhân hoặc một nhóm quá nhỏ. Chính vì vậy, cả hai cần được xem như các nguyên tắc quản trị, không phải chỉ là metadata của contract.
+
 ### 2.3. Tại sao cần `owners` và `threshold` chốt trong datum?
 
 Quỹ multisig không lưu private key trong smart contract. Smart contract chỉ lưu danh sách `VerificationKeyHash`, không lưu khóa riêng. Khi một người ký giao dịch, thông tin chữ ký đi vào `tx.extra_signatories`.
@@ -120,6 +108,67 @@ Khi khởi tạo treasury, dữ liệu đầu vào phải thỏa các điều ki
 Nếu không thỏa, contract không cho mint identity token hay tạo treasury state.
 
 Các điều kiện khởi tạo này giúp tránh những cấu hình vô nghĩa ngay từ đầu. Chẳng hạn, treasury có ba owner nhưng threshold bằng bốn sẽ không bao giờ đạt đủ chữ ký; threshold bằng không lại khiến cơ chế phê duyệt mất ý nghĩa. Tương tự, owner bị lặp có thể khiến người đọc nhầm số người tham gia thực tế. Vì vậy, khởi tạo không chỉ là tạo địa chỉ script mà còn là thời điểm validator xác nhận rằng bộ quy tắc quản trị ban đầu có thể hoạt động.
+
+### 2.5. Identity factory: quy tắc `Init` và `End`
+
+Mã nguồn `identity_factory.ak` được trình bày ở Bài giảng 2, ngay trước phần giải thích về spending validator. Ở đây, ta tập trung vào các quy tắc mà policy phải bảo đảm:
+
+1. `validator identity_factory(...)`  
+   Đây là policy mint/burn, không phải spending validator. Nó được tham số hóa bằng `utxo_ref`, `treasury` và `token_name`. Dữ liệu này giúp policy biết mình đang gắn với treasury instance nào, thay vì mint token một cách tùy tiện.
+
+2. `Init` branch  
+   Khi treasury mới được tạo, policy yêu cầu:
+   - transaction phải tiêu đúng `utxo_ref` one-shot
+   - chính xác mint `+1` identity token
+   - output treasury phải nằm ở `treasury_address`
+   - output chứa inline datum hợp lệ với `threshold > 0`, `allowance > 0`, `proposal = None`
+   - các owner không trùng lặp và `threshold <= owners.length`
+
+   Đây chính là chốt của thiết kế: không thể tạo treasury mới nếu cấu hình quản trị vô nghĩa.
+
+3. `End` branch  
+   Khi treasury đóng, identity token phải bị burn `-1`. Policy sẽ kiểm tra token đang ở treasury address và mục tiêu là ngăn việc giữ token "đang sống" sau khi treasury đã kết thúc.
+
+4. Tại sao điều này quan trọng?  
+   Một treasury không chỉ là "một account có số ADA". Trong mô hình UTxO, treasury là một state machine gắn với một identity token. Token này là dấu hiệu nhận dạng cho phiên bản state hiện tại. Nếu không có mint/burn rule rõ ràng, hệ thống có thể tạo ra treasury giả hoặc không biết khi nào state kết thúc.
+
+### 2.6. Liên kết giữa khái niệm từ Bài 1 và mã Aiken ở Bài 2
+
+Nếu Bài 1 là phần lý thuyết về quy tắc quản trị, thì Bài 2 là phần chuyển quy tắc đó thành mã có thể chạy trên chuỗi. Giữa hai phần, có một câu chuyện nối dài rất rõ:
+
+- Trong Bài 1, ta nói treasury có `owners`, `threshold`, `allowance`, proposal, vote, execute.
+- Trong mã Aiken, những khái niệm ấy không còn là lời giải thích đơn thuần; chúng biến thành dữ liệu `Datum` và `Redeemer` thật sự.
+
+Cụ thể:
+
+- `owners`: được lưu trong `Datum.owners`, tương ứng với danh sách các `VerificationKeyHash` thuộc quyền quản lý treasury.
+- `threshold`: là một số nguyên `Int`, đồng nghĩa với số phiếu YES tối thiểu cần có để proposal được thực hiện.
+- `allowance`: là hạn mức tối đa mỗi lần propose, giúp ngăn việc rút quá nhiều tiền trong một proposal.
+- `proposal`: là `Option<Proposal>`, nghĩa là “có proposal đang mở hay không”. Nếu `None` thì treasury đang rảnh; nếu `Some { recipient, amount }` thì có một proposal đang chờ phê duyệt.
+- `signers` và `no_signers`: trở thành dữ liệu state riêng của vòng proposal, thể hiện ai đã vote YES, ai đã vote NO.
+- `policy_id`: là định danh state token, cho biết output nào đang là treasury hiện tại của một instance nào đó.
+
+Lúc này, bạn có thể nhìn thấy một mối liên hệ rất chặt chẽ giữa khái niệm và mã:
+
+- `owners + threshold` định nghĩa quyền lực của quỹ
+- `proposal + signers + no_signers` định nghĩa tiến trình phê duyệt
+- `policy_id` định nghĩa state identity và giúp xác định treasury output hiện hành
+- `redeemer` định nghĩa hành động hiện tại: `Deposit`, `Propose`, `Vote`, `Execute`
+
+Rõ ràng hơn, `identity_factory.ak` không phải là “trang bị thêm cho đẹp”; nó chính là sự biểu diễn bằng code của ý tưởng “treasury là một state machine có token định danh”. Tại thời điểm khởi tạo, `Init` mint `+1` token để gắn với treasury mới. Tại thời điểm đóng, `End` burn `-1` để đánh dấu treasury không còn active nữa. Đây là cách Aiken chuyển khái niệm “state sống / state đóng” từ suy nghĩ lý thuyết thành ràng buộc trên chain.
+
+Từ đó, khi sang phần `multisig_treasury.ak`, bạn sẽ thấy các hành động khác nhau không chỉ là UI actions, mà là các nhánh của `when redeemer is { ... }`:
+
+- `Deposit` không đổi proposal và không đổi danh sách owner; nó chỉ tăng balance trong treasury output mới
+- `Propose` tạo `proposal` mới và reset `signers/no_signers` cho vòng mới
+- `Vote` thêm vote mới vào danh sách tương ứng và có thể hủy proposal nếu nó chắc chắn không thể đạt ngưỡng
+- `Execute` kiểm tra đủ chữ ký, payment đúng cho recipient, và cuối cùng reset proposal hoặc đóng treasury nếu chi toàn bộ quỹ
+
+Vậy nên, nếu bạn nhớ một câu đơn giản để nối từ Bài 1 sang Bài 2, hãy nhớ như sau:
+
+“Bài 1 nói treasury là một quỹ quản trị theo M-of-N; Bài 2 cho thấy mã Aiken làm thế nào để biến quy tắc đó thành state machine trên UTxO, với datum lưu trạng thái, redeemer mô tả hành động, và minting policy đảm bảo token identity của treasury được sinh ra và bị burn đúng lúc.”
+
+Đây chính là chỗ mà người mới học Cardano hay mắc nhầm lẫn nhất: họ nghĩ smart contract chỉ là “logic if else”, nhưng thực chất nó là “logic dạng state machine + asset rules + signature verification + output reconciliation”. Bài 1 giúp hình dung khái niệm; Bài 2 giúp bạn thấy cách triển khai bằng Aiken bằng chính mã nguồn.
 
 ---
 
