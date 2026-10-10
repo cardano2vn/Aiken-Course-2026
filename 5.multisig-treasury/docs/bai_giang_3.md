@@ -70,20 +70,124 @@ Identity token giúp nhận diện UTxO đang hoạt động, nhưng bản thân
 
 ---
 
-## 3. Mesh adapter và chuẩn bị transaction
+## 3. Kết nối ví và Mesh adapter
 
-### 3.1. Lớp `MeshAdapter` là "trục" của off-chain
+### 3.1. Kết nối ví trước khi tương tác với treasury
+
+Trước khi dựng transaction, ứng dụng cần biết ví nào đang được người dùng cho phép sử dụng và địa chỉ nào sẽ đại diện cho họ. Trong dự án, nút **Connect Wallet** trên giao diện đưa người dùng tới trang đăng nhập; tại đó người dùng chọn một ví Cardano được hỗ trợ và xác nhận cho ứng dụng kết nối. Bước này chỉ cấp quyền tương tác với ví thông qua CIP-30, không trao private key cho ứng dụng.
+
+Luồng kết nối trong frontend diễn ra theo thứ tự:
+
+1. Người dùng chọn wallet ở trang đăng nhập.
+2. Hook `useWallet` gọi `BrowserWallet.enable(name.toLowerCase())` để yêu cầu ví cấp quyền cho ứng dụng.
+3. Ứng dụng kiểm tra network ID của ví có khớp với network đang cấu hình hay không. Ví dụ, nếu ứng dụng chạy trên preprod thì ví cũng phải ở preprod.
+4. Frontend đọc change address và reward/stake address từ ví, rồi lưu thông tin kết nối trong wallet store để các màn hình và dịch vụ có thể sử dụng.
+5. Khi cần khởi tạo hoặc đọc treasury, service tạo một `MeshWallet` với network, provider và địa chỉ ví vừa có. Service truyền `MeshWallet` này vào `MeshTxBuilder`, là lớp con của `MeshAdapter`.
+
+#### Code chọn ví và bắt đầu kết nối
+
+Trong component `Wallet`, người dùng chọn một ví từ danh sách. Nếu ví đã được cài đặt và được enable, nút xác nhận gọi `signIn` của wallet store với thông tin ví đã chọn:
+
+```tsx
+<AlertDialogAction
+  onClick={
+    isDownload
+      ? isEnable
+        ? async () => {
+            await signIn(session, {
+              icon: wallet.image,
+              id: wallet.id,
+              name: wallet.name,
+              version: wallet.version || "",
+            });
+          }
+        : handleEnable
+      : handleDownload
+  }
+>
+  {isDownload ? (isEnable ? "Continue" : "Enable") : "Download"}
+</AlertDialogAction>
+```
+
+`isDownload` trong component được dùng để kiểm tra ví đã có trong môi trường trình duyệt hay chưa. Nếu chưa có thì lựa chọn mở trang tải ví; nếu đã có nhưng chưa được cấp quyền thì gọi `handleEnable`; khi ví đã enable, lựa chọn **Continue** mới gọi `signIn(session, wallet)`. Như vậy, thao tác chọn ví và thao tác cấp quyền cho dApp là hai bước riêng.
+
+#### Code enable wallet và đọc địa chỉ
+
+Trong hook `useWallet`, `signIn` dùng Mesh SDK để yêu cầu kết nối qua CIP-30, kiểm tra network rồi lấy thông tin địa chỉ:
+
+```typescript
+const { name } = wallet;
+const browserWallet = await BrowserWallet.enable(name.toLowerCase());
+if (!browserWallet) {
+  throw new Error("Failed to connect wallet");
+}
+
+const network = await browserWallet.getNetworkId();
+if (network !== APP_NETWORK_ID) {
+  throw new Error(`Invalid network, please switch to ${APP_NETWORK}`);
+}
+
+const address = await browserWallet.getChangeAddress();
+if (address.length === 0) {
+  throw new Error("Cant get address");
+}
+
+const stakeList = await browserWallet.getRewardAddresses();
+if (stakeList.length === 0) {
+  throw new Error("Cant get stake address");
+}
+const stakeAddress = stakeList[0];
+```
+
+Giải thích theo thứ tự chạy:
+
+1. `BrowserWallet.enable(...)` yêu cầu ví có tên tương ứng cấp quyền kết nối cho website và trả về đối tượng `BrowserWallet`. Tham số được chuyển về chữ thường để khớp cách Mesh tìm ví trong trình duyệt.
+2. `getNetworkId()` trả về network ID của ví. Nếu không trùng `APP_NETWORK_ID`, hàm dừng thay vì tiếp tục dựng giao dịch trên nhầm network.
+3. `getChangeAddress()` lấy địa chỉ payment/change mà ứng dụng dùng làm địa chỉ hiện tại của người dùng. Mã kiểm tra địa chỉ không rỗng.
+4. `getRewardAddresses()` lấy danh sách reward/stake address; ứng dụng yêu cầu danh sách có ít nhất một địa chỉ và dùng phần tử đầu tiên.
+
+Sau đó, hook lưu `browserWallet`, metadata của wallet, change address và stake address vào Zustand store bằng `set(...)`. Các thao tác đọc UTxO, ký transaction và submit transaction khác trong ứng dụng lấy đối tượng kết nối từ store này; ví dụ `signTx` và `submitTx` báo lỗi nếu chưa có wallet được kết nối.
+
+Ở nhánh đã có session và địa chỉ session khớp địa chỉ vừa đọc từ ví, phần cập nhật store có dạng:
+
+```typescript
+set({
+  browserWallet,
+  wallet,
+  address,
+  stakeAddress,
+});
+```
+
+Lưu ý, trong code hiện tại, nhánh đăng nhập mới có gọi `signData(data)` để lấy chữ ký nonce, nhưng payload truyền vào NextAuth `signIn("credentials", ...)` chỉ chứa tên ví và địa chỉ; biến `signature` không được đưa vào payload đó. Vì vậy, đoạn này minh họa việc yêu cầu ví ký dữ liệu, không tự nó chứng minh rằng server đã xác minh chữ ký.
+
+#### Luồng đăng nhập của ứng dụng
+
+Nếu người dùng chưa có NextAuth session, hook còn gọi `getNonceAddress(address)` để lấy nonce gắn với địa chỉ và yêu cầu ví `signData(data)`. Sau đó frontend gọi NextAuth `signIn("credentials", ...)` để tạo session, đồng thời lưu trạng thái wallet vào store. Nếu session đã tồn tại, hook so địa chỉ session với địa chỉ ví vừa kết nối; địa chỉ không khớp thì từ chối, còn khớp thì cập nhật wallet store.
+
+Vì thế cần phân biệt hai khái niệm: **kết nối CIP-30** cho phép frontend gọi các API của ví; **NextAuth session** là trạng thái đăng nhập của ứng dụng. Cả hai đều không chuyển private key ra khỏi ví. Sau khi kết nối xong, transaction vẫn cần được người dùng ký riêng trước khi submit.
+
+Có thể hình dung ranh giới trách nhiệm như sau:
+
+- **Browser wallet** giữ khóa và xin người dùng xác nhận các quyền hoặc chữ ký.
+- **Wallet store** giữ trạng thái kết nối cùng các thao tác như lấy UTxO, ký và submit transaction thông qua wallet API.
+- **`MeshWallet`** cung cấp cho Mesh thông tin mạng, provider và địa chỉ để query/dựng giao dịch; trong luồng service hiện tại, nó được khởi tạo từ địa chỉ ví.
+- **`MeshAdapter`** nhận `MeshWallet` cùng cấu hình treasury để chuẩn bị hạ tầng cho transaction builder.
+
+Kết nối ví không có nghĩa là transaction đã được ký hay đã gửi lên chain. Ở bước này, ứng dụng mới có thông tin và quyền truy cập cần thiết để bắt đầu thao tác. Việc người dùng ký và submit transaction là một bước riêng, được giải thích ở mục 5.
+
+### 3.2. Lớp `MeshAdapter` là "trục" của off-chain
 
 Lớp `MeshAdapter` hoặc `MeshTxBuilder` thường là nơi chứa các cấu hình và helper cần thiết để:
 
-- khởi tạo `provider` và `wallet`
+- nhận `MeshWallet` đã được service cấu hình cùng provider
 - gắn script CBOR, địa chỉ script và policy ID
 - chuyển đổi `datum` giữa dạng JavaScript/TypeScript và `PlutusData`
 - wrap/unwrap `Redeemer`
 - query UTxO cho ví và script
 - chọn `collateral` và `change address`
 
-Một builder điển hình có các tham số như:
+Một `MeshTxBuilder` điển hình được tạo với `MeshWallet`, cùng các tham số như:
 
 - `walletAddress`: địa chỉ ví đang tương tác
 - `utxos`: danh sách UTxO của ví để trả phí do network yêu cầu
@@ -93,11 +197,81 @@ Một builder điển hình có các tham số như:
 - `policyId` và `tokenName`: dùng để tìm treasury UTxO qua identity token
 - `scriptCbor`: script raw đã build từ Aiken
 
-Vai trò của adapter là gom các thao tác hạ tầng thường lặp lại vào một chỗ, để mỗi builder tập trung vào action cần thực hiện. Ví dụ, `propose` không nên tự định nghĩa một cách tìm UTxO treasury khác với `vote`, vì sự khác biệt đó có thể khiến hai luồng chọn hai state khác nhau. Adapter cung cấp cách dùng provider, script và tiện ích chuyển đổi dữ liệu nhất quán; từng builder vẫn chịu trách nhiệm tạo đúng redeemer, output và datum cho action của nó.
+#### Code khởi tạo `MeshAdapter`
+
+Service truyền `MeshWallet`, one-shot `utxoRef` (khi khởi tạo treasury) và tên treasury vào builder. Constructor của adapter chuẩn bị spending validator và, nếu có `utxoRef`, minting policy:
+
+```typescript
+this.meshWallet = meshWallet;
+this.name = name;
+this.fetcher = blockfrostProvider;
+this.utxoRef = utxoRef;
+
+this.spendCompileCode = this.readValidator(
+  plutus as Plutus,
+  title.multisigTreasury,
+);
+this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, []);
+this.spendScript = {
+  code: this.spendScriptCbor,
+  version: "V3",
+};
+this.spendAddress = serializeAddressObj(
+  scriptAddress(
+    deserializeAddress(
+      serializePlutusScript(
+        this.spendScript,
+        undefined,
+        APP_NETWORK_ID,
+        false,
+      ).address,
+    ).scriptHash,
+    "",
+    false,
+  ),
+  APP_NETWORK_ID,
+);
+
+if (utxoRef) {
+  this.mintCompileCode = this.readValidator(
+    plutus as Plutus,
+    title.identityFactory,
+  );
+  this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
+    mOutputReference(utxoRef.txHash, utxoRef.outputIndex),
+    deserializeAddress(this.spendAddress).scriptHash,
+    this.name,
+  ]);
+  this.policyId = resolveScriptHash(this.mintScriptCbor, "V3");
+}
+```
+
+Đoạn tạo `spendAddress` dùng `serializePlutusScript` để lấy địa chỉ script, đọc `scriptHash` từ địa chỉ đó rồi tạo lại địa chỉ theo `APP_NETWORK_ID`. Địa chỉ này là nơi treasury UTxO được khóa; nó không phải địa chỉ ví người dùng.
+
+#### Giải thích luồng trong code
+
+1. **Nhận cấu hình và wallet**: `meshWallet` được tạo ở service sau khi đã có địa chỉ người dùng; `fetcher` trỏ tới `blockfrostProvider` để adapter query dữ liệu chain. `name` là tên treasury/token, còn `utxoRef` dùng để khóa lần mint identity token ban đầu.
+2. **Nạp spending validator đã biên dịch**: `readValidator(...)` tìm validator theo title trong `plutus.json` và lấy `compiledCode`. Adapter không biên dịch file Aiken tại runtime.
+3. **Chuẩn bị spending script**: `applyParamsToScript(..., [])` tạo CBOR script V3. Hash của script được dùng để tạo `spendAddress`, nơi treasury UTxO được khóa.
+4. **Parameterize identity factory khi có `utxoRef`**: policy nhận ba tham số theo đúng thứ tự contract yêu cầu: output reference one-shot, script hash của treasury address và token name. `resolveScriptHash(...)` từ minting script CBOR tạo `policyId`; token unit sau đó là `policyId + stringToHex(name)`.
+5. **Khởi tạo Mesh transaction builder**: method `initalize()` tạo `MeshTxBuilder` với `fetcher` và evaluator để những hàm `init`, `deposit`, `propose`, `vote`, `execute` có thể dựng transaction và đánh giá script.
+
+```typescript
+public initalize = async (): Promise<void> => {
+  this.meshTxBuilder = new MeshTxBuilder({
+    fetcher: this.fetcher,
+    evaluator: blockfrostProvider,
+  });
+};
+```
+
+`utxoRef` là tùy chọn vì các transaction thường ngày chỉ cần spending validator và identity token đã có. `init()` cần nó để xác định policy khởi tạo; đóng treasury cần identity minting policy để burn token. Vì vậy service của một thao tác cần mint/burn phải khởi tạo adapter với đúng reference ban đầu.
+
+Vai trò của adapter là gom các thao tác hạ tầng thường lặp lại vào một chỗ, để mỗi builder tập trung vào action cần thực hiện. Ví dụ, `propose` không nên tự định nghĩa một cách tìm UTxO treasury khác với `vote`, vì sự khác biệt đó có thể khiến hai luồng chọn hai state khác nhau. Service cấu hình `MeshWallet` và truyền instance đó vào adapter; adapter dùng wallet cùng provider, script và các tiện ích chuyển đổi dữ liệu một cách nhất quán. Từng builder vẫn chịu trách nhiệm tạo đúng redeemer, output và datum cho action của nó.
 
 Trong thực tế, `MeshAdapter` thực hiện vai trò giống như một “engine” cho toàn bộ off-chain layer. Từ góc nhìn kiến trúc, nó không phải phần “dễ thấy nhất” trên UI, nhưng lại là nơi tụ tập mọi thứ cần cho giao dịch chạm được vào smart contract: script compilation, parameterization, script hash, address serialization, wallet UTxO query, và logic chuyển đổi kiểu dữ liệu. Nếu không có lớp này, mỗi transaction builder phải tự viết lại những thao tác như `deserializeAddress`, `serializeAddressObj`, `applyParamsToScript`, `resolveScriptHash`, `datumToPlutusData`, và `getCollateral`. Điều này không chỉ lặp lại mà còn dễ sinh sai lệch các thứ tự dữ liệu và cấu trúc trên chain. Tích hợp đúng nơi đúng lúc là chìa khóa để off-chain không chỉ “run được” mà còn “đúng với hợp đồng”.
 
-### 3.2. Query UTxO là bước cực kỳ quan trọng
+### 3.3. Query UTxO là bước cực kỳ quan trọng
 
 Trước khi dựng transaction, builder phải biết rõ:
 
@@ -118,7 +292,7 @@ Không phải lúc nào mã client cũng có thể thành công ngay lập tức
 
 Việc query cần kiểm tra đồng thời địa chỉ script, policy ID, token name và dữ liệu output, thay vì chỉ lấy output đầu tiên trả về từ provider. Sau khi tìm thấy candidate UTxO, builder nên xác nhận inline datum có thể decode và các trường cần thiết có giá trị hợp lệ trước khi dùng nó. Nếu không tìm được duy nhất state phù hợp hoặc dữ liệu thiếu, cần dừng và báo lỗi rõ ràng; tiếp tục dựng transaction từ một output đoán được có thể khiến người dùng ký một giao dịch chắc chắn bị từ chối.
 
-### 3.3. Giao dịch Plutus cần những phần nào?
+### 3.4. Giao dịch Plutus cần những phần nào?
 
 Một transaction dùng validator trên Cardano thường cần các phần sau:
 
@@ -135,9 +309,9 @@ Một transaction dùng validator trên Cardano thường cần các phần sau:
 
 Những thành phần này có quan hệ với nhau chứ không phải danh sách các trường độc lập. Redeemer phải mô tả cùng action mà builder đang thực hiện; datum output phải là state tiếp theo mà validator dự kiến; các input phụ phải đủ để thanh toán phí và tạo change; collateral được ví dùng theo quy tắc giao dịch Plutus. Chỉ cần datum được encode theo sai thứ tự constructor hoặc amount được đổi nhầm giữa ADA và lovelace, transaction có thể không còn khớp với kiểu dữ liệu và điều kiện mà Aiken kiểm tra.
 
-### 3.4. Mã nguồn thực tế: `MeshTxBuilder`
+### 3.5. Mã nguồn thực tế: `MeshTxBuilder`
 
-Dưới đây là phần builder thực tế dùng MeshJS để dựng các transaction `init`, `deposit`, `propose`, `vote` và `execute`.
+Dưới đây là phần builder thực tế dùng MeshJS để dựng các transaction `init`, `deposit`, `propose`, `vote` và `execute`. Hàm `end` là helper phía off-chain, gọi lại luồng `execute` khi khoản chi bằng toàn bộ balance.
 
 ```typescript
 export class MeshTxBuilder extends MeshAdapter {
@@ -157,10 +331,10 @@ export class MeshTxBuilder extends MeshAdapter {
     initial: string;
   }): Promise<string> => {
     const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-    const utxo = utxos.find(
-      (u) =>
-        u.input.txHash === this.utxoRef.txHash &&
-        u.input.outputIndex === this.utxoRef.outputIndex,
+    const utxoRef = this.utxoRef;
+    const utxo = utxos.find((u) =>
+      u.input.txHash === utxoRef.txHash &&
+      u.input.outputIndex === utxoRef.outputIndex
     );
 
     unsignedTx
@@ -357,6 +531,55 @@ Khởi tạo state ban đầu của treasury và mint identity token. Đây là 
 - insert inline datum chứa state đầu tiên
 - đính kèm redeemer `Init`
 
+#### Mã nguồn cốt lõi
+
+Trích từ `MeshTxBuilder.init()`:
+
+```typescript
+if (!this.utxoRef) {
+  throw new Error("Creating a treasury requires the original one-shot UTxO reference.");
+}
+const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+const utxoRef = this.utxoRef;
+const utxo = utxos.find(
+  (u) =>
+    u.input.txHash === utxoRef.txHash &&
+    u.input.outputIndex === utxoRef.outputIndex,
+);
+if (!utxo) {
+  throw new Error("The utxoRef is no longer in the wallet — re-select an existing one-shot UTxO.");
+}
+
+unsignedTx
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .mintPlutusScriptV3()
+  .mint("1", this.policyId, stringToHex(this.name))
+  .mintingScript(this.mintScriptCbor)
+  .mintRedeemerValue(mConStr0([]))
+  .txOut(this.spendAddress, [
+    { unit: "lovelace", quantity: initial },
+    { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+  ])
+  .txOutInlineDatumValue(this.datumToPlutusData({
+    policyId: this.policyId,
+    owners,
+    threshold,
+    allowance,
+    signers,
+    noSigners,
+    proposal: null,
+  }));
+```
+
+#### Giải thích từng phần
+
+- `utxoRef` là UTxO one-shot đã dùng làm tham số cho minting policy. Builder tìm lại UTxO này trong ví và dừng nếu không còn; minting policy chỉ cho phép khởi tạo khi đúng reference này được tiêu.
+- `txIn(...)` thêm UTxO one-shot vào transaction. `mintPlutusScriptV3()` chọn Plutus V3; `.mint("1", ...)` yêu cầu mint đúng một identity token; `.mintingScript(...)` đính kèm policy đã parameterize.
+- `mConStr0([])` encode redeemer `Init`, constructor đầu tiên của kiểu `Mint`. Redeemer không có field nên danh sách fields rỗng.
+- `txOut(...)` tạo treasury output ở script address, chứa initial lovelace và đúng một identity token (`policyId` nối với token name dạng hex).
+- `txOutInlineDatumValue(...)` ghi datum ban đầu trực tiếp trong output. `proposal: null` cùng `signers` và `noSigners` rỗng là state chưa có proposal; các giá trị `owners`, `threshold`, `allowance` đến từ cấu hình người tạo.
+- Phần cuối của hàm thiết lập UTxO ví cho phí, change address, required signer, collateral và network trước khi `complete()` tạo unsigned transaction.
+
 #### Logic chính
 
 Builder sẽ:
@@ -368,7 +591,7 @@ Builder sẽ:
    - `lovelace` khởi tạo
    - identity token
    - `inline datum` chứa owners, threshold, allowance, các danh sách vote rỗng và proposal chưa mở
-5. Gắn signer của người khởi tạo.
+5. Đưa public key hash của wallet vào required signers để wallet ký transaction và cung cấp chữ ký cho các input thuộc quyền kiểm soát của mình.
 
 Chọn đúng one-shot UTxO là điều kiện quan trọng hơn việc chọn một input bất kỳ có đủ tiền. Identity minting policy được tạo với reference UTxO cụ thể, nên giao dịch `Init` phải tiêu đúng UTxO đó; nếu reference đã bị dùng hoặc không còn trong ví, người tạo cần chọn một UTxO hợp lệ khác và khởi tạo policy phù hợp. Sau khi khởi tạo, builder cũng cần bảo đảm datum ban đầu có `proposal = None` và hai danh sách vote rỗng để treasury bắt đầu trong state sạch.
 
@@ -380,7 +603,7 @@ Validation không chỉ dựa trên dữ liệu mà UI gửi. On-chain sẽ bắ
 - UTxO one-shot phải hợp lệ với script policy
 - output treasury phải nằm đúng script address
 - datum phải đúng cấu trúc và giá trị threshold/owners
-- signer có quyền khởi tạo hay không
+- transaction có tiêu đúng UTxO one-shot đã dùng để parameterize minting policy hay không
 
 Nếu UI cố tình gửi wrong datum, transaction vẫn bị lỗi ở validator. Đây là điểm quan trọng trong một dApp: off-chain build là hỗ trợ, không phải giám hộ.
 
@@ -390,12 +613,44 @@ Nếu UI cố tình gửi wrong datum, transaction vẫn bị lỗi ở validato
 
 Thêm ADA vào treasury mà không thay đổi chủ sở hữu, threshold hoặc proposal đang đang có.
 
+#### Mã nguồn cốt lõi
+
+```typescript
+const utxo = await this.getTreasuryUTXO();
+const datum = this.convertDatum({
+  plutusData: utxo.output.plutusData as string,
+});
+const lovelace = utxo.output.amount.find((a) => a.unit === "lovelace");
+const currentLovelace = BigInt(lovelace?.quantity ?? "0");
+const nextLovelace = (currentLovelace + BigInt(quantity)).toString();
+
+unsignedTx
+  .spendingPlutusScriptV3()
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(this.redeemer.Deposit())
+  .txInScript(this.spendScriptCbor)
+  .txOut(this.spendAddress, [
+    { unit: "lovelace", quantity: nextLovelace },
+    { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+  ])
+  .txOutInlineDatumValue(this.datumToPlutusData(datum));
+```
+
+#### Giải thích từng phần
+
+- `getTreasuryUTXO()` tìm state hiện hành; `convertDatum(...)` giải mã inline datum để builder có thể encode lại.
+- Số dư được lấy từ `Value` của UTxO, không phải datum. `BigInt` cộng số nguyên lovelace để tránh sai số số thực.
+- Các lệnh `spendingPlutusScriptV3`, `txIn`, `txInInlineDatumPresent` và `txInScript` khai báo spending input, inline datum cùng validator sẽ kiểm tra.
+- `this.redeemer.Deposit()` encode nhánh `Deposit`. Output mới có balance tăng, giữ identity token và giữ nguyên datum.
+- Phần cấu hình phía sau hàm chọn UTxO ví để trả tiền nạp/phí, đặt change address, collateral và network. Validator xác nhận balance tăng, token còn nguyên và datum không đổi; contract hiện tại không yêu cầu người nạp phải là owner.
+
 #### Cách hoạt động
 
 - Query treasury UTxO hiện tại.
 - Đọc số lovelace hiện có từ `Value` của treasury UTxO; số dư không nằm trong datum.
 - Tạo output mới với `balance + amount`.
-- Giữ nguyên identity token và đầu vào `Datum` (hoặc cập nhật nếu data model yêu cầu).
+- Giữ nguyên identity token và datum hiện tại.
 - Gắn redeemer `Deposit`.
 
 #### Điều cần lưu ý
@@ -457,7 +712,7 @@ Nếu không có một trong những điều đó, chain sẽ từ chối.
 
 Một ví dụ cụ thể: nếu quỹ đang có 30 ADA, allowance là 10 ADA và owner đề xuất chuyển 6 ADA, builder có thể kiểm tra sớm rằng 6 nhỏ hơn cả allowance lẫn số dư. Transaction tạo proposal chưa chuyển 6 ADA cho người nhận; nó chỉ tiêu treasury UTxO cũ và tạo UTxO mới có cùng giá trị, identity token được giữ nguyên, còn datum được cập nhật để ghi proposal và phiếu YES của proposer. Khoản thanh toán chỉ xảy ra ở bước `Execute` sau khi đủ ngưỡng.
 
-Đây là phần cốt lõi trong builder: cập nhật datum, gắn redeemer, rồi tạo continuing output giữ nguyên value của treasury:
+#### Mã nguồn cốt lõi
 
 ```typescript
 const newDatum = {
@@ -479,6 +734,8 @@ unsignedTx
   .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
 ```
 
+#### Giải thích đoạn code
+
 `txInInlineDatumPresent()` nói với builder rằng datum nằm trực tiếp trong input treasury; `txInRedeemerValue(...)` chọn nhánh `Propose` và truyền các tham số mà validator sẽ kiểm tra. Output dùng lại `utxo.output.amount`, nên proposal chưa chuyển tiền. Builder này có kiểm tra allowance và balance trước đoạn trích, nhưng việc proposal đang rỗng và proposer là owner vẫn phải được validator xác nhận; kiểm tra off-chain không thể thay thế các điều kiện đó.
 
 ### 4.4. `vote`: bỏ phiếu YES hoặc NO
@@ -486,6 +743,51 @@ unsignedTx
 #### Mục tiêu
 
 Các owner khác góp ý kiến về proposal đang mở.
+
+#### Mã nguồn cốt lõi
+
+```typescript
+const datum = this.convertDatum({
+  plutusData: utxo.output.plutusData as string,
+});
+const voterPubKeyHash = deserializeAddress(walletAddress).pubKeyHash;
+if (!datum.proposal) throw new Error("Không có proposal đang mở để vote.");
+if (!datum.owners.includes(voterPubKeyHash)) {
+  throw new Error("Chỉ owner mới có thể vote.");
+}
+if (
+  datum.signers.includes(voterPubKeyHash) ||
+  datum.noSigners.includes(voterPubKeyHash)
+) {
+  throw new Error("Owner này đã vote rồi.");
+}
+
+const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
+const isDoomed =
+  datum.owners.length - updatedNoSigners.length < datum.threshold;
+const newDatum = approve
+  ? { ...datum, signers: [voterPubKeyHash, ...datum.signers] }
+  : isDoomed
+    ? { ...datum, proposal: null, signers: [], noSigners: [] }
+    : { ...datum, noSigners: updatedNoSigners };
+
+unsignedTx
+  .spendingPlutusScriptV3()
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(this.redeemer.Vote(voterPubKeyHash, approve))
+  .txInScript(this.spendScriptCbor)
+  .txOut(this.spendAddress, utxo.output.amount)
+  .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+```
+
+#### Giải thích từng phần
+
+- Voter được suy ra từ payment key hash của wallet hiện tại. Builder dừng nếu không có proposal, voter không thuộc owners, hoặc voter đã nằm trong một trong hai danh sách vote.
+- YES thêm voter vào `signers`; NO thêm voter vào `updatedNoSigners`, danh sách đã tính cả lá phiếu hiện tại.
+- `isDoomed` tính số owner tối đa còn có thể bỏ phiếu YES. Nếu số này thấp hơn `threshold`, proposal không thể được thông qua nên datum mới xóa proposal và reset hai danh sách vote.
+- `this.redeemer.Vote(voterPubKeyHash, approve)` gửi danh tính và lựa chọn vote cho validator. Phần cấu hình cuối hàm đặt voter thành required signer, rồi bổ sung collateral và network.
+- Output giữ nguyên toàn bộ `utxo.output.amount`, vì vậy vote chỉ cập nhật datum chứ không chuyển tiền hay thay identity token. Validator vẫn xác minh chữ ký và state transition trên chain.
 
 #### Logic chính
 
@@ -515,26 +817,68 @@ Sau đó mới dựng transaction. Đó là cách tốt để tránh lỗi sớm
 
 Nếu một phiếu NO làm cho proposal không còn khả năng đạt threshold, on-chain validator yêu cầu datum output xóa proposal và reset cả hai danh sách vote. Đây là một trường hợp mà builder không thể chỉ phản chiếu phép cập nhật thông thường “thêm voter vào `no_signers`”; output phải khớp với state machine on-chain. Vì thế, sau khi tính phiếu mới, off-chain cần kiểm tra số owner còn có thể vote YES và chọn đúng state tiếp theo trước khi đưa transaction cho wallet ký.
 
-Builder cần tính state sau vote trước khi encode datum:
-
-```typescript
-const updatedNoSigners = [voterPubKeyHash, ...datum.noSigners];
-const isDoomed =
-  datum.owners.length - updatedNoSigners.length < datum.threshold;
-const newDatum = approve
-  ? { ...datum, signers: [voterPubKeyHash, ...datum.signers] }
-  : isDoomed
-    ? { ...datum, proposal: null, signers: [], noSigners: [] }
-    : { ...datum, noSigners: updatedNoSigners };
-```
-
 Với YES, builder thêm voter vào danh sách `signers`. Với NO, nó tính số phiếu NO sau khi tính phiếu hiện tại; nếu số owner còn có thể bỏ phiếu YES thấp hơn threshold thì datum phải trở về trạng thái không có proposal. Ngay cả khi builder dựng datum đúng, validator vẫn kiểm tra voter có phải owner, có chữ ký và chưa vote hay chưa.
 
 ### 4.5. `execute`: thực thi chi tiền
 
 #### Mục tiêu
 
-Khi số phiếu YES đạt ngưỡng yêu cầu, một owner có thể gửi transaction thực thi - chuyển tiền đến recipient và cập nhật treasury state.
+Khi số phiếu YES đạt ngưỡng yêu cầu, người gửi transaction có thể thực thi khoản chi đến recipient và cập nhật treasury state. Hàm `execute()` không nhận amount từ UI; nó lấy recipient và amount từ proposal đang lưu trong datum on-chain.
+
+#### Mã nguồn cốt lõi
+
+```typescript
+const datum = this.convertDatum({
+  plutusData: utxo.output.plutusData as string,
+});
+const proposal = datum.proposal;
+if (!proposal) throw new Error("Không có proposal để execute.");
+if (datum.signers.length < datum.threshold) {
+  throw new Error("Chưa đủ chữ ký YES.");
+}
+
+const ownLovelace = BigInt(
+  utxo.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? "0",
+);
+const amountValue = BigInt(proposal.amount);
+const isClosing = amountValue === ownLovelace;
+
+unsignedTx
+  .spendingPlutusScriptV3()
+  .txIn(utxo.input.txHash, utxo.input.outputIndex)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(this.redeemer.Execute())
+  .txInScript(this.spendScriptCbor)
+  .txOut(proposal.recipient, [
+    { unit: "lovelace", quantity: amountValue.toString() },
+  ]);
+
+if (isClosing) {
+  unsignedTx
+    .mintPlutusScriptV3()
+    .mint("-1", this.policyId, stringToHex(this.name))
+    .mintingScript(this.mintScriptCbor)
+    .mintRedeemerValue(mConStr1([]));
+} else {
+  const remaining = (ownLovelace - amountValue).toString();
+  const newDatum = { ...datum, signers: [], noSigners: [], proposal: null };
+  unsignedTx
+    .txOut(this.spendAddress, [
+      { unit: "lovelace", quantity: remaining },
+      { unit: this.policyId + stringToHex(this.name), quantity: "1" },
+    ])
+    .txOutInlineDatumValue(this.datumToPlutusData(newDatum));
+}
+```
+
+#### Giải thích từng phần
+
+- Builder yêu cầu proposal tồn tại và số YES trong datum đạt `threshold`. Đây là kiểm tra sớm; spending validator vẫn xác minh các điều kiện này trên chain.
+- `ownLovelace` là balance của treasury input; `amountValue` lấy trực tiếp từ proposal đã được biểu quyết, không phải số tiền tùy ý từ giao diện.
+- Transaction tiêu treasury UTxO, gắn redeemer `Execute`, rồi tạo payment output đúng recipient và amount trong proposal.
+- Nếu amount bằng toàn bộ balance, transaction không tạo continuing treasury output. Nó mint `-1` identity token; `mConStr1([])` encode redeemer `End` của minting policy.
+- Nếu còn dư, builder tạo treasury output tiếp theo với balance còn lại, giữ identity token và reset proposal cùng hai danh sách vote.
+- Trước khi `complete()`, hàm chọn input ví trả phí, đặt collateral và change address. Nếu wallet hiện tại cũng là recipient, nó tìm change address khác để change không bị nhập nhầm vào khoản payment.
 
 #### Các trường hợp cần handle
 
@@ -572,40 +916,56 @@ Transaction không được "đặt amount theo cảm tính" ở UI. Validity ph
 
 Nói cách khác, validator là người quyết định giao dịch đó có thực thi đúng luật hay không, không phải component frontend.
 
-Đặc biệt, số tiền builder yêu cầu execute phải khớp với `proposal.amount`, vì validator xác định khoản thanh toán từ proposal đang lưu trong datum. Nếu số tiền truyền vào builder khác số tiền đã được owner biểu quyết, transaction có thể được dựng nhưng vẫn không thỏa điều kiện payment của validator. Với trường hợp rút toàn bộ, amount còn phải bằng đúng lovelace đang có trong treasury; khi đó transaction không tạo continuing treasury output và minting policy xác thực việc burn identity token.
+Frontend builder lấy recipient và amount trực tiếp từ proposal on-chain; không có tham số amount riêng để UI thay đổi sau khi đã được biểu quyết. Khi chi toàn bộ balance, transaction không tạo continuing treasury output và minting policy xác thực việc burn identity token. Nếu còn dư, builder tạo output treasury mới, giữ token và reset proposal/vote.
 
-Frontend builder lấy amount trực tiếp từ proposal on-chain. Builder trong package `offchain/` nhận amount làm tham số, nên cần từ chối nếu amount được truyền vào khác proposal:
+### 4.6. `end`: kết thúc treasury sau khi chi hết
 
-```typescript
-const amountValue = BigInt(amount);
-if (amountValue !== BigInt(proposal.amount)) {
-  throw new Error("Số tiền execute phải khớp với proposal.");
-}
-```
-
-Đối với trường hợp rút hết, builder tạo payment output rồi yêu cầu mint `-1` identity token:
+#### Mã nguồn cốt lõi
 
 ```typescript
-unsignedTx
-  .spendingPlutusScriptV3()
-  .txIn(utxo.input.txHash, utxo.input.outputIndex)
-  .txInInlineDatumPresent()
-  .txInRedeemerValue(this.redeemer.Execute())
-  .txInScript(this.spendScriptCbor)
-  .txOut(proposal.recipient, [
-    { unit: "lovelace", quantity: amountValue.toString() },
-  ]);
+end = async (): Promise<string> => {
+  const utxo = await this.getTreasuryUTXO();
+  if (!utxo) {
+    throw new Error("Cannot find proposal from Treasury");
+  }
 
-if (amountValue === ownLovelace) {
-  unsignedTx
-    .mintPlutusScriptV3()
-    .mint("-1", this.policyId, stringToHex(this.name))
-    .mintingScript(this.mintScriptCbor)
-    .mintRedeemerValue(mConStr1([]));
-}
+  const datum = this.convertDatum({
+    plutusData: utxo.output.plutusData as string,
+  });
+  if (!datum.proposal) {
+    throw new Error("Cannot end Treasury without an active proposal for the full balance.");
+  }
+
+  const treasuryBalance = BigInt(
+    utxo.output.amount.find((asset) => asset.unit === "lovelace")?.quantity ?? "0",
+  );
+  if (BigInt(datum.proposal.amount) !== treasuryBalance) {
+    throw new Error("Cannot end Treasury: proposal amount must equal the full treasury balance.");
+  }
+
+  return this.execute();
+};
 ```
 
-Payment lấy địa chỉ nhận từ proposal đã lưu trong datum, còn số tiền phải được đối chiếu với chính `proposal.amount`. Khi chi toàn bộ balance, builder không tạo continuing treasury output; nhánh `End` của minting policy được gọi cùng thao tác burn. Nếu còn dư, builder đi nhánh khác: tạo output treasury mới với balance còn lại và reset proposal/vote.
+#### Giải thích từng phần
+
+- `end()` tìm treasury UTxO hiện hành, giải mã datum và yêu cầu phải có proposal đang mở.
+- Amount của proposal phải bằng toàn bộ balance. Nếu chi ít hơn thì quỹ còn tiền nên hàm báo lỗi, không tạo transaction đóng treasury.
+- Khi điều kiện thỏa, hàm gọi lại `execute()` để dùng luồng thực thi chung: kiểm tra threshold, chuyển ADA cho recipient, không tạo continuing output và burn identity token.
+- `end()` là helper off-chain, không phải redeemer spending mới. Spending validator vẫn nhận `Execute`; minting policy nhận `End` để xác thực việc burn.
+
+### 4.7. Hàm builder và redeemer tương ứng
+
+| Hàm builder | Script được gọi | Redeemer | Thay đổi chính |
+|---|---|---|---|
+| `init()` | Minting policy | `Init` (`mConStr0`) | Mint `+1` identity token và tạo treasury state đầu tiên |
+| `deposit()` | Spending validator | `Deposit` | Tăng balance, giữ nguyên datum và identity token |
+| `propose()` | Spending validator | `Propose` | Mở proposal và ghi proposer thành YES đầu tiên |
+| `vote()` | Spending validator | `Vote` | Cập nhật phiếu YES/NO hoặc hủy proposal không thể đạt threshold |
+| `execute()` | Spending validator | `Execute` | Trả payment; reset state còn dư hoặc đóng quỹ nếu chi hết |
+| `end()` | Gọi lại `execute()` | Không có redeemer riêng; minting policy dùng `End` (`mConStr1`) | Chỉ kết thúc khi proposal bằng toàn bộ balance |
+
+Với `Action` của spending validator, builder encode lần lượt `Deposit`, `Propose`, `Vote`, `Execute` thành constructor `mConStr0`, `mConStr1`, `mConStr2`, `mConStr3`. Đây là thứ tự khai báo của các variant trong kiểu Aiken; riêng `Mint` của identity factory có thứ tự `Init = mConStr0`, `End = mConStr1`.
 
 ---
 
@@ -893,9 +1253,5 @@ Một developer off-chain muốn làm tốt cần có tư duy gồm:
 - biết wallet là nơi chứng thực chữ ký, không phải nơi “đẩy state”
 
 Đây là lý do phần off-chain khó hơn nhiều người nghĩ: không chỉ là “call API rồi gửi tx”. Đó là cả một chuỗi định nghĩa quyền, trạng thái và thời gian.
-
----
-
-> Lưu ý: Đây là bài giảng về tư duy lập trình trên Cardano, không chỉ là cách "viết code chạy được". Trên blockchain, điều quan trọng nhất là làm sao hệ thống vẫn đúng khi mọi người cùng tương tác, thậm chí có dữ liệu stale hoặc có hành vi sai từ phía client.
 
 ---

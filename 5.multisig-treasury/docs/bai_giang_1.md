@@ -705,5 +705,3 @@ Nếu proposal lần sau request 40 ADA và treasury chỉ còn 40 ADA, transact
 Vì nó cho thấy rằng một treasury không phải “cái túi tiền có thể rút tùy ý”. Mỗi giao dịch phải là một state transition hợp lệ. Nếu một người cố thay đổi `datum` mà không giữ output đúng, hoặc đưa recipient sai, hoặc tạo thêm output treasury, hoặc không burn identity token khi close treasury, validator sẽ reject. Đây chính là tâm lý cốt lõi của Cardano: “không có trạng thái chung, chỉ có state transition xác thực trên chain.”
 
 ---
-
-> Lưu ý: Đây là bài giảng nền tảng. Nếu hiểu rõ mô hình M-of-N, state transition và EUTxO, bạn sẽ dễ dàng hiểu sâu hơn các bài tiếp theo về validator Aiken và off-chain MeshJS.
