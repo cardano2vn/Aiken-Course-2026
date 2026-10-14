@@ -1,5 +1,6 @@
 use aiken/cbor
 use aiken/crypto.{blake2b_256}
+use aiken/fuzz
 use cardano/address.{Address}
 use cardano/assets.{AssetName, PolicyId, add, from_asset, from_lovelace}
 use cardano/transaction.{InlineDatum, Input, Transaction}
@@ -11,6 +12,23 @@ use mocktail.{
 }
 use p2plending
 use types.{Cancel, Create, Datum, Fund, Liquidate, Repay}
+
+// Hàm tính lãi suất giả định trích từ contract của bạn
+fn calculate_interest(principal: Int, interest_rate: Int) -> Int {
+  principal * interest_rate / 10000
+}
+
+test prop_interest_always_non_negative(
+  (principal, rate) via fuzz.both(
+   
+    fuzz.int_between(1, 1_000_000_000),
+    // Sinh lãi suất basis points ngẫu nhiên từ 0 đến 10000 (0% đến 100%)
+    fuzz.int_between(0, 10000),
+  ),
+) {
+  let interest = calculate_interest(principal, rate)
+  interest >= 0
+}
 
 fn loan_datum(
   borrower: Address,
@@ -24,15 +42,15 @@ fn loan_datum(
   due_date: Option<Int>,
 ) -> Datum {
   Datum {
-    borrower: borrower,
-    lender: lender,
-    principal: principal,
-    interest_rate: interest_rate,
-    collateral_policy_id: collateral_policy_id,
-    collateral_asset_name: collateral_asset_name,
-    collateral_amount: collateral_amount,
-    loan_duration: loan_duration,
-    due_date: due_date,
+    borrower,
+    lender,
+    principal,
+    interest_rate,
+    collateral_policy_id,
+    collateral_asset_name,
+    collateral_amount,
+    loan_duration,
+    due_date,
   }
 }
 
@@ -72,7 +90,11 @@ test create_success_mints_seeded_identity_and_locks_collateral() {
           True,
           Input {
             output_reference: seed,
-            output: mock_script_output(borrower, from_lovelace(1), InlineDatum(None)),
+            output: mock_script_output(
+              borrower,
+              from_lovelace(1),
+              InlineDatum(None),
+            ),
           },
         )
 
@@ -89,7 +111,7 @@ test fund_success_updates_lender_and_due_date() {
   let principal = 1_000_000_000
   let loan_duration = 1000
   let current_time = 500
-  let expected_due = (current_time + 10) + loan_duration
+  let expected_due = current_time + 10 + loan_duration
   let script_address = mock_script_address(0, None)
   let output_reference = mock_utxo_ref(0, 0)
 
@@ -249,7 +271,11 @@ test repay_success_pays_interest_and_returns_collateral() {
     mocktail_tx()
       |> mint(True, -1, policy_id, identity_name)
       |> tx_out(True, lender, from_lovelace(total_repayment))
-      |> tx_out(True, borrower, from_asset(collateral_policy_id, collateral_asset_name, 1))
+      |> tx_out(
+          True,
+          borrower,
+          from_asset(collateral_policy_id, collateral_asset_name, 1),
+        )
       |> required_signer_hash(True, borrower_pkh)
       |> invalid_before(True, current_time)
       |> invalid_hereafter(True, current_time + 100)
@@ -301,7 +327,11 @@ test cancel_success_refunds_collateral_to_borrower() {
   let tx: Transaction =
     mocktail_tx()
       |> mint(True, -1, policy_id, identity_name)
-      |> tx_out(True, borrower, from_asset(collateral_policy_id, collateral_asset_name, 1))
+      |> tx_out(
+          True,
+          borrower,
+          from_asset(collateral_policy_id, collateral_asset_name, 1),
+        )
       |> required_signer_hash(True, borrower_pkh)
       |> invalid_before(True, current_time)
       |> invalid_hereafter(True, current_time + 100)
@@ -354,7 +384,11 @@ test liquidate_success_after_due_date() {
   let tx: Transaction =
     mocktail_tx()
       |> mint(True, -1, policy_id, identity_name)
-      |> tx_out(True, lender, from_asset(collateral_policy_id, collateral_asset_name, 1))
+      |> tx_out(
+          True,
+          lender,
+          from_asset(collateral_policy_id, collateral_asset_name, 1),
+        )
       |> required_signer_hash(True, lender_pkh)
       |> invalid_before(True, current_time)
       |> invalid_hereafter(True, current_time + 10)
