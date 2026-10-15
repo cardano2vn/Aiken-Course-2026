@@ -1,5 +1,6 @@
 use aiken/crypto.{VerificationKeyHash}
 use cardano/address.{Address}
+use cardano/transaction.{OutputReference}
 
 /// contributions: mỗi donor đúng 1 entry (key = PubKeyHash, không trùng key).
 /// Donate lần sau của cùng donor -> CẬP NHẬT entry cũ (cộng dồn).
@@ -16,8 +17,7 @@ pub type Redeemer {
   Withdraw
 }
 
-/// Redeemer cho mint handler
 pub type MintAction {
-  Create
+  Create(OutputReference)
   Close
 }
