@@ -14,12 +14,15 @@ use validation/find.{output_by_addr_value}
 
 pub const author: ByteArray = "author"
 
-fn find_output(
+// Fees are matched by payment credential, as rewards may be sent to an address
+// with any stake credential. `any` also stops as soon as one qualifying output
+// is found instead of constructing an intermediate list.
+fn has_output(
   outputs: List<Output>,
   price: Int,
   output_address: address.Address,
-) -> Option<Output> {
-  list.find(
+) -> Bool {
+  list.any(
     outputs,
     fn(output) {
       lovelace_of(output.value) >= price && output.address.payment_credential == output_address.payment_credential
@@ -32,6 +35,9 @@ fn check_output_utxo(
   issuer: VerificationKeyHash,
   vks: List<VerificationKeyHash>,
 ) -> Bool {
+  // A valid stored reference token must carry CIP-68 metadata whose author is
+  // the configured issuer, signed by that author, and contain one non-Ada
+  // asset only.
   expect InlineDatum(data) = output.datum
   expect metadatum: CIP68 = data
   expect output_author: VerificationKeyHash = cip68.get(metadatum, author)
@@ -49,20 +55,20 @@ fn check_output_remove(
   platform_fee: Int,
   user_address: address.Address,
 ) -> Bool {
-  let matching_outputs =
-    list.filter(
-      outputs,
-      fn(output) {
-        or {
-          and {
-            lovelace_of(output.value) >= platform_fee,
-            output.address.payment_credential == platform_address.payment_credential,
-          },
-          output.address.payment_credential == user_address.payment_credential,
-        }
-      },
-    )
-  list.length(matching_outputs) == 2
+  // Require exactly two outputs to match either the platform-fee condition or
+  // the author's address. Each output is counted once; no filtered list is built.
+  list.count(
+    outputs,
+    fn(output) {
+      or {
+        and {
+          lovelace_of(output.value) >= platform_fee,
+          output.address.payment_credential == platform_address.payment_credential,
+        },
+        output.address.payment_credential == user_address.payment_credential,
+      }
+    },
+  ) == 2
 }
 
 fn check_output_update(
@@ -70,12 +76,12 @@ fn check_output_update(
   outputs: List<Output>,
   output_address: address.Address,
 ) -> Bool {
+  // Require the number of inputs and outputs at the store address to match, so
+  // an update cannot reduce the count of continuing store outputs.
   let output_count =
-    list.filter(outputs, fn(output) { output.address == output_address })
-      |> list.length()
+    list.count(outputs, fn(output) { output.address == output_address })
   let input_count =
-    list.filter(inputs, fn(input) { input.output.address == output_address })
-      |> list.length()
+    list.count(inputs, fn(input) { input.output.address == output_address })
   output_count == input_count
 }
 
@@ -84,6 +90,8 @@ fn filter_and_pair(
   prefix100: ByteArray,
   prefix222: ByteArray,
 ) -> List<(PolicyId, AssetName, AssetName, Int)> {
+  // CIP-68 reference and user tokens sort by their full names in the same
+  // order. Zipping the two lists pairs matching names without nested searches.
   let filter100 =
     list.filter(
       flat,
@@ -96,18 +104,12 @@ fn filter_and_pair(
     )
   let sorted100 =
     list.sort(
-      list.map(
-        filter100,
-        fn((policy_id, asset_name, amount)) { (policy_id, asset_name, amount) },
-      ),
+      filter100,
       fn((_, name1, _), (_, name2, _)) { bytearray.compare(name1, name2) },
     )
   let sorted222 =
     list.sort(
-      list.map(
-        filter222,
-        fn((policy_id, asset_name, amount)) { (policy_id, asset_name, amount) },
-      ),
+      filter222,
       fn((_, name1, _), (_, name2, _)) { bytearray.compare(name1, name2) },
     )
   list.map(
@@ -123,26 +125,37 @@ fn check_assets_prefix(
   policy_id: PolicyId,
   prefix: ByteArray,
 ) -> Bool {
-  let pairs =
-    list.map(
-      list.filter(
-        flat,
-        fn((_, asset_name, _)) { bytearray.starts_with(asset_name, prefix) },
-      ),
-      fn((asset_name, _, amount)) { (asset_name, -amount) },
-    )
-  list.foldl(
-    pairs,
-    True,
-    fn((asset_name, amount), acc) {
-      if !acc {
-        False
-      } else {
+  // For every token with the requested prefix, require the corresponding
+  // CIP-68 user-token prefix and preserve the exact token quantity.
+  list.all(
+    flat,
+    fn((_, asset_name, quantity)) {
+      if bytearray.starts_with(asset_name, prefix) {
         and {
-          minting.by_prefix(flat, policy_id, cip68.prefix_222, -amount)?,
-          minting.exact(flat, policy_id, asset_name, -amount)?,
+          minting.by_prefix(flat, policy_id, cip68.prefix_222, quantity)?,
+          minting.exact(flat, policy_id, asset_name, quantity)?,
         }
+      } else {
+        True
       }
+    },
+  )
+}
+
+// A reference token may only be burned through the branch that found an
+// authorized reference-token input. In particular, the user-token-only branch
+// must not silently ignore a reference-token burn.
+fn check_no_reference_token_burn(
+  flat: List<(PolicyId, AssetName, Int)>,
+  policy_id: PolicyId,
+) -> Bool {
+  list.all(
+    flat,
+    fn((asset_policy, asset_name, _)) {
+      asset_policy != policy_id || !bytearray.starts_with(
+        asset_name,
+        cip68.prefix_100,
+      )
     },
   )
 }
@@ -151,6 +164,8 @@ fn find_input_reference_asset(
   inputs: List<Input>,
   vks: List<VerificationKeyHash>,
 ) -> List<(PolicyId, AssetName, Int)> {
+  // Only use reference tokens from inputs whose metadata author signed this
+  // transaction; unrelated, unsigned, or non-inline-datum inputs are ignored.
   list.filter_map(
     inputs,
     fn(input) {
@@ -187,6 +202,8 @@ fn check_pair_asset_name(
   reference_asset_name: AssetName,
   user_asset_name: AssetName,
 ) -> Bool {
+  // Both CIP-68 token names must have the same suffix after their four-byte
+  // standard prefixes.
   bytearray.compare(
     bytearray.drop(reference_asset_name, 4),
     bytearray.drop(user_asset_name, 4),
@@ -199,6 +216,8 @@ fn check_minting_reference(
   reference_asset_name: AssetName,
   has_reference: Bool,
 ) -> Bool {
+  // A reference token already in circulation need not be minted again.
+  // Otherwise this transaction must mint exactly one new reference token.
   if has_reference {
     True
   } else {
@@ -220,29 +239,26 @@ fn check_asset_mint(
   extra_signatories: List<VerificationKeyHash>,
   has_reference: Bool,
 ) -> Bool {
-  list.foldl(
+  // Validate each sorted CIP-68 pair against the store output, its author,
+  // and the mint quantities. `all` short-circuits at the first invalid pair.
+  list.all(
     filter_and_pair(flat, prefix100, prefix222),
-    True,
-    fn((_, reference_asset_name, user_asset_name, amount), acc) {
-      if !acc {
-        False
-      } else {
-        let reference_value =
-          assets.from_asset(policy_id, reference_asset_name, 1)
-        let output_utxo_store =
-          output_by_addr_value(outputs, store_address, reference_value)
-        and {
-          check_output_utxo(output_utxo_store, issuer, extra_signatories)?,
-          check_pair_asset_name(reference_asset_name, user_asset_name),
-          check_minting_reference(
-            flat,
-            policy_id,
-            reference_asset_name,
-            has_reference,
-          ),
-          minting.exact(flat, policy_id, user_asset_name, amount - 1)?,
-          minting.by_prefix(flat, policy_id, cip68.prefix_222, amount - 1)?,
-        }
+    fn((_, reference_asset_name, user_asset_name, amount)) {
+      let reference_value =
+        assets.from_asset(policy_id, reference_asset_name, 1)
+      let output_utxo_store =
+        output_by_addr_value(outputs, store_address, reference_value)
+      and {
+        check_output_utxo(output_utxo_store, issuer, extra_signatories)?,
+        check_pair_asset_name(reference_asset_name, user_asset_name),
+        check_minting_reference(
+          flat,
+          policy_id,
+          reference_asset_name,
+          has_reference,
+        ),
+        minting.exact(flat, policy_id, user_asset_name, amount)?,
+        minting.by_prefix(flat, policy_id, cip68.prefix_222, amount)?,
       }
     },
   )
@@ -254,20 +270,18 @@ fn check_asset_burn(
   prefix100: ByteArray,
   prefix222: ByteArray,
 ) -> Bool {
-  list.foldl(
+  // A burn must remove one reference token and one paired user token. The
+  // quantity in `flat` also contains the consumed reference input, so it is
+  // not the amount to expect for the user token.
+  list.all(
     filter_and_pair(flat, prefix100, prefix222),
-    True,
-    fn((_, reference_asset_name, user_asset_name, amount), acc) {
-      if !acc {
-        False
-      } else {
-        and {
-          check_pair_asset_name(reference_asset_name, user_asset_name),
-          minting.exact(flat, policy_id, reference_asset_name, -1)?,
-          minting.exact(flat, policy_id, user_asset_name, amount + 1)?,
-          minting.by_prefix(flat, policy_id, cip68.prefix_100, -1)?,
-          minting.by_prefix(flat, policy_id, cip68.prefix_222, amount + 1)?,
-        }
+    fn((_, reference_asset_name, user_asset_name, _)) {
+      and {
+        check_pair_asset_name(reference_asset_name, user_asset_name),
+        minting.exact(flat, policy_id, reference_asset_name, -1)?,
+        minting.exact(flat, policy_id, user_asset_name, -1)?,
+        minting.by_prefix(flat, policy_id, cip68.prefix_100, -1)?,
+        minting.by_prefix(flat, policy_id, cip68.prefix_222, -1)?,
       }
     },
   )
@@ -281,6 +295,8 @@ validator mint(
   store_stake_credential: VerificationKeyHash,
 ) {
   mint(redeemer: MintRedeemer, policy_id: PolicyId, transaction: Transaction) {
+    // Flatten once so all asset checks reuse the transaction's normalized mint
+    // value rather than repeatedly traversing its nested Value structure.
     let Transaction { inputs, outputs, extra_signatories, mint, .. } =
       transaction
     let mint_flatten =
@@ -292,13 +308,11 @@ validator mint(
         |> address.from_script()
         |> address.with_delegation_key(store_stake_credential)
     let platform_address = address.from_verification_key(platform)
-    let output_utxo_platform =
-      find_output(outputs, platform_fee, platform_address)
-    let check_output_platform = output_utxo_platform != None
-
-    when redeemer is {
-      Mint -> {
-        let asset_mint_check =
+    // Both minting and burning require the platform fee; branch-specific
+    // asset checks are evaluated separately from this shared requirement.
+    let assets_valid =
+      when redeemer is {
+        Mint ->
           check_asset_mint(
             mint_flatten,
             policy_id,
@@ -310,32 +324,27 @@ validator mint(
             extra_signatories,
             False,
           )
-        and {
-          asset_mint_check?,
-          check_output_platform?,
-        }
-      }
-      Burn -> {
-        let reference_asset =
-          find_input_reference_asset(inputs, extra_signatories)
-        if list.length(reference_asset) > 0 {
-          let mint_concat = list.concat(reference_asset, mint_flatten)
-          and {
-            check_asset_burn(
-              mint_concat,
-              policy_id,
-              cip68.prefix_100,
-              cip68.prefix_222,
-            )?,
-            check_output_platform?,
-          }
-        } else {
-          and {
-            check_assets_prefix(mint_flatten, policy_id, cip68.prefix_222)?,
-            check_output_platform?,
+        Burn -> {
+          let reference_asset =
+            find_input_reference_asset(inputs, extra_signatories)
+          when reference_asset is {
+            [_, ..] ->
+              check_asset_burn(
+                list.concat(reference_asset, mint_flatten),
+                policy_id,
+                cip68.prefix_100,
+                cip68.prefix_222,
+              )
+            [] -> and {
+                check_no_reference_token_burn(mint_flatten, policy_id)?,
+                check_assets_prefix(mint_flatten, policy_id, cip68.prefix_222)?,
+              }
           }
         }
       }
+    and {
+      assets_valid?,
+      has_output(outputs, platform_fee, platform_address),
     }
   }
 
@@ -356,45 +365,42 @@ validator store(
     transaction: Transaction,
   ) {
     expect Some(datum_input) = datum
+    // Find the consumed store UTxO first: its address and value determine the
+    // continuing output that an Update is required to preserve.
     let Transaction { inputs, outputs, extra_signatories, .. } = transaction
     let platform_address = address.from_verification_key(platform)
-    let output_utxo_platform =
-      find_output(outputs, platform_fee, platform_address)
     expect Some(input) = find_input(inputs, output_reference)
     let script_address = input.output.address
     let reference_token = input.output.value |> without_lovelace()
     let metadatum_input: CIP68 = datum_input
     expect author_input: ByteArray = cip68.get(metadatum_input, author)
-    let signed_by_author = tx.verify_signature(extra_signatories, author_input)
-
-    when signed_by_author is {
-      False -> False
-      True ->
-        when redeemer is {
-          Update -> {
-            let utxo_output =
-              output_by_addr_value(outputs, script_address, reference_token)
-            expect InlineDatum(datum_output) = utxo_output.datum
-            expect metadatum_output: CIP68 = datum_output
-            expect author_output: ByteArray =
-              cip68.get(metadatum_output, author)
-            and {
-              check_output_utxo(utxo_output, issuer, extra_signatories)?,
-              check_output_update(inputs, outputs, script_address),
-              output_utxo_platform != None,
-              author_input == author_output,
-            }
-          }
-          Remove -> {
-            let author_address = address.from_verification_key(author_input)
-            check_output_remove(
-              outputs,
-              platform_address,
-              platform_fee,
-              author_address,
-            )
+    if tx.verify_signature(extra_signatories, author_input) {
+      when redeemer is {
+        Update -> {
+          let utxo_output =
+            output_by_addr_value(outputs, script_address, reference_token)
+          expect InlineDatum(datum_output) = utxo_output.datum
+          expect metadatum_output: CIP68 = datum_output
+          expect author_output: ByteArray = cip68.get(metadatum_output, author)
+          and {
+            check_output_utxo(utxo_output, issuer, extra_signatories)?,
+            check_output_update(inputs, outputs, script_address),
+            has_output(outputs, platform_fee, platform_address),
+            author_input == author_output,
           }
         }
+        Remove -> {
+          let author_address = address.from_verification_key(author_input)
+          check_output_remove(
+            outputs,
+            platform_address,
+            platform_fee,
+            author_address,
+          )
+        }
+      }
+    } else {
+      False
     }
   }
 
