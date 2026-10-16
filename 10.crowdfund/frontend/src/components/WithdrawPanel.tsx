@@ -13,7 +13,7 @@ interface Props {
         beneficiary: string;
         goal: number;
         deadline: number;
-        contributions: { address: string; quantity: number }[];
+        contributions: { address: string; paymentKeyHash: string; quantity: number }[];
     };
     onSuccess: (txHash: string) => void;
 }
@@ -37,9 +37,7 @@ export default function WithdrawPanel({ wallet, address, campaignUtxo, datum, on
         try {
             const unsignedTx: string = await withdraw({
                 address: await wallet.getChangeAddress(),
-                goal: datum.goal,
-                deadline: datum.deadline,
-                beneficiary: datum.beneficiary,
+                campaignRef: campaignUtxo.input,
             });
             const signedTx = await wallet.signTx(unsignedTx);
             const txHash = await wallet.submitTx(signedTx);

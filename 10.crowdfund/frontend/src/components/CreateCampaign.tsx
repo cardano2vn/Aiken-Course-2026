@@ -14,7 +14,7 @@ export default function CreateCampaign({ wallet, onSuccess }: Props) {
     const [beneficiary, setBeneficiary] = useState("");
     const [goalAda, setGoalAda] = useState("");
     const [deadlineDate, setDeadlineDate] = useState("");
-    const [initialAda, setInitialAda] = useState("2");
+    const [campaignDepositAda, setCampaignDepositAda] = useState("2");
     const [loading, setLoading] = useState(false);
     const [txHash, setTxHash] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -27,18 +27,18 @@ export default function CreateCampaign({ wallet, onSuccess }: Props) {
         try {
             const goalLovelace = BigInt(Math.floor(parseFloat(goalAda) * 1_000_000));
             const deadlinePosixMs = new Date(deadlineDate).getTime();
-            const initialLovelace = BigInt(Math.floor(parseFloat(initialAda) * 1_000_000));
+            const campaignDepositLovelace = BigInt(Math.floor(parseFloat(campaignDepositAda) * 1_000_000));
 
             if (goalLovelace <= 0) throw new Error("Goal must be > 0 ADA");
             if (deadlinePosixMs <= Date.now()) throw new Error("Deadline must be in the future");
-            if (initialLovelace < 2 * DECIMAL_PLACE) throw new Error("Initial donation must be >= 2 ADA");
+            if (campaignDepositLovelace < 2 * DECIMAL_PLACE) throw new Error("Campaign deposit must be >= 2 ADA");
 
             const unsignedTx = await create({
                 address: await wallet.getChangeAddress(),
                 beneficiary,
                 goal: Number(goalAda) * DECIMAL_PLACE,
                 deadline: deadlinePosixMs,
-                initial: Number(initialAda) * DECIMAL_PLACE,
+                campaignDeposit: Number(campaignDepositAda) * DECIMAL_PLACE,
             });
             const signedTx = await wallet.signTx(unsignedTx);
             const txHash = await wallet.submitTx(signedTx);
@@ -63,6 +63,7 @@ export default function CreateCampaign({ wallet, onSuccess }: Props) {
                     required
                     className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-teal-500"
                 />
+                <p className="mt-1 text-xs text-gray-500">The connected wallet must be the beneficiary to authorize campaign creation.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -79,17 +80,18 @@ export default function CreateCampaign({ wallet, onSuccess }: Props) {
                     />
                 </div>
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">Initial Donation (ADA)</label>
+                    <label className="block text-sm text-gray-400 mb-1">Campaign Deposit (ADA)</label>
                     <input
                         type="number"
-                        value={initialAda}
-                        onChange={(e) => setInitialAda(e.target.value)}
+                        value={campaignDepositAda}
+                        onChange={(e) => setCampaignDepositAda(e.target.value)}
                         placeholder="2"
                         min="2"
                         step="0.5"
                         required
                         className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-teal-500"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Locked as the campaign&apos;s minimum ADA; it is not counted toward the goal.</p>
                 </div>
             </div>
             <div>

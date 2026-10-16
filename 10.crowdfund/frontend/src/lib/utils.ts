@@ -1,6 +1,13 @@
 import { deserializeDatum, pubKeyAddress, serializeAddressObj } from "@meshsdk/core";
 import { APP_NETWORK_ID } from "@/constants/enviroments";
 
+type PlutusDataNode = {
+    bytes?: string;
+    int?: bigint | number | string;
+    fields?: PlutusDataNode[];
+    map?: { k?: PlutusDataNode; v?: PlutusDataNode }[];
+};
+
 export const convertDatum = ({
     plutusData,
 }: {
@@ -9,10 +16,10 @@ export const convertDatum = ({
     beneficiary: string;
     goal: number;
     deadline: number;
-    contributions: { address: string; quantity: number }[];
+    contributions: { address: string; paymentKeyHash: string; quantity: number }[];
 } => {
     try {
-        const datum = deserializeDatum(plutusData);
+        const datum = deserializeDatum(plutusData) as PlutusDataNode;
 
         const buildAddress = (paymentHex: string, stakeHex?: string): string => {
             if (!paymentHex || paymentHex.length !== 56) {
@@ -24,7 +31,7 @@ export const convertDatum = ({
             return serializeAddressObj(pubKeyAddress(paymentHex, stakeHex ?? "", false), APP_NETWORK_ID);
         };
 
-        const parseAddress = (addressDatum: any): string => {
+        const parseAddress = (addressDatum: PlutusDataNode | undefined): string => {
             if (!addressDatum?.fields) {
                 throw new Error("Invalid address datum");
             }
@@ -39,27 +46,29 @@ export const convertDatum = ({
         const beneficiary = parseAddress(beneficiaryDatum);
         const goal = Number(datum.fields?.[1]?.int);
         const deadline = Number(datum.fields?.[2]?.int);
-        const contributions: { address: string; quantity: number }[] = [];
+        if (!Number.isSafeInteger(goal) || goal <= 0 || !Number.isSafeInteger(deadline)) {
+            throw new Error("Invalid campaign goal or deadline in datum");
+        }
+        const contributions: { address: string; paymentKeyHash: string; quantity: number }[] = [];
         const contributionMap = datum.fields?.[3]?.map ?? [];
 
         for (const item of contributionMap) {
-            const addressDatum = item.k;
+            const paymentKeyHash = item.k?.bytes;
             const quantity = Number(item.v?.int);
 
-            try {
-                const address = parseAddress(addressDatum);
-                contributions.push({ address, quantity });
-            } catch (err) {
-                console.warn("Skipping invalid contribution:", err);
+            if (!paymentKeyHash || paymentKeyHash.length !== 56 || !Number.isSafeInteger(quantity)) {
+                throw new Error("Invalid contribution entry in campaign datum");
             }
+
+            contributions.push({
+                address: buildAddress(paymentKeyHash),
+                paymentKeyHash,
+                quantity,
+            });
         }
 
         return { beneficiary, goal, deadline, contributions };
     } catch (err) {
-        try {
-            console.dir(deserializeDatum(plutusData), { depth: null });
-        } catch {}
-
         throw new Error(`Invalid Plutus datum: ${err instanceof Error ? err.message : String(err)}`);
     }
 };

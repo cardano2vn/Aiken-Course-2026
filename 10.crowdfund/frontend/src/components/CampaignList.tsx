@@ -1,6 +1,6 @@
 "use client";
 
-import { UTxO } from "@meshsdk/core";
+import { deserializeAddress, UTxO } from "@meshsdk/core";
 import { useEffect, useState } from "react";
 import { getCampaign } from "@/actions/crowdfund.action";
 
@@ -10,7 +10,7 @@ interface Campaign {
         beneficiary: string;
         goal: number;
         deadline: number;
-        contributions: { address: string; quantity: number }[];
+        contributions: { address: string; paymentKeyHash: string; quantity: number }[];
     };
 }
 
@@ -25,7 +25,7 @@ function progressPercent(datum: {
     beneficiary: string;
     goal: number;
     deadline: number;
-    contributions: { address: string; quantity: number }[];
+    contributions: { address: string; paymentKeyHash: string; quantity: number }[];
 }): number {
     const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
     if (datum.goal === 0) return 0;
@@ -84,7 +84,10 @@ export default function CampaignList({ address, onSelectCampaign, selectedUtxoId
                 const progress = progressPercent(datum);
                 const isExpired = Date.now() > datum.deadline;
                 const goalMet = total >= datum.goal;
-                const myContrib = address ? datum.contributions.find((c) => c.address === address) : null;
+                const paymentKeyHash = address ? deserializeAddress(address).pubKeyHash : null;
+                const myContrib = paymentKeyHash
+                    ? datum.contributions.find((contribution) => contribution.paymentKeyHash === paymentKeyHash)
+                    : null;
                 const isSelected = utxoId === selectedUtxoId;
 
                 return (

@@ -4,19 +4,18 @@ import { APP_MNEMONIC, APP_NETWORK_ID } from "@/constants/enviroments";
 import { blockfrostProvider } from "@/providers/cardano/blockfrost";
 import { MeshTxBuilder } from "@/txbuilders/mesh.txbuilder";
 import { MeshWallet } from "@meshsdk/core";
-import { convertDatum } from "@/lib/utils";
 
 export const create = async ({
     beneficiary,
     goal,
     deadline,
-    initial,
+    campaignDeposit,
     address,
 }: {
     beneficiary: string;
     goal: number;
     deadline: number;
-    initial: number;
+    campaignDeposit: number;
     address: string;
 }) => {
     const meshWallet = new MeshWallet({
@@ -36,26 +35,22 @@ export const create = async ({
 
     await meshTxBuilder.initalize();
 
-    return await meshTxBuilder.donate({
+    return await meshTxBuilder.createCampaign({
         beneficiary: beneficiary,
         deadline: deadline,
-        quantity: initial,
         goal: goal,
+        campaignDeposit,
     });
 };
 
 export const donate = async ({
-    beneficiary,
-    goal,
-    deadline,
     address,
     quantity,
+    campaignRef,
 }: {
-    beneficiary: string;
-    goal: number;
-    deadline: number;
     address: string;
     quantity: number;
+    campaignRef: { txHash: string; outputIndex: number };
 }) => {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
@@ -75,14 +70,18 @@ export const donate = async ({
     await meshTxBuilder.initalize();
 
     return await meshTxBuilder.donate({
-        beneficiary: beneficiary,
-        deadline: deadline,
-        goal: goal,
         quantity: quantity,
+        campaignRef,
     });
 };
 
-export const reclaim = async ({ beneficiary, goal, deadline, address }: { beneficiary: string; goal: number; deadline: number; address: string }) => {
+export const reclaim = async ({
+    address,
+    campaignRef,
+}: {
+    address: string;
+    campaignRef: { txHash: string; outputIndex: number };
+}) => {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
         networkId: APP_NETWORK_ID,
@@ -101,22 +100,16 @@ export const reclaim = async ({ beneficiary, goal, deadline, address }: { benefi
     await meshTxBuilder.initalize();
 
     return await meshTxBuilder.reclaim({
-        beneficiary: beneficiary,
-        deadline: deadline,
-        goal: goal,
+        campaignRef,
     });
 };
 
 export const withdraw = async ({
-    beneficiary,
-    goal,
-    deadline,
     address,
+    campaignRef,
 }: {
-    beneficiary: string;
-    goal: number;
-    deadline: number;
     address: string;
+    campaignRef: { txHash: string; outputIndex: number };
 }) => {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
@@ -136,9 +129,7 @@ export const withdraw = async ({
     await meshTxBuilder.initalize();
 
     return await meshTxBuilder.withdraw({
-        beneficiary: beneficiary,
-        deadline: deadline,
-        goal: goal,
+        campaignRef,
     });
 };
 
@@ -160,15 +151,5 @@ export const getCampaign = async () => {
 
     await meshTxBuilder.initalize();
 
-    const utxos = await blockfrostProvider.fetchAddressUTxOs(meshTxBuilder.spendAddress);
-
-    return utxos.map((utxo) => {
-        const datum = convertDatum({
-            plutusData: utxo.output.plutusData as string,
-        });
-        return {
-            utxo: utxo,
-            datum: datum,
-        };
-    });
+    return meshTxBuilder.getCampaigns();
 };

@@ -1,12 +1,10 @@
 import {
     applyParamsToScript,
     deserializeAddress,
-    deserializeDatum,
     IFetcher,
     MeshTxBuilder,
     MeshWallet,
     PlutusScript,
-    pubKeyAddress,
     resolveScriptHash,
     scriptAddress,
     serializeAddressObj,
@@ -16,8 +14,9 @@ import {
 import { blockfrostProvider } from "../providers/cardano/blockfrost";
 import plutus from "../libs/plutus.json";
 import { Plutus } from "../types";
-import { DECIMAL_PLACE, title } from "../constants/common";
+import { title } from "../constants/common";
 import { APP_NETWORK_ID } from "../constants/enviroments";
+import { convertDatum } from "@/lib/utils";
 
 /**
  * @description
@@ -29,10 +28,12 @@ import { APP_NETWORK_ID } from "../constants/enviroments";
  */
 export class MeshAdapter {
     public spendAddress: string;
+    public policyId: string;
 
     protected spendCompileCode: string;
     protected spendScriptCbor: string;
     protected spendScript: PlutusScript;
+    protected mintScriptCbor: string;
 
     protected fetcher: IFetcher;
     protected meshWallet: MeshWallet;
@@ -54,6 +55,8 @@ export class MeshAdapter {
 
         this.spendCompileCode = this.readValidator(plutus as Plutus, title.crowdfund);
         this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, []);
+        this.mintScriptCbor = applyParamsToScript(this.readValidator(plutus as Plutus, title.crowdfundMint), []);
+        this.policyId = resolveScriptHash(this.mintScriptCbor, "V3");
         this.spendScript = {
             code: this.spendScriptCbor,
             version: "V3",
@@ -166,6 +169,44 @@ export class MeshAdapter {
         return await this.fetcher.fetchAddressUTxOs(address, unit);
     };
 
+    protected getCampaignIdentity = (utxo: UTxO): { unit: string; assetName: string } => {
+        const assets = utxo.output.amount.filter(
+            (asset) => asset.unit.startsWith(this.policyId) && asset.unit.length > this.policyId.length,
+        );
+
+        if (assets.length !== 1 || assets[0].quantity !== "1") {
+            throw new Error("Campaign UTxO must contain exactly one identity token.");
+        }
+
+        const unit = assets[0].unit;
+        const assetName = unit.slice(this.policyId.length);
+        if (!/^[0-9a-f]{64}$/i.test(assetName)) {
+            throw new Error("Campaign identity token has an invalid asset name.");
+        }
+
+        return { unit, assetName };
+    };
+
+    protected findCampaign = async (campaignRef: { txHash: string; outputIndex: number }) => {
+        const utxos = await this.fetcher.fetchAddressUTxOs(this.spendAddress);
+        const utxo = utxos.find(
+            ({ input }) => input.txHash === campaignRef.txHash && input.outputIndex === campaignRef.outputIndex,
+        );
+
+        if (!utxo) {
+            throw new Error("The selected campaign UTxO was not found. Refresh the campaign list and try again.");
+        }
+        if (!utxo.output.plutusData) {
+            throw new Error("The selected campaign UTxO is missing its inline datum.");
+        }
+
+        return {
+            utxo,
+            datum: this.convertDatum({ plutusData: utxo.output.plutusData }),
+            identity: this.getCampaignIdentity(utxo),
+        };
+    };
+
     /**
      * @description
      * Select a UTxO from wallet to serve as collateral for Plutus script transactions.
@@ -211,64 +252,5 @@ export class MeshAdapter {
      */
     public convertDatum = ({
         plutusData,
-    }: {
-        plutusData: string;
-    }): {
-        beneficiary: string;
-        goal: number;
-        deadline: number;
-        contributions: { address: string; quantity: number }[];
-    } => {
-        try {
-            const datum = deserializeDatum(plutusData);
-
-            const buildAddress = (paymentHex: string, stakeHex?: string): string => {
-                if (!paymentHex || paymentHex.length !== 56) {
-                    throw new Error(`Invalid payment credential: ${paymentHex}`);
-                }
-                if (stakeHex && stakeHex.length !== 56) {
-                    throw new Error(`Invalid stake credential: ${stakeHex}`);
-                }
-                return serializeAddressObj(pubKeyAddress(paymentHex, stakeHex ?? "", false), APP_NETWORK_ID);
-            };
-
-            const parseAddress = (addressDatum: any): string => {
-                if (!addressDatum?.fields) {
-                    throw new Error("Invalid address datum");
-                }
-                const paymentHex = addressDatum?.fields?.[0]?.fields?.[0]?.bytes;
-                const stakeHex = addressDatum?.fields?.[1]?.fields?.[0]?.fields?.[0]?.fields?.[0]?.bytes;
-                if (!paymentHex) {
-                    throw new Error("Missing payment credential");
-                }
-                return buildAddress(paymentHex, stakeHex);
-            };
-            const beneficiaryDatum = datum.fields?.[0];
-            const beneficiary = parseAddress(beneficiaryDatum);
-            const goal = Number(datum.fields?.[1]?.int);
-            const deadline = Number(datum.fields?.[2]?.int);
-            const contributions: { address: string; quantity: number }[] = [];
-            const contributionMap = datum.fields?.[3]?.map ?? [];
-
-            for (const item of contributionMap) {
-                const addressDatum = item.k;
-                const quantity = Number(item.v?.int);
-
-                try {
-                    const address = parseAddress(addressDatum);
-                    contributions.push({ address, quantity });
-                } catch (err) {
-                    console.warn("Skipping invalid contribution:", err);
-                }
-            }
-
-            return { beneficiary, goal, deadline, contributions };
-        } catch (err) {
-            try {
-                console.dir(deserializeDatum(plutusData), { depth: null });
-            } catch {}
-
-            throw new Error(`Invalid Plutus datum: ${err instanceof Error ? err.message : String(err)}`);
-        }
-    };
+    }: { plutusData: string }) => convertDatum({ plutusData });
 }

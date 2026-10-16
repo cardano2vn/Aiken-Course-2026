@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { UTxO } from "@meshsdk/common";
+import { deserializeAddress, type UTxO } from "@meshsdk/core";
 import type { BrowserWallet } from "@meshsdk/wallet";
 import { DECIMAL_PLACE } from "@/constants/common";
 import { reclaim } from "@/actions/crowdfund.action";
@@ -14,7 +14,7 @@ interface Props {
         beneficiary: string;
         goal: number;
         deadline: number;
-        contributions: { address: string; quantity: number }[];
+        contributions: { address: string; paymentKeyHash: string; quantity: number }[];
     };
     onSuccess: (txHash: string) => void;
 }
@@ -27,7 +27,8 @@ export default function ReclaimPanel({ wallet, address, campaignUtxo, datum, onS
     const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
     const isExpired = Date.now() > datum.deadline;
     const goalMet = total >= datum.goal;
-    const myContrib = datum.contributions.find((c) => c.address === address);
+    const walletPaymentKeyHash = deserializeAddress(address).pubKeyHash;
+    const myContrib = datum.contributions.find((contribution) => contribution.paymentKeyHash === walletPaymentKeyHash);
     const canReclaim = isExpired && !goalMet && !!myContrib;
 
     async function handleReclaim() {
@@ -37,9 +38,7 @@ export default function ReclaimPanel({ wallet, address, campaignUtxo, datum, onS
         try {
             const unsignedTx: string = await reclaim({
                 address: await wallet.getChangeAddress(),
-                goal: datum.goal,
-                deadline: datum.deadline,
-                beneficiary: datum.beneficiary,
+                campaignRef: campaignUtxo.input,
             });
             const signedTx = await wallet.signTx(unsignedTx);
             const txHash = await wallet.submitTx(signedTx);

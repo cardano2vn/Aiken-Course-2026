@@ -12,7 +12,7 @@ interface Props {
         beneficiary: string;
         goal: number;
         deadline: number;
-        contributions: { address: string; quantity: number }[];
+        contributions: { address: string; paymentKeyHash: string; quantity: number }[];
     };
     onSuccess: (txHash: string) => void;
 }
@@ -40,10 +40,8 @@ export default function DonateForm({ wallet, campaignUtxo, datum, onSuccess }: P
             if (donationLovelace < DECIMAL_PLACE) throw new Error("Minimum donation: 1 ADA");
             const hash = await donate({
                 address: await wallet.getChangeAddress(),
-                deadline: datum.deadline,
-                goal: datum.goal,
-                beneficiary: datum.beneficiary,
                 quantity: Number(amountAda) * DECIMAL_PLACE,
+                campaignRef: campaignUtxo.input,
             });
             setTxHash(hash);
             onSuccess(hash);

@@ -21,7 +21,7 @@ interface SelectedCampaign {
         beneficiary: string;
         goal: number;
         deadline: number;
-        contributions: { address: string; quantity: number }[];
+        contributions: { address: string; paymentKeyHash: string; quantity: number }[];
     };
 }
 

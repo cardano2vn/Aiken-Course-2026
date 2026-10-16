@@ -6,6 +6,7 @@ import { DECIMAL_PLACE } from "../constants/common";
 
 describe("CrowdFund is a trustless crowdfunding platform built on Cardano's EUTxO model. Each fundraising campaign acts as an autonomous smart contract entity.", function () {
     let meshWallet: MeshWallet;
+    const campaignRef = { txHash: "00".repeat(32), outputIndex: 0 };
 
     // account 0 - addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g
     // account 1 - addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew
@@ -39,10 +40,8 @@ describe("CrowdFund is a trustless crowdfunding platform built on Cardano's EUTx
         console.log(Date.now() + 2 * 60 * 1000);
 
         const unsignedTx: string = await meshTxBuilder.donate({
-            beneficiary: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
-            deadline: Date.now() + 2 * 60 * 1000,
-            goal: 10 * DECIMAL_PLACE,
             quantity: 10 * DECIMAL_PLACE,
+            campaignRef,
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
@@ -64,9 +63,7 @@ describe("CrowdFund is a trustless crowdfunding platform built on Cardano's EUTx
 
         await meshTxBuilder.initalize();
         const unsignedTx: string = await meshTxBuilder.reclaim({
-            beneficiary: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
-            deadline: 1781200264488,
-            goal: 30 * DECIMAL_PLACE,
+            campaignRef,
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
@@ -89,9 +86,7 @@ describe("CrowdFund is a trustless crowdfunding platform built on Cardano's EUTx
         await meshTxBuilder.initalize();
 
         const unsignedTx: string = await meshTxBuilder.withdraw({
-            beneficiary: "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g",
-            deadline: 1781200919436,
-            goal: 10 * DECIMAL_PLACE,
+            campaignRef,
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);
