@@ -42,15 +42,16 @@ export const convertDatum = ({
             }
             return buildAddress(paymentHex, stakeHex);
         };
-        const beneficiaryDatum = datum.fields?.[0];
+        const contributionsDatum = datum.fields?.[0];
+        const beneficiaryDatum = datum.fields?.[1];
         const beneficiary = parseAddress(beneficiaryDatum);
-        const goal = Number(datum.fields?.[1]?.int);
-        const deadline = Number(datum.fields?.[2]?.int);
+        const goal = Number(datum.fields?.[2]?.int);
+        const deadline = Number(datum.fields?.[3]?.int);
         if (!Number.isSafeInteger(goal) || goal <= 0 || !Number.isSafeInteger(deadline)) {
             throw new Error("Invalid campaign goal or deadline in datum");
         }
         const contributions: { address: string; paymentKeyHash: string; quantity: number }[] = [];
-        const contributionMap = datum.fields?.[3]?.map ?? [];
+        const contributionMap = contributionsDatum?.map ?? [];
 
         for (const item of contributionMap) {
             const paymentKeyHash = item.k?.bytes;

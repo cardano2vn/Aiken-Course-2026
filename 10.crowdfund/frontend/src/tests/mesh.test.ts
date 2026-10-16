@@ -87,6 +87,7 @@ describe("CrowdFund is a trustless crowdfunding platform built on Cardano's EUTx
 
         const unsignedTx: string = await meshTxBuilder.withdraw({
             campaignRef,
+            changeAddress: "addr_test1qqy0z4ekhv8gcnmvkeakkaher82rlrx2yu9y79cjf4r704pqg73fhf002takqewlvjcy39dellyumg43f08uea0p6mps7pw77f",
         });
 
         const signedTx = await meshWallet.signTx(unsignedTx, true);

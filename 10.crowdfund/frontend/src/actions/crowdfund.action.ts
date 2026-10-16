@@ -106,9 +106,11 @@ export const reclaim = async ({
 
 export const withdraw = async ({
     address,
+    changeAddress,
     campaignRef,
 }: {
     address: string;
+    changeAddress: string;
     campaignRef: { txHash: string; outputIndex: number };
 }) => {
     const meshWallet = new MeshWallet({
@@ -130,6 +132,7 @@ export const withdraw = async ({
 
     return await meshTxBuilder.withdraw({
         campaignRef,
+        changeAddress,
     });
 };
 

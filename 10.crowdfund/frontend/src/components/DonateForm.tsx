@@ -38,13 +38,15 @@ export default function DonateForm({ wallet, campaignUtxo, datum, onSuccess }: P
 
             const donationLovelace = Number(Math.floor(parseFloat(amountAda) * DECIMAL_PLACE));
             if (donationLovelace < DECIMAL_PLACE) throw new Error("Minimum donation: 1 ADA");
-            const hash = await donate({
+            const unsignedTx = await donate({
                 address: await wallet.getChangeAddress(),
                 quantity: Number(amountAda) * DECIMAL_PLACE,
                 campaignRef: campaignUtxo.input,
             });
-            setTxHash(hash);
-            onSuccess(hash);
+             const signedTx = await wallet.signTx(unsignedTx);
+            const txHash = await wallet.submitTx(signedTx);
+            setTxHash(txHash);
+            onSuccess(txHash);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {

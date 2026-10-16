@@ -35,8 +35,15 @@ export default function WithdrawPanel({ wallet, address, campaignUtxo, datum, on
         setError(null);
         setTxHash(null);
         try {
+            const [unusedAddresses, usedAddresses] = await Promise.all([wallet.getUnusedAddresses(), wallet.getUsedAddresses()]);
+            const changeAddress = [...unusedAddresses, ...usedAddresses].find((candidate) => candidate !== datum.beneficiary);
+            if (!changeAddress) {
+                throw new Error("Your wallet did not provide another address for transaction change. Use a wallet with an additional address and retry.");
+            }
+
             const unsignedTx: string = await withdraw({
                 address: await wallet.getChangeAddress(),
+                changeAddress,
                 campaignRef: campaignUtxo.input,
             });
             const signedTx = await wallet.signTx(unsignedTx);

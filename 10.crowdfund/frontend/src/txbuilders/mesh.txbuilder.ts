@@ -93,10 +93,10 @@ export class MeshTxBuilder extends MeshAdapter {
             ])
             .txOutInlineDatumValue(
                 mConStr0([
+                    new Map(),
                     mPubKeyAddress(beneficiaryAddress.pubKeyHash, beneficiaryAddress.stakeCredentialHash),
                     BigInt(goal),
                     BigInt(deadline),
-                    new Map(),
                 ]),
             )
             .invalidHereafter(Number(resolveSlotNo(APP_NETWORK, deadline)))
@@ -157,10 +157,10 @@ export class MeshTxBuilder extends MeshAdapter {
             .txOut(this.spendAddress, campaignAssets)
             .txOutInlineDatumValue(
                 mConStr0([
+                    plutusContributions,
                     mPubKeyAddress(deserializeAddress(datum.beneficiary).pubKeyHash, deserializeAddress(datum.beneficiary).stakeCredentialHash),
                     BigInt(datum.goal),
                     BigInt(datum.deadline),
-                    plutusContributions,
                 ]),
             )
             .invalidBefore(Number(resolveSlotNo(APP_NETWORK, Date.now() - 60_000)))
@@ -216,13 +216,13 @@ export class MeshTxBuilder extends MeshAdapter {
                 .txOut(this.spendAddress, campaignAssets)
                 .txOutInlineDatumValue(
                     mConStr0([
+                        plutusContributions,
                         mPubKeyAddress(
                             deserializeAddress(datum.beneficiary).pubKeyHash,
                             deserializeAddress(datum.beneficiary).stakeCredentialHash,
                         ),
                         BigInt(datum.goal),
                         BigInt(datum.deadline),
-                        plutusContributions,
                     ]),
                 );
         } else {
@@ -242,12 +242,15 @@ export class MeshTxBuilder extends MeshAdapter {
             .complete();
     };
 
-    withdraw = async ({ campaignRef }: { campaignRef: CampaignRef }) => {
-        const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+    withdraw = async ({ campaignRef, changeAddress }: { campaignRef: CampaignRef; changeAddress: string }) => {
+        const { utxos, collateral } = await this.getWalletForTx();
         const { utxo, datum, identity } = await this.findCampaign(campaignRef);
         const totalContributions = datum.contributions.reduce((sum, contribution) => sum + contribution.quantity, 0);
         if (totalContributions < datum.goal) {
             throw new Error("Campaign goal has not been reached.");
+        }
+        if (!changeAddress || changeAddress === datum.beneficiary) {
+            throw new Error("Withdraw change address must differ from the beneficiary address.");
         }
 
         const payout = utxo.output.amount.filter((asset) => asset.unit !== identity.unit);
@@ -264,7 +267,7 @@ export class MeshTxBuilder extends MeshAdapter {
             .mintingScript(this.mintScriptCbor)
             .mintRedeemerValue(mConStr1([]))
             .selectUtxosFrom(utxos)
-            .changeAddress(walletAddress)
+            .changeAddress(changeAddress)
             .requiredSignerHash(deserializeAddress(datum.beneficiary).pubKeyHash)
             .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
             .setNetwork(APP_NETWORK)
