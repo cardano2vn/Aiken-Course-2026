@@ -7,12 +7,17 @@ import {
   MeshTxBuilder,
   UTxO,
   Asset,
-  resolvePaymentKeyHash,
+  deserializeAddress,
+  resolveStakeKeyHash,
 } from "@meshsdk/core";
 import { useWallet } from "@/contexts/WalletContext";
-import { joinBetTx, cancelBetTx, announceWinnerTx, ParsedBetDatum } from "@cardano-bet-dapp/offchain";
+import { joinBetTx, cancelBetTx, announceWinnerTx, ParsedBetDatum, NETWORK_ID } from "@cardano-bet-dapp/offchain";
 import TxStatus, { TxStepStatus } from "@/components/TxStatus";
 import { waitForTxConfirmation, pendingTxStorage } from "@/utils/txUtils";
+
+const cardanoscanBaseUrl = NETWORK_ID === 1
+  ? "https://cardanoscan.io"
+  : "https://preprod.cardanoscan.io";
 
 interface BetItem {
   utxo: UTxO;
@@ -32,12 +37,12 @@ interface BetListProps {
 const ITEMS_PER_PAGE = 8;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// datum.expiration được lưu dưới dạng Unix milliseconds
 function getBetStatus(datum: ParsedBetDatum, currentTime: number = Date.now()): BetStatus {
+  const isNoPlayer = datum.playerAddress === null;
   const isExpired = currentTime >= Number(datum.expiration);
-  // player is AddressObj | null (null = no one joined yet)
-  if (datum.player !== null) return isExpired ? "AWAITING_RESULT" : "CLOSED";
-  return isExpired ? "EXPIRED" : "OPEN";
+
+  if (!isExpired) return isNoPlayer ? "OPEN" : "CLOSED";
+  return isNoPlayer ? "EXPIRED" : "AWAITING_RESULT";
 }
 
 function getExpirationDate(expirationMs: bigint): Date {
@@ -83,55 +88,57 @@ const YouBadge = () => (
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function BetList({ bets, loading, onRefresh, onSuccess }: BetListProps) {
-  const { wallet, connected, address } = useWallet();
+  const { wallet, connected, address, isTxBusy, setTxBusy } = useWallet();
   const [txStatus, setTxStatus] = useState<TxStepStatus>("idle");
   const [txError, setTxError] = useState("");
   const [activeTxHash, setActiveTxHash] = useState<string | null>(null);
   const [successTxHash, setSuccessTxHash] = useState("");
   const [page, setPage] = useState(0);
   const [selectingWinnerFor, setSelectingWinnerFor] = useState<string | null>(null);
+  const [pendingBetIds, setPendingBetIds] = useState<Set<string>>(new Set());
 
-  // 0. Timer tự động cập nhật thời gian thực mỗi 3 giây để thẻ bet tự nhảy trạng thái khi qua mốc Expiration
+  // Timer tự động cập nhật thời gian thực mỗi 5 giây để thẻ bet tự nhảy trạng thái khi qua mốc Expiration
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(timer);
   }, []);
 
-  // 1. Thu thập TẤT CẢ PKH (từ used, unused và change address) để nhận dạng các chuẩn bet mà người dùng có liên quan -> hỗ trợ ví Multi-address
-  const [myPkhs, setMyPkhs] = useState<Set<string>>(new Set());
+  // Nhận diện tài khoản ví HD qua Stake Key 
+  const [myStakeKeyHashes, setMyStakeKeyHashes] = useState<string[]>([]);
 
   useEffect(() => {
     if (!connected || !wallet) {
-      setMyPkhs(new Set());
+      setMyStakeKeyHashes([]);
       return;
     }
 
-    Promise.all([
-      wallet.getUsedAddresses(),
-      wallet.getUnusedAddresses()
-    ])
-      .then(([used, unused]) => {
-        const allAddrs = [...used, ...unused];
-        const pkhSet = new Set<string>();
+    let isMounted = true;
 
-        // Thêm address đang active (change address)
-        if (address) {
-          try { pkhSet.add(resolvePaymentKeyHash(address)); } catch { }
+    const fetchStakeKey = async () => {
+      try {
+        const rewardAddrs = await wallet.getRewardAddresses();
+
+        if (rewardAddrs && rewardAddrs.length > 0) {
+          const hashes = rewardAddrs
+            .map((addr) => resolveStakeKeyHash(addr))
+            .filter(Boolean) as string[];
+
+          if (isMounted && hashes.length > 0) {
+            setMyStakeKeyHashes(hashes);
+          }
         }
+      } catch (err) {
+        console.error("Lỗi lấy reward address từ ví:", err);
+      }
+    };
 
-        // Thêm toàn bộ các address khác
-        allAddrs.forEach(addr => {
-          try { pkhSet.add(resolvePaymentKeyHash(addr)); } catch { }
-        });
+    fetchStakeKey();
 
-        console.log("all allAddrs addresses", allAddrs);
-        console.log("all pkhSet addresses", pkhSet);
-
-        setMyPkhs(pkhSet);
-      })
-      .catch(console.error);
-  }, [connected, wallet, address]);
+    return () => {
+      isMounted = false;
+    };
+  }, [connected, wallet]);
 
   // Khôi phục tiến trình xác nhận từ LocalStorage nếu người dùng reload / F5 trang
   useEffect(() => {
@@ -142,34 +149,51 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
     if (!apiKey) return;
     const provider = new BlockfrostProvider(apiKey);
 
-    setActiveTxHash(pending.txId || pending.hash);
+    const betId = pending.betId || pending.txId || pending.hash;
+    setActiveTxHash(betId);
     setSuccessTxHash(pending.hash);
     setTxStatus("confirming");
+    setPendingBetIds((prev) => new Set(prev).add(betId));
+    setTxBusy(true);
 
     waitForTxConfirmation(provider, pending.hash).then((isConfirmed) => {
       pendingTxStorage.clear("pending_bet_action");
+      setPendingBetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(betId);
+        return next;
+      });
       setTxStatus(isConfirmed ? "success" : "submitted");
+      setTxBusy(false);
       onSuccess();
     });
-  }, [onSuccess]);
+  }, [onSuccess, setTxBusy]);
 
   const totalPages = Math.ceil(bets.length / ITEMS_PER_PAGE);
   const paginated = bets.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
 
+  /**
+   * Đảm nhận toàn bộ quy trình xử lý giao dịch: từ build, ký, gửi và đợi xác nhận
+   * @param buildFn - Hàm xây dựng giao dịch
+   * @param betId - ID của ván cược (txHash của Bet UTxO)
+   * @param useEvaluator - Sử dụng evaluator hay không
+   */
   const buildAndSubmit = async (
     buildFn: (txBuilder: MeshTxBuilder) => Promise<string>,
-    txId: string,
+    betId: string,
     useEvaluator: boolean = false
   ) => {
-    if (!wallet) return;
+    if (!wallet || isTxBusy) return;
     const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
     if (!apiKey) { setTxError("Missing Blockfrost API Key"); setTxStatus("failed"); return; }
 
     const provider = new BlockfrostProvider(apiKey);
-    setActiveTxHash(txId);
+    setActiveTxHash(betId);
     setTxError("");
     setSuccessTxHash("");
     setTxStatus("building");
+    setPendingBetIds((prev) => new Set(prev).add(betId));
+    setTxBusy(true);
 
     try {
       const txBuilder = new MeshTxBuilder(
@@ -187,29 +211,45 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
       setSuccessTxHash(hash);
 
       // Lưu pending Tx vào LocalStorage để chống mất trạng thái khi reload / F5
-      pendingTxStorage.save("pending_bet_action", { hash, txId });
+      pendingTxStorage.save("pending_bet_action", { hash, betId });
 
+      // Chờ giao dịch được xác nhận (polling block)
       setTxStatus("confirming");
       const isConfirmed = await waitForTxConfirmation(provider, hash);
 
+      // Hoàn tất: Dọn dẹp pending, giải phóng thẻ cược và mở khóa UI
       pendingTxStorage.clear("pending_bet_action");
+      setPendingBetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(betId);
+        return next;
+      });
       setTxStatus(isConfirmed ? "success" : "submitted");
+      setTxBusy(false);
       onSuccess();
     } catch (err: any) {
+      // Xử lý lỗi / người dùng hủy ký ví: Xóa pending, gỡ mờ thẻ cược và mở khóa UI
       pendingTxStorage.clear("pending_bet_action");
+      setPendingBetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(betId);
+        return next;
+      });
+      setTxBusy(false);
+
+      // Trích xuất thông điệp lỗi chi tiết (bóc tách mismatchReason từ JSON nếu có)
       let msg = err.message || "Unknown error";
       try {
         const match = msg.match(/Data:\s*(\{.*?\})/);
         if (match?.[1]) { const d = JSON.parse(match[1]); if (d.mismatchReason) msg = d.mismatchReason; }
-      } catch { /* giữ nguyên */ }
+      } catch { /* giữ nguyên message gốc nếu parse thất bại */ }
       setTxError(msg);
       setTxStatus("failed");
-      // Không reset activeTxHash ở đây — để TxStatus hiển thị cho đến khi user đóng
     }
   };
 
   const handleJoin = (b: BetItem) => {
-    if (!wallet) return;
+    if (!wallet || isTxBusy) return;
     buildAndSubmit(
       (txBuilder) => joinBetTx(txBuilder, wallet, b.utxo, b.datum),
       b.utxo.input.txHash,
@@ -218,7 +258,7 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
   };
 
   const handleCancel = (b: BetItem) => {
-    if (!wallet) return;
+    if (!wallet || isTxBusy) return;
     buildAndSubmit(
       (txBuilder) => cancelBetTx(txBuilder, wallet, b.utxo, b.datum),
       b.utxo.input.txHash,
@@ -227,7 +267,7 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
   };
 
   const handleAnnounceWinner = (b: BetItem, isOwnerWin: boolean) => {
-    if (!wallet) return;
+    if (!wallet || isTxBusy) return;
     buildAndSubmit(
       (txBuilder) => announceWinnerTx(txBuilder, wallet, isOwnerWin, b.utxo, b.datum),
       b.utxo.input.txHash,
@@ -282,16 +322,18 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                 const status = getBetStatus(b.datum, now);
                 const expDate = getExpirationDate(b.datum.expiration);
                 const lovelace = getLovelaceAmount(b.utxo);
-                let ownerPkh = null, playerPkh = null, refereePkh = null;
-                try { ownerPkh = resolvePaymentKeyHash(b.datum.ownerAddress); } catch { }
-                try { if (b.datum.playerAddress) playerPkh = resolvePaymentKeyHash(b.datum.playerAddress); } catch { }
-                try { refereePkh = resolvePaymentKeyHash(b.datum.refereeAddress); } catch { }
+                let ownerStake = null, playerStake = null, refereeStake = null;
+                try { ownerStake = deserializeAddress(b.datum.ownerAddress).stakeCredentialHash; } catch { }
+                try { if (b.datum.playerAddress) playerStake = deserializeAddress(b.datum.playerAddress).stakeCredentialHash; } catch { }
+                try { refereeStake = deserializeAddress(b.datum.refereeAddress).stakeCredentialHash; } catch { }
 
-                const isOwner = ownerPkh && myPkhs.has(ownerPkh);
-                const isReferee = refereePkh && myPkhs.has(refereePkh);
-                const isPlayer = playerPkh && myPkhs.has(playerPkh);
+                const isOwner = !!(ownerStake && myStakeKeyHashes.includes(ownerStake));
+                const isReferee = !!(refereeStake && myStakeKeyHashes.includes(refereeStake));
+                const isPlayer = !!(playerStake && myStakeKeyHashes.includes(playerStake));
+                const isBetPending = pendingBetIds.has(b.utxo.input.txHash);
                 const isActive = activeTxHash === b.utxo.input.txHash;
-                const isProcessing = isActive && ["building", "signing", "submitting", "confirming"].includes(txStatus);
+                const isProcessing = (isActive && ["building", "signing", "submitting", "confirming"].includes(txStatus)) || isBetPending;
+                const isLocked = isProcessing || isTxBusy;
 
                 return (
                   <motion.div
@@ -300,7 +342,12 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
-                    className="p-4 rounded-lg bg-neutral-bg2 border border-border-subtle hover:border-brand/30 transition-all flex flex-col gap-2"
+                    className={`p-4 rounded-lg bg-neutral-bg2 border transition-all flex flex-col gap-2 ${isProcessing
+                      ? "border-brand/20 opacity-75"
+                      : isTxBusy
+                        ? "border-border-subtle opacity-85"
+                        : "border-border-subtle hover:border-brand/30"
+                      }`}
                   >
                     {/* Top row */}
                     <div className="flex justify-between items-center">
@@ -344,7 +391,7 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
 
                     {/* UTxO ref */}
                     <a
-                      href={`https://preprod.cardanoscan.io/transaction/${b.utxo.input.txHash}`}
+                      href={`${cardanoscanBaseUrl}/transaction/${b.utxo.input.txHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[10px] font-mono text-brand/70 hover:text-brand transition-colors truncate flex items-center gap-1"
@@ -361,19 +408,33 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                       {status === "OPEN" && (
                         <button
                           onClick={() => handleJoin(b)}
-                          disabled={!connected || !!isOwner || !!isReferee || isProcessing}
-                          className="flex-1 py-1.5 text-xs border border-brand/50 text-brand rounded hover:bg-brand/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          disabled={!connected || !!isOwner || !!isReferee || isLocked}
+                          className={`flex-1 py-1.5 text-xs rounded transition-all ${isLocked
+                            ? "bg-white/5 border border-white/10 text-text-muted cursor-not-allowed opacity-40 shadow-none"
+                            : "border border-brand/50 text-brand hover:bg-brand/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                            }`}
                         >
-                          {isOwner ? "Your Bet" : isReferee ? "You're Referee" : "Join"}
+                          {isProcessing
+                            ? "⏳ Đang xác nhận..."
+                            : isTxBusy
+                              ? "⏳ Đang bận..."
+                              : isOwner
+                                ? "Your Bet"
+                                : isReferee
+                                  ? "You're Referee"
+                                  : "Join"}
                         </button>
                       )}
                       {status === "EXPIRED" && isOwner && (
                         <button
                           onClick={() => handleCancel(b)}
-                          disabled={!connected || isProcessing}
-                          className="flex-1 py-1.5 text-xs border border-status-warning/50 text-status-warning rounded hover:bg-status-warning/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          disabled={!connected || isLocked}
+                          className={`flex-1 py-1.5 text-xs rounded transition-all ${isLocked
+                            ? "bg-white/5 border border-white/10 text-text-muted cursor-not-allowed opacity-40 shadow-none"
+                            : "border border-status-warning/50 text-status-warning hover:bg-status-warning/10 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                            }`}
                         >
-                          Cancel & Refund
+                          {isProcessing ? "⏳ Đang xác nhận..." : isTxBusy ? "⏳ Đang bận..." : "Cancel & Refund"}
                         </button>
                       )}
                       {status === "CLOSED" && (
@@ -388,27 +449,38 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => handleAnnounceWinner(b, true)}
-                                  disabled={isProcessing}
-                                  className="flex-1 py-1.5 text-[10px] font-bold bg-brand/20 text-brand border border-brand/40 rounded hover:bg-brand/30 transition-all"
+                                  disabled={isLocked}
+                                  className={`flex-1 py-1.5 text-[10px] font-bold rounded transition-all ${isLocked
+                                    ? "bg-white/5 border border-white/10 text-text-muted cursor-not-allowed opacity-40 shadow-none"
+                                    : "bg-brand/20 text-brand border border-brand/40 hover:bg-brand/30 cursor-pointer"
+                                    }`}
                                 >
-                                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                                    Owner Wins
-                                    {isOwner && <span className="text-[8px] bg-sky-500/30 text-sky-300 rounded px-1 ml-1">YOU</span>}
-                                  </div>
+                                  {isProcessing ? "⏳ Đang gửi..." : (
+                                    <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                      Owner Wins
+                                      {isOwner && <span className="text-[8px] bg-sky-500/30 text-sky-300 rounded px-1 ml-1">YOU</span>}
+                                    </div>
+                                  )}
                                 </button>
                                 <button
                                   onClick={() => handleAnnounceWinner(b, false)}
-                                  disabled={isProcessing}
-                                  className="flex-1 py-1.5 text-[10px] font-bold bg-brand/20 text-brand border border-brand/40 rounded hover:bg-brand/30 transition-all flex items-center justify-center group"
+                                  disabled={isLocked}
+                                  className={`flex-1 py-1.5 text-[10px] font-bold rounded transition-all ${isLocked
+                                    ? "bg-white/5 border border-white/10 text-text-muted cursor-not-allowed opacity-40 shadow-none"
+                                    : "bg-brand/20 text-brand border border-brand/40 hover:bg-brand/30 cursor-pointer"
+                                    }`}
                                 >
-                                  <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                                    Player Wins
-                                    {isPlayer && <span className="text-[8px] bg-sky-500/30 text-sky-300 rounded px-1 ml-1">YOU</span>}
-                                  </div>
+                                  {isProcessing ? "⏳ Đang gửi..." : (
+                                    <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                                      Player Wins
+                                      {isPlayer && <span className="text-[8px] bg-sky-500/30 text-sky-300 rounded px-1 ml-1">YOU</span>}
+                                    </div>
+                                  )}
                                 </button>
                                 <button
                                   onClick={() => setSelectingWinnerFor(null)}
-                                  className="px-2 text-text-muted hover:text-white"
+                                  disabled={isLocked}
+                                  className="px-2 text-text-muted hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
                                 >
                                   ✕
                                 </button>
@@ -416,10 +488,13 @@ export default function BetList({ bets, loading, onRefresh, onSuccess }: BetList
                             ) : (
                               <button
                                 onClick={() => setSelectingWinnerFor(b.utxo.input.txHash)}
-                                disabled={isProcessing}
-                                className="w-full py-1.5 text-xs font-bold bg-purple-500/20 text-purple-400 border border-purple-500/40 rounded hover:bg-purple-500/30 transition-all animate-pulse"
+                                disabled={isLocked}
+                                className={`w-full py-1.5 text-xs font-bold rounded transition-all ${isLocked
+                                  ? "bg-white/5 border border-white/10 text-text-muted cursor-not-allowed opacity-40 shadow-none"
+                                  : "bg-purple-500/20 text-purple-400 border border-purple-500/40 hover:bg-purple-500/30 animate-pulse cursor-pointer"
+                                  }`}
                               >
-                                🏆 Announce Result
+                                {isProcessing ? "⏳ Đang xác nhận..." : isTxBusy ? "⏳ Đang bận..." : "🏆 Announce Result"}
                               </button>
                             )}
                           </div>

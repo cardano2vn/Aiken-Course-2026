@@ -1,12 +1,11 @@
 use aiken/collection/dict
 use aiken/collection/list
-use cardano/address.{Address, Script}
+use cardano/address.{Address, Script, from_script}
 use cardano/assets.{
   has_nft_strict, is_zero, lovelace_of, tokens, without_lovelace,
 }
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction, find_input,
-  find_script_outputs,
 }
 use cocktail/vodka_address.{address_payment_key}
 use cocktail/vodka_extra_signatories.{key_signed}
@@ -47,9 +46,9 @@ validator bet(bet_token_name: ByteArray, minimum_bet_amount: Int) {
     when quantity is {
       1 -> {
         // === CREATE (Tạo bet): Đúc 1 Bet Token mới và khởi tạo Bet UTxO ===
-        // Đảm bảo đúng 1 output trả về Script này
+        // Đảm bảo đúng 1 output trả về Script này (no-stake address)
         // Lợi thế của multi-purpose validator: policy_id chính là script hash
-        expect [bet_output] = find_script_outputs(outputs, policy_id)
+        expect [bet_output] = outputs_at(outputs, from_script(policy_id))
 
         let Output { value: output_value, datum, .. } = bet_output
         expect InlineDatum(bet_datum_data) = datum
@@ -90,7 +89,7 @@ validator bet(bet_token_name: ByteArray, minimum_bet_amount: Int) {
 
     expect Some(bet_input) = find_input(inputs, own_output_ref)
     let Output { value: input_value, address: own_address, .. } = bet_input.output
-    // Lấy ra script hash từ Bet UTXO => nó chính là policy_id của bet token
+    // Lấy ra script hash từ own_address => nó chính là policy_id của bet token
     expect Script(own_policy_id) = own_address.payment_credential
 
     // Input bắt buộc chứa đúng Bet Token + Ada
@@ -105,7 +104,7 @@ validator bet(bet_token_name: ByteArray, minimum_bet_amount: Int) {
         let has_no_player_before = current_datum.player == None
 
         // 2. Kiểm tra Bet UTxO cập nhật chính xác
-        // Giao dịch có 1 continuing output duy nhất (own_output)
+        // Giao dịch có 1 continuing output duy nhất (bet output)
         expect [bet_output] = outputs_at(outputs, own_address)
 
         // Trích xuất dữ liệu từ Bet UTxO mới

@@ -37,6 +37,7 @@ export const waitForTxConfirmation = (
 
 export interface PendingTxData {
   hash: string;
+  betId?: string;
   txId?: string;
   timestamp?: number;
 }

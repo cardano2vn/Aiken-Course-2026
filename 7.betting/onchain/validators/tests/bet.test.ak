@@ -12,9 +12,8 @@ use mocktail/virgin_validity_range.{mock_interval}
 // ============= TEST CONFIGURATION =============
 const test_token_name = "Bet Token"
 
-const test_min_bet = 2000000
-
 // 2 ADA minimum bet for testing
+const test_min_bet = 2000000
 
 // =========================================================================
 // NHÓM 1: CREATE (TẠO PHÒNG CƯỢC & KHỞI TẠO BET UTXO)
@@ -199,6 +198,230 @@ test fail_create_missing_owner_signature() fail {
     mint: from_asset(mock_policy_id(1), test_token_name, 1),
     // Thiếu chữ ký của Owner (mock_pub_key_hash(1)) -> Fail
     extra_signatories: [],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_wrong_script_address() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Gửi output về địa chỉ ví thường thay vì script address của validator -> Fail tại outputs_at
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: mock_pub_key_address(1, None),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_output_contains_extra_token() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Output đính kèm thêm token lạ ngoài Bet Token -> Fail tại has_nft_strict
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1)
+          |> add(mock_policy_id(2), "foreign_token", 1),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_when_player_not_none() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    // Khởi tạo bet nhưng player đã được gán sẵn -> Fail tại (player == None)
+    player: Some(mock_pub_key_address(2, None)),
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_multiple_script_outputs() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Tạo 2 outputs tại script address -> Fail tại expect [bet_output] = outputs_at(...)
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_mint_more_than_one() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Cố tình đúc 2 Bet Token (quantity = 2) thay vì 1 -> when quantity rơi vào _ -> False
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 2),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 2),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_missing_inline_datum() fail {
+  // Output tại script không gắn Inline Datum (truyền NoDatum) -> Fail tại expect InlineDatum(...)
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: NoDatum,
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_create_missing_token_in_script_output() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Đúc token nhưng output tại script chỉ chứa Lovelace mà không có Bet Token -> Fail tại has_nft_strict
+  let test_transaction = Transaction {
+    ..placeholder,
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(3000000),
+        datum: InlineDatum(initial_bet_datum),
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, 1),
+    extra_signatories: [mock_pub_key_hash(1)],
     validity_range: mock_interval(Some(1752989540000), Some(1752990020000)),
   }
   bet.bet.mint(
@@ -639,6 +862,214 @@ test fail_join_invalid_output_token() fail {
   )
 }
 
+test fail_join_when_already_joined() fail {
+  // Phòng cược ban đầu đã có người chơi tham gia (player != None) -> Không cho phép Join lần 2
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: Some(mock_pub_key_address(2, None)),
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  let updated_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: Some(mock_pub_key_address(4, None)),
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(6000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(12000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(updated_bet_datum),
+        reference_script: None,
+      },
+    ],
+    extra_signatories: [mock_pub_key_hash(4)],
+    validity_range: mock_interval(Some(1753162820000), Some(1753163120000)),
+  }
+
+  let join_action: Action = JOIN
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    join_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+test fail_join_changes_owner() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Người chơi cố tình thay đổi chủ phòng sang ví khác (ví 4)
+  let updated_bet_datum = BetDatum {
+    owner: mock_pub_key_address(4, None),
+    player: Some(mock_pub_key_address(2, None)),
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(3000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(6000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(updated_bet_datum),
+        reference_script: None,
+      },
+    ],
+    extra_signatories: [mock_pub_key_hash(2)],
+    validity_range: mock_interval(Some(1753162820000), Some(1753163120000)),
+  }
+
+  let join_action: Action = JOIN
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    join_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+test fail_join_changes_referee() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Người chơi cố tình thay đổi trọng tài sang ví quen của mình (ví 4)
+  let updated_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: Some(mock_pub_key_address(2, None)),
+    referee: mock_pub_key_address(4, None),
+    expiration: 1753939940000,
+  }
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(3000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(6000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(updated_bet_datum),
+        reference_script: None,
+      },
+    ],
+    extra_signatories: [mock_pub_key_hash(2)],
+    validity_range: mock_interval(Some(1753162820000), Some(1753163120000)),
+  }
+
+  let join_action: Action = JOIN
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    join_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+test fail_join_changes_expiration() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Người chơi cố tình thay đổi thời điểm hết hạn của ván cược
+  let updated_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: Some(mock_pub_key_address(2, None)),
+    referee: mock_pub_key_address(3, None),
+    expiration: 1754000000000,
+  }
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(3000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        address: from_script(mock_policy_id(1)),
+        value: from_lovelace(6000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: InlineDatum(updated_bet_datum),
+        reference_script: None,
+      },
+    ],
+    extra_signatories: [mock_pub_key_hash(2)],
+    validity_range: mock_interval(Some(1753162820000), Some(1753163120000)),
+  }
+
+  let join_action: Action = JOIN
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    join_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
 // =========================================================================
 // NHÓM 3: SPEND VALIDATOR - NHÁNH CANCEL (HUỶ CƯỢC KHI HẾT HẠN)
 // =========================================================================
@@ -873,6 +1304,52 @@ test fail_cancel_multiple_outputs() fail {
     extra_signatories: [mock_pub_key_hash(1)],
     validity_range: mock_interval(Some(1754027120000), None),
   }
+  let cancel_action: Action = CANCEL
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    cancel_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+test fail_cancel_output_contains_token() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+
+  // Output hoàn tiền về cho owner không chỉ có Ada mà giữ lại Bet Token (không chịu đốt) -> Fail
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(3000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        address: mock_pub_key_address(1, None),
+        value: from_lovelace(3000000)
+          |> add(mock_policy_id(1), test_token_name, 1),
+        datum: NoDatum,
+        reference_script: None,
+      },
+    ],
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1754027120000), None),
+  }
 
   let cancel_action: Action = CANCEL
   bet.bet.spend(
@@ -931,11 +1408,58 @@ test fail_cancel_invalid_input_token() fail {
   )
 }
 
+test fail_cancel_wrong_destination_address() fail {
+  let initial_bet_datum = BetDatum {
+    owner: mock_pub_key_address(1, None),
+    player: None,
+    referee: mock_pub_key_address(3, None),
+    expiration: 1753939940000,
+  }
+  // Output hoàn tiền nhưng gửi sang địa chỉ khác không phải Owner -> Fail
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(3000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(initial_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        // Sai địa chỉ: Gửi về địa chỉ khác (ví 2) thay vì địa chỉ Owner (ví 1)
+        address: mock_pub_key_address(2, None),
+        value: from_lovelace(3000000),
+        datum: NoDatum,
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, -1),
+    extra_signatories: [mock_pub_key_hash(1)],
+    validity_range: mock_interval(Some(1754027120000), None),
+  }
+
+  let cancel_action: Action = CANCEL
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(initial_bet_datum),
+    cancel_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
 // =========================================================================
 // NHÓM 4: SPEND VALIDATOR - NHÁNH ANNOUNCE_WINNER (TRỌNG TÀI CÔNG BỐ NGƯỜI THẮNG)
 // =========================================================================
 
-test announce_winner_the_bet() {
+test announce_owner_win() {
   let closed_bet_datum = BetDatum {
     owner: mock_pub_key_address(1, None),
     player: Some(mock_pub_key_address(2, None)),
@@ -982,7 +1506,7 @@ test announce_winner_the_bet() {
   )
 }
 
-test announce_winner_player_wins_simulation() {
+test announce_player_win() {
   let player_addr = mock_pub_key_address(2, None)
   let referee_addr = mock_pub_key_address(3, None)
   let owner_addr = mock_pub_key_address(1, None)
@@ -1315,6 +1839,104 @@ test fail_announce_when_no_player() fail {
     Some(open_bet_datum),
     announce_action,
     mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+test fail_announce_wrong_winner_address() fail {
+  let player_addr = mock_pub_key_address(2, None)
+  let referee_addr = mock_pub_key_address(3, None)
+  let owner_addr = mock_pub_key_address(1, None)
+  let closed_bet_datum = BetDatum {
+    owner: owner_addr,
+    player: Some(player_addr),
+    referee: referee_addr,
+    expiration: 1753939940000,
+  }
+
+  let test_transaction = Transaction {
+    ..placeholder,
+    inputs: [
+      Input {
+        output: Output {
+          address: from_script(mock_policy_id(1)),
+          value: from_lovelace(6000000)
+            |> add(mock_policy_id(1), test_token_name, 1),
+          datum: InlineDatum(closed_bet_datum),
+          reference_script: None,
+        },
+        output_reference: mock_utxo_ref(1, 0),
+      },
+    ],
+    outputs: [
+      Output {
+        // Trọng tài công bố Owner thắng (is_owner_win = True) nhưng output lại gửi về ví lạ (ví 4) -> Fail
+        address: mock_pub_key_address(4, None),
+        value: from_lovelace(6000000),
+        datum: NoDatum,
+        reference_script: None,
+      },
+    ],
+    mint: from_asset(mock_policy_id(1), test_token_name, -1),
+    extra_signatories: [mock_pub_key_hash(3)],
+    validity_range: mock_interval(Some(1754027120000), None),
+  }
+
+  let announce_action: Action = ANNOUNCE_WINNER { is_owner_win: True }
+  bet.bet.spend(
+    test_token_name,
+    test_min_bet,
+    Some(closed_bet_datum),
+    announce_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
+}
+
+// =========================================================================
+// NHÓM 5: MINT VALIDATOR - NHÁNH BURN BET TOKEN (ĐỐT TOKEN)
+// =========================================================================
+
+test burn_the_bet() {
+  let test_transaction = Transaction {
+    ..placeholder,
+    mint: from_asset(mock_policy_id(1), test_token_name, -1),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_burn_more_than_one() fail {
+  // Cố tình đốt nhiều hơn 1 token (quantity = -2) -> Không rơi vào nhánh -1 -> Fail
+  let test_transaction = Transaction {
+    ..placeholder,
+    mint: from_asset(mock_policy_id(1), test_token_name, -2),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
+    test_transaction,
+  )
+}
+
+test fail_burn_wrong_token_name() fail {
+  // Đốt đúng policy nhưng sai token name -> expect token_name == bet_token_name -> Fail
+  let test_transaction = Transaction {
+    ..placeholder,
+    mint: from_asset(mock_policy_id(1), "Wrong Bet Token", -1),
+  }
+  bet.bet.mint(
+    test_token_name,
+    test_min_bet,
+    NoDatum,
+    mock_policy_id(1),
     test_transaction,
   )
 }

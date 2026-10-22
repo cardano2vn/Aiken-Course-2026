@@ -11,6 +11,8 @@ interface WalletState {
   address: string;
   connect: (walletId: string) => Promise<void>;
   disconnect: () => void;
+  isTxBusy: boolean;
+  setTxBusy: (busy: boolean) => void;
 }
 
 const WalletContext = createContext<WalletState>({
@@ -21,6 +23,8 @@ const WalletContext = createContext<WalletState>({
   address: "",
   connect: async () => {},
   disconnect: () => {},
+  isTxBusy: false,
+  setTxBusy: () => {},
 });
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -29,6 +33,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [connecting, setConnecting] = useState(false);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [isTxBusy, setTxBusy] = useState(false);
 
   const connect = useCallback(async (walletId: string) => {
     setConnecting(true);
@@ -54,7 +59,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <WalletContext.Provider value={{ wallet, connected, connecting, name, address, connect, disconnect }}>
+    <WalletContext.Provider value={{ wallet, connected, connecting, name, address, connect, disconnect, isTxBusy, setTxBusy }}>
       {children}
     </WalletContext.Provider>
   );

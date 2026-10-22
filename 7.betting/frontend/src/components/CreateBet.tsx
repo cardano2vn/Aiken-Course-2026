@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
 import { BlockfrostProvider, MeshTxBuilder } from "@meshsdk/core";
 import { useWallet } from "@/contexts/WalletContext";
-import { createBetTx } from "@cardano-bet-dapp/offchain";
+import { createBetTx, NETWORK_ID } from "@cardano-bet-dapp/offchain";
 import TxStatus, { TxStepStatus } from "@/components/TxStatus";
 import { waitForTxConfirmation, pendingTxStorage } from "@/utils/txUtils";
 
@@ -14,22 +14,20 @@ interface CreateBetProps {
 
 // Validation: địa chỉ Cardano bắt đầu bằng addr1 (mainnet) hoặc addr_test1 (preprod/preview)
 const isValidCardanoAddress = (addr: string): boolean => {
-  return /^(addr_test1)[a-z0-9]+$/.test(addr.trim());
+  const trimmed = addr.trim();
+  return NETWORK_ID === 1
+    ? /^addr1[a-z0-9]+$/.test(trimmed)
+    : /^addr_test1[a-z0-9]+$/.test(trimmed);
 };
 
 
 export default function CreateBet({ onSuccess }: CreateBetProps) {
-  const { wallet, connected } = useWallet();
+  const { wallet, connected, isTxBusy, setTxBusy } = useWallet();
+  const [betAmount, setBetAmount] = useState("5");   // ADA, default 5
   const [refereeAddr, setRefereeAddr] = useState("");
   const [expirationDatetime, setExpirationDatetime] = useState("");
-  const [betAmount, setBetAmount] = useState("5");   // ADA, default 5
   const [betMessage, setBetMessage] = useState("");
 
-  // Cho phép nhập tối đa 250 ký tự (sẽ được tự động phân tách theo chuẩn CIP-20 64-byte chunks ở tầng giao dịch)
-  const MAX_MSG_CHARS = 250;
-  const handleBetMessageChange = (value: string) => {
-    setBetMessage(value.slice(0, MAX_MSG_CHARS));
-  };
   const [txStatus, setTxStatus] = useState<TxStepStatus>("idle");
   const [txError, setTxError] = useState("");
   const [txHash, setTxHash] = useState("");
@@ -45,13 +43,15 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
 
     setTxHash(pending.hash);
     setTxStatus("confirming");
+    setTxBusy(true);
 
     waitForTxConfirmation(provider, pending.hash).then((isConfirmed) => {
       pendingTxStorage.clear("pending_create_bet");
       setTxStatus(isConfirmed ? "success" : "submitted");
+      setTxBusy(false);
       onSuccess();
     });
-  }, [onSuccess]);
+  }, [onSuccess, setTxBusy]);
 
   // Hiển thị timezone offset của client
   const tzLabel = useMemo(() => {
@@ -62,6 +62,14 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
     }
   }, []);
 
+  // Trạng thái xử lý giao dịch:
+  // - isProcessing: Form này đang trong quá trình xử lý giao dịch
+  // - isLocked: Có 1 giao dịch đang xử lý bởi form này hoặc BetList. Không cho tạo giao dịch mới, tránh xung đột UTxO.
+  const isProcessing = ["building", "signing", "submitting", "confirming"].includes(txStatus);
+  const isLocked = isProcessing || isTxBusy;
+
+  // PRE-CHECK dữ liệu bet trước khi tạo giao dịch
+  // Số tiền cược (tối thiểu 5 ADA)
   const betAmountNum = betAmount ? parseFloat(betAmount.replace(/,/g, "")) : NaN;
   const betAmountError = betAmount
     ? isNaN(betAmountNum)
@@ -71,18 +79,31 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
         : ""
     : "";
 
+  // Kiểm tra địa chỉ ví trọng tài hợp lệ
   const refereeError = refereeAddr && !isValidCardanoAddress(refereeAddr)
-    ? "Invalid Cardano address format"
+    ? `Địa chỉ không hợp lệ (yêu cầu địa chỉ ví ${NETWORK_ID === 1 ? "Mainnet: addr1..." : "Testnet: addr_test1..."})`
     : "";
 
+  // Thời điểm hết hạn phải ở tương lai
+  const expPosixTime = expirationDatetime ? new Date(expirationDatetime).getTime() : 0;
+  const isExpirationValid = !!expirationDatetime && !isNaN(expPosixTime) && expPosixTime > Date.now();
+  const expirationError = expirationDatetime && !isExpirationValid
+    ? "Thời điểm hết hạn phải ở tương lai"
+    : "";
+
+  // Tối đa 250 ký tự cho nội dung ván cược
+  const MAX_MSG_CHARS = 250;
+  const handleBetMessageChange = (value: string) => {
+    setBetMessage(value.slice(0, MAX_MSG_CHARS));
+  };
+
   const isFormValid =
+    betAmountNum >= 5 &&
     isValidCardanoAddress(refereeAddr) &&
-    !!expirationDatetime &&
-    !betAmountError &&
-    !!betAmount;
+    isExpirationValid;
 
   const handleCreate = async () => {
-    if (!wallet || !isFormValid) return;
+    if (!wallet || !isFormValid || isLocked) return;
 
     const apiKey = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "";
     if (!apiKey) {
@@ -91,18 +112,11 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
       return;
     }
 
-    // Chuyển datetime-local (local time) sang Unix ms
-    const expUnixTime = new Date(expirationDatetime).getTime();
-    if (expUnixTime <= Date.now()) {
-      setTxError("Expiration must be in the future");
-      setTxStatus("failed");
-      return;
-    }
-
     const provider = new BlockfrostProvider(apiKey);
     setTxError("");
     setTxHash("");
     setTxStatus("building");
+    setTxBusy(true);
 
     try {
       const txBuilder = new MeshTxBuilder({
@@ -111,7 +125,7 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
         submitter: provider,
       });
       const betAmountLovelace = BigInt(Math.round(betAmountNum * 1_000_000));
-      const unsignedTx = await createBetTx(txBuilder, wallet, refereeAddr, expUnixTime, betAmountLovelace, betMessage);
+      const unsignedTx = await createBetTx(txBuilder, wallet, refereeAddr, expPosixTime, betAmountLovelace, betMessage);
 
       setTxStatus("signing");
       const signedTx = await wallet.signTx(unsignedTx);
@@ -126,30 +140,34 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
       setTxStatus("confirming");
       const isConfirmed = await waitForTxConfirmation(provider, hash);
 
+      // Xử lý hoàn tất: Xóa pending trong LocalStorage và hoàn tất
       pendingTxStorage.clear("pending_create_bet");
       setTxStatus(isConfirmed ? "success" : "submitted");
+      setTxBusy(false);
       onSuccess();
-      // Reset form
+
+      // Reset form nhập liệu về trạng thái mặc định
       setRefereeAddr("");
       setExpirationDatetime("");
       setBetAmount("5");
       setBetMessage("");
     } catch (err: any) {
+      // Xử lý lỗi / người dùng hủy ký ví: Xóa pending storage và mở khóa UI
       pendingTxStorage.clear("pending_create_bet");
+      setTxBusy(false);
       let msg = err.message || "Unknown error";
       try {
+        // Trích xuất lý do lỗi chi tiết (bóc tách mismatchReason từ JSON nếu có)
         const match = msg.match(/Data:\s*(\{.*?\})/);
         if (match?.[1]) {
           const errData = JSON.parse(match[1]);
           if (errData.mismatchReason) msg = errData.mismatchReason;
         }
-      } catch { /* giữ nguyên message gốc */ }
+      } catch { /* giữ nguyên message gốc nếu parse thất bại */ }
       setTxError(msg);
       setTxStatus("failed");
     }
   };
-
-  const isProcessing = ["building", "signing", "submitting", "confirming"].includes(txStatus);
 
   return (
     <motion.div
@@ -219,7 +237,7 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
           <input
             value={refereeAddr}
             onChange={(e) => setRefereeAddr(e.target.value)}
-            placeholder="addr_test1..."
+            placeholder={NETWORK_ID === 1 ? "addr1..." : "addr_test1..."}
             className={`glass-input text-xs ${refereeError ? "border-status-error/60 focus:border-status-error" : ""}`}
           />
           {refereeError && (
@@ -237,9 +255,11 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
             type="datetime-local"
             value={expirationDatetime}
             onChange={(e) => setExpirationDatetime(e.target.value)}
-            className="glass-input text-xs [color-scheme:dark]"
+            className={`glass-input text-xs [color-scheme:dark] ${expirationError ? "border-status-error/60 focus:border-status-error" : ""}`}
           />
-          {expirationDatetime && (
+          {expirationError ? (
+            <p className="text-[11px] text-status-error mt-1">{expirationError}</p>
+          ) : expirationDatetime && (
             <p className="text-[11px] text-text-muted mt-1">
               Expires: {new Date(expirationDatetime).toLocaleString(undefined, {
                 dateStyle: "medium",
@@ -252,10 +272,16 @@ export default function CreateBet({ onSuccess }: CreateBetProps) {
 
         <button
           onClick={handleCreate}
-          disabled={!connected || !isFormValid || isProcessing}
+          disabled={!connected || !isFormValid || isLocked}
           className="w-full py-3 rounded-lg font-semibold text-sm text-neutral-bg1 bg-brand hover:bg-brand-hover shadow-glow hover:shadow-glow-lg transition-all duration-200 disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed"
         >
-          {!connected ? "Connect Wallet First" : "Initialize Bet"}
+          {!connected
+            ? "Connect Wallet First"
+            : isProcessing
+              ? "⏳ Đang tạo bet..."
+              : isTxBusy
+                ? "⏳ Đang đợi giao dịch trước hoàn tất..."
+                : "Initialize Bet"}
         </button>
 
         <TxStatus

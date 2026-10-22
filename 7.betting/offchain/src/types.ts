@@ -15,13 +15,8 @@ export type BetDatum = ConStr0<
 
 // Parsed / human-friendly version for use in UI and transaction building
 export interface ParsedBetDatum {
-  // Raw address objects — used directly in Datum/Redeemer with conStr helpers
-  owner: PubKeyAddress;
-  player: PubKeyAddress | null; // null = None
-  referee: PubKeyAddress;
-  expiration: bigint;
-  // Serialized bech32 — used for display and txOut
   ownerAddress: string;
   playerAddress: string | null;
   refereeAddress: string;
+  expiration: bigint;
 }

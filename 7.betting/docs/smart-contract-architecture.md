@@ -267,7 +267,7 @@ sequenceDiagram
 **`getAllBets`:**
 - Gọi `provider.fetchAddressUTxOs(SCRIPT_ADDRESS)` để lấy toàn bộ UTxO tại địa chỉ script.
 - Lọc lấy các UTxO có chứa Bet Token (`POLICY_ID + TOKEN_NAME_HEX`) và datum đúng định dạng để loại bỏ UTxO rác.
-- Với mỗi UTxO hợp lệ, gọi `parseDatumCbor()` để giải mã Plutus Data CBOR thành `BetDatum`.
+- Với mỗi UTxO hợp lệ, gọi `deserializeDatum()` để giải mã Plutus Data CBOR thành `BetDatum`.
 - Gọi `parseBetDatum()` để chuyển đổi các trường `PubKeyAddress` sang địa chỉ bech32 (`serializeAddressObj`) phục vụ hiển thị và so sánh.
 
 **`fetchBetMessage`:**
@@ -304,9 +304,9 @@ value_length(output_to_winner.value) == 1
 ```
 Thay vì kiểm tra trường `mint`, ta kiểm tra số lượng output và giá trị của output đó. Giao dịch kết thúc bet (ANNOUNCE_WINNER và CANCEL) chỉ cho phép một Output duy nhất và chỉ chứa ADA. Vì giao dịch tiêu thụ Bet Token từ Input nhưng không có Output nào chứa nó, theo quy tắc bảo toàn giá trị của EUTxO, cách duy nhất để cân bằng giao dịch là burn token đó (`mint = -1`).
 
-Phương án kiểm tra này cũng xuất phát từ một lý do khác: phí giao dịch trên Cardano không cố định và chỉ được xác định tại thời điểm build TX. Nếu validator kiểm tra cứng giá trị Output (ví dụ phải bằng giá trị `pot` ở thời điểm công bố), thì phí giao dịch bắt buộc phải trích từ ví của Referee (người ký giao dịch). Bằng cách chỉ ràng buộc một Output duy nhất và set `changeAddress = winner`, MeshJS sẽ tự động tính toán và routing toàn bộ số ADA còn lại (sau phí) về địa chỉ người thắng. Kết quả là phí giao dịch được khấu trừ từ chính quỹ cược, không phải từ ví của Referee.
+Phương án kiểm tra này cũng xuất phát từ một lý do khác: phí giao dịch trên Cardano không cố định và chỉ được xác định tại thời điểm build TX. Nếu validator kiểm tra cứng giá trị Output (ví dụ phải bằng giá trị `pot` ở thời điểm công bố), thì phí giao dịch bắt buộc phải trích từ ví của Referee (người ký giao dịch). Bằng cách chỉ ràng buộc một Output duy nhất và set `changeAddress = winner`, MeshJS sẽ tự động tính toán và routing toàn bộ số ADA còn lại (sau phí) về địa chỉ người thắng. Kết quả là phí giao dịch được khấu trừ từ chính quỹ cược, không phải từ ví của Referee. Tương tự với giao dịch CANCEL.
 
-Cách tiếp cận này cũng mở ra khả năng gộp nhiều giao dịch ANNOUNCE_WINNER hoặc CANCEL vào cùng 1 TX. Hãy thử sức với bài tập này trong phần thực hành.
+Cách tiếp cận này cũng mở ra khả năng gộp nhiều giao dịch CANCEL (các bet từ cùng owner) vào cùng 1 TX. Hãy thử sức với bài tập này trong phần thực hành.
 
 ### 4.3 Xác thực chữ ký từ Datum, không từ Change Address
 
@@ -319,3 +319,23 @@ const refereePkh = resolvePaymentKeyHash(betDatumData.refereeAddress); // ← t�
 ```
 
 Điều này đảm bảo tính đúng đắn khi người dùng dùng ví ở chế độ multi-address có nhiều địa chỉ con — Change Address hiện tại của ví có thể khác với địa chỉ đã đăng ký trong Datum.
+
+### 4.4 Ấn định Budget tĩnh (Fixed Execution Units) cho ANNOUNCE và CANCEL
+
+**Vấn đề:**
+- **Nghiệp vụ & On-chain:** Ở 2 giao dịch `announceWinnerTx` và `cancelBetTx`, dApp được thiết kế để Trọng tài / Chủ cược không phải bỏ thêm ADA từ ví cá nhân để trả phí. Toàn bộ phí mạng lưới được khấu trừ trực tiếp từ Script UTxO, và số ADA còn lại được dồn về người thụ hưởng qua `changeAddress`. Đồng thời, Smart Contract ràng buộc giao dịch chỉ được phép có duy nhất 1 Output (`expect [output] = outputs`).
+- **Hạn chế khi dùng Evaluator tự động:** Do giao dịch không có `.txOut` cố định (phí trừ linh hoạt vào quỹ cược), cơ chế tự động ước lượng tài nguyên của MeshSDK (`evaluator`) phát sinh lỗi `EvaluationFailure` trong quá trình dựng và đánh giá Mock Transaction.
+
+**Giải pháp:**
+Thay vì sử dụng Evaluator động, dự án ấn định trước Execution Units (Budget) tĩnh dựa trên kết quả đo đạc thực tế từ `aiken check` kèm 30% biên độ an toàn:
+
+```typescript
+export const BET_SPEND_ANNOUNCE_BUDGET = { mem: 260000, steps: 115000000 };
+export const BET_SPEND_CANCEL_BUDGET   = { mem: 260000, steps: 115000000 };
+export const BET_BURN_BUDGET           = { mem: 50000,  steps: 20000000 };
+```
+
+Cách tiếp cận này giúp:
+- Giao dịch hoàn toàn tự cấp vốn (Self-funded) từ Script UTxO — Trọng tài ký phân xử với `0 ADA` chi phí cá nhân.
+- Duy trì cấu trúc duy nhất 1 Output, thỏa mãn tuyệt đối điều kiện kiểm tra của Smart Contract mà không phụ thuộc vào cơ chế Coin Selection của SDK.
+

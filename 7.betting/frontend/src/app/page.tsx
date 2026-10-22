@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { BlockfrostProvider } from "@meshsdk/core";
-import { getAllBets, fetchBetMessage } from "@cardano-bet-dapp/offchain";
+import { getAllBets, fetchBetMessage, NETWORK_ID } from "@cardano-bet-dapp/offchain";
 import WalletConnect from "@/components/WalletConnect";
 import { useWallet } from "@/contexts/WalletContext";
 import CreateBet from "@/components/CreateBet";
@@ -25,9 +25,9 @@ export default function Home() {
     try {
       const data = await getAllBets(provider);
 
-      // Load messages song song để tránh chờ tuần tự
+      // Load messages song song
       const messages = await Promise.all(
-        data.map(({ utxo, datum }) => fetchBetMessage(provider, utxo, datum, apiKey))
+        data.map(({ utxo, datum }) => fetchBetMessage(utxo, datum, apiKey))
       );
 
       const betsWithMessages = data.map((b, i) => ({ ...b, message: messages[i] }));
@@ -58,7 +58,15 @@ export default function Home() {
           <div className="w-10 h-10 rounded-full bg-brand/20 border border-brand/50 flex items-center justify-center shadow-glow">
             <span className="text-brand font-bold text-lg">🎲</span>
           </div>
-          <span className="font-bold text-xl tracking-wide hidden sm:block">BETTING dApp</span>
+          <div className="flex items-center gap-2.5">
+            <span className="font-bold text-xl tracking-wide hidden sm:block">BETTING dApp</span>
+            <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-full border ${NETWORK_ID === 1
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+              }`}>
+              {NETWORK_ID === 1 ? "Mainnet" : "Preprod"}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <button

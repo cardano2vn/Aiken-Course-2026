@@ -82,14 +82,14 @@ building → signing → submitting → confirming → success
 - `building`: Off-chain đang gom UTxO và xây dựng giao dịch.
 - `signing`: Chờ người dùng ký qua ví CIP-30.
 - `submitting`: Đang gửi lên mạng lưới qua Blockfrost.
-- `confirming`: Polling Blockfrost mỗi 5 giây, tối đa 30 lần (~2.5 phút).
+- `confirming`: Lắng nghe xác nhận on-chain qua `provider.onTxConfirmed` (thăm dò mỗi 5 giây, tối đa 30 lần ~ 2.5 phút). Giao dịch được lưu tạm vào `localStorage` kèm timestamp (tối đa 5 phút) để tự động khôi phục tiến trình nếu người dùng F5 hoặc reload trang.
 - `submitted`: Giao dịch đã được gửi nhưng chưa confirm — thông báo người dùng kiểm tra Explorer.
 - `success`: Blockfrost xác nhận giao dịch đã có trong block.
 
 ### 2.3 Giới thiệu các Component chính
 
 - **`CreateBet.tsx`**: Form giao diện để người dùng tạo bet. Xử lý việc nhập thông tin, gọi logic build transaction và hiển thị tiến trình qua `TxStatus`.
-- **`BetList.tsx`**: Component cốt lõi của ứng dụng, hiển thị tất cả các kèo bet đang có trên hệ thống. Nó tự động nhận diện vai trò người dùng (Owner, Player, Referee) để hiển thị các nút tương tác tương ứng.
+- **`BetList.tsx`**: Component cốt lõi của ứng dụng, hiển thị tất cả các ván cược đang có trên hệ thống. Nó tự động nhận diện vai trò người dùng (Owner, Player, Referee) để hiển thị các nút tương tác tương ứng.
 - **`TxStatus.tsx`**: Một portal/overlay hiển thị trạng thái thời gian thực của giao dịch, giúp người dùng theo dõi từ giai đoạn xây dựng đến khi xác nhận trên blockchain.
 
 ## 3. Lớp Off-chain (Off-chain Library)
@@ -120,9 +120,9 @@ Khác với EVM nơi Smart Contract tự thực thi và thay đổi trạng thá
 ### 3.4 Các giao dịch cốt lõi (`transactions.ts`)
 
 - **`createBetTx`**: Khởi tạo bet mới. Thực hiện đúc (mint) 1 Bet Token để định danh bet và khóa tiền đặt cược (ADA) vào địa chỉ Script cùng với Datum ban đầu.
-- **`joinBetTx`**: Cho phép người chơi thứ hai tham gia bet. Giao dịch tiêu thụ Bet UTxO hiện tại, yêu cầu người chơi nạp thêm ADA bằng lượng chủ kèo đã đặt và cập nhật địa chỉ Player vào Datum của Bet UTxO mới.
+- **`joinBetTx`**: Cho phép người chơi thứ hai tham gia bet. Giao dịch tiêu thụ Bet UTxO hiện tại, yêu cầu người chơi nạp thêm ADA bằng lượng chủ phòng (Owner) đã đặt và cập nhật địa chỉ Player vào Datum của Bet UTxO mới.
 - **`announceWinnerTx`**: Giao dịch công bố kết quả của Referee. Dựa trên kết quả, toàn bộ ADA trong quỹ cược được gửi về địa chỉ Winner, đồng thời thực hiện đốt (burn) Bet Token để kết thúc vòng đời bet.
-- **`cancelBetTx`**: Cho phép chủ kèo rút tiền cược nếu hết thời hạn mà chưa có ai tham gia. Giao dịch này cũng thực hiện đốt Bet Token.
+- **`cancelBetTx`**: Cho phép chủ phòng (Owner) rút tiền cược nếu hết thời hạn mà chưa có ai tham gia. Giao dịch này cũng thực hiện đốt Bet Token.
 
 ## 4. Lớp Hợp đồng Thông minh (On-chain)
 
