@@ -1,6 +1,6 @@
 # Kiến trúc Tổng thể (System Architecture)
 
-P2P Lending là dApp nối borrower và lender bằng một loan UTxO. UTxO giữ principal và collateral, còn datum lưu điều khoản vay cùng trạng thái hiện tại.
+P2P Lending là dApp nối borrower và lender bằng một loan UTxO. UTxO giữ collateral, identity token và ADA tối thiểu; principal được chuyển trực tiếp cho borrower khi lender fund loan. Datum lưu điều khoản vay cùng trạng thái hiện tại.
 
 ## 1. Kiến trúc 3 lớp
 
@@ -11,11 +11,11 @@ graph TD
   FE --> OC["MeshJS off-chain"]
   OC --> Provider["Blockfrost / Koios"]
   OC --> Loan["Loan script UTxO"]
-  Loan --> Validator["crowdlend Aiken validator"]
+  Loan --> Validator["p2plending.p2plending.spend validator"]
   OC --> Policy["identity minting policy"]
 ```
 
-Frontend hiển thị loan và yêu cầu ký. Off-chain tìm loan UTxO, tạo validity range và các output cho borrower/lender. Validator là nơi kiểm tra quyền ký, trạng thái, số tiền và thời gian.
+Frontend hiển thị loan và yêu cầu ký. Off-chain tìm loan UTxO, tạo validity range và các output cho borrower/lender. Validator `p2plending.p2plending.spend` kiểm tra quyền ký, trạng thái, số tiền và thời gian; minting policy `p2plending.p2plending.mint` quản lý identity token.
 
 ## 2. Mô hình dữ liệu
 
@@ -27,12 +27,12 @@ Datum {
 }
 ```
 
-Collateral là native asset xác định bởi `collateral_policy_id`, `collateral_asset_name` và `collateral_amount`; token này được khóa cùng identity token tại địa chỉ lending. `Pending` có `lender` và `due_date` là `None`; `Active` có cả hai giá trị này là `Some`.
+Collateral là native asset xác định bởi `collateral_policy_id`, `collateral_asset_name` và `collateral_amount`; token này được khóa cùng identity token và ADA tối thiểu tại địa chỉ lending. Principal không nằm trong loan UTxO: khi fund, lender chuyển principal trực tiếp cho borrower. `Pending` có `lender` và `due_date` là `None`; `Active` có cả hai giá trị này là `Some`.
 
 ## 3. Luồng nghiệp vụ
 
-1. Borrower tạo loan: mint identity token có tên duy nhất được dẫn xuất từ UTxO seed, khóa collateral và tạo datum `Pending`.
-2. Lender fund: gửi principal, ký giao dịch; datum chuyển sang `Active` và tính `due_date`.
+1. Borrower tạo loan: mint identity token có tên duy nhất được dẫn xuất từ UTxO seed, khóa collateral cùng ADA tối thiểu và tạo datum `Pending`.
+2. Lender fund: principal được chuyển trực tiếp cho borrower; loan UTxO tiếp tục giữ collateral, identity token và ADA tối thiểu. Datum chuyển sang `Active` và tính `due_date`.
 3. Borrower repay: trước due date, trả principal cộng interest cho lender và nhận collateral.
 4. Borrower cancel: khi còn `Pending`, borrower lấy lại collateral.
 5. Liquidate: sau due date, lender ký và nhận collateral.

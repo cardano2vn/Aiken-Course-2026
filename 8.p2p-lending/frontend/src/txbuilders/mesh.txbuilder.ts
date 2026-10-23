@@ -1,7 +1,6 @@
 import {
     deserializeAddress,
     hexToBytes,
-    hexToString,
     mConStr0,
     mConStr1,
     mConStr2,
@@ -146,7 +145,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     principal,
                     interestRate,
                     collateralPolicyId,
-                    hexToString(collateralAssetName),
+                    collateralAssetName,
                     collateralAmount,
                     loanDuration,
                     mConStr1([]),
@@ -213,7 +212,8 @@ export class MeshTxBuilder extends MeshAdapter {
         }
 
         const currentSlot = Number(resolveSlotNo(APP_NETWORK));
-        const upperSlot = Number(resolveSlotNo(APP_NETWORK, datum.dueDate));
+        const dueDateSlot = Number(resolveSlotNo(APP_NETWORK, datum.dueDate));
+        const upperSlot = Math.min(currentSlot + 300, dueDateSlot);
         const lowerSlot = Math.min(currentSlot - 30, upperSlot - 1);
         const principal = BigInt(datum.principal);
         const totalRepayment = principal + (principal * BigInt(datum.interestRate)) / BigInt(10000);

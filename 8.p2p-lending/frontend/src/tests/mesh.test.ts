@@ -6,7 +6,7 @@ import { DECIMAL_PLACE } from "../constants/common";
 
 const runCardanoIntegrationTest = process.env.RUN_CARDANO_INTEGRATION_TESTS === "true" ? test : test.skip;
 
-describe("CrowdFund is a decentralized crowdfunding platform on Cardano that enables secure donations, transparent fund management, and trustless fundraising through smart contracts.", function () {
+describe("P2P Lending on Cardano", function () {
     let meshWallet: MeshWallet;
 
     // account 0 - addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g
@@ -30,8 +30,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
 
     jest.setTimeout(600000000);
 
-    test("Create", async function () {
-        return;
+    runCardanoIntegrationTest("Create", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -58,8 +57,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Cancel", async function () {
-        return;
+    runCardanoIntegrationTest("Cancel", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -90,9 +88,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Fund a pending loan on Cardano", async function () {
-        return;
-
+    runCardanoIntegrationTest("Fund a pending loan on Cardano", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -123,8 +119,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Repay", async function () {
-        // return;
+    runCardanoIntegrationTest("Repay", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
@@ -159,8 +154,7 @@ describe("CrowdFund is a decentralized crowdfunding platform on Cardano that ena
         });
     });
 
-    test("Liquidate an overdue loan owned by the test wallet", async function () {
-        return;
+    runCardanoIntegrationTest("Liquidate an overdue loan owned by the test wallet", async function () {
         const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
             meshWallet: meshWallet,
         });
