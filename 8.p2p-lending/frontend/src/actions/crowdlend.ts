@@ -24,22 +24,35 @@ const createBuilder = async ({ address }: { address: string }) => {
     await meshTxBuilder.initalize();
     return meshTxBuilder;
 };
-
 export const getLoans = async () => {
-    const { spendAddress } = getLendingScriptDetails();
-    const utxos = await blockfrostProvider.fetchAddressUTxOs(spendAddress);
+    try {
+        const { spendAddress } = getLendingScriptDetails();
+        const utxos = await blockfrostProvider.fetchAddressUTxOs(
+            spendAddress
+        );
 
-    return utxos.map((utxo) => {
-        if (!utxo.output.plutusData) {
-            throw new Error(`Loan UTxO ${utxo.input.txHash}#${utxo.input.outputIndex} has no inline datum.`);
+        return utxos.map((utxo) => {
+            if (!utxo.output.plutusData) {
+                throw new Error(
+                    `Loan UTxO ${utxo.input.txHash}#${utxo.input.outputIndex} has no inline datum.`
+                );
+            }
+
+            return {
+                ...convertDatum({
+                    plutusData: utxo.output.plutusData,
+                }),
+                txHash: utxo.input.txHash,
+                outputIndex: utxo.input.outputIndex,
+            };
+        });
+    } catch (error) {
+        if (error instanceof Error) {
+            throw error;
         }
 
-        return {
-            ...convertDatum({ plutusData: utxo.output.plutusData }),
-            txHash: utxo.input.txHash,
-            outputIndex: utxo.input.outputIndex,
-        };
-    });
+        throw new Error("Failed to fetch loan list.");
+    }
 };
 
 export const create = async ({
