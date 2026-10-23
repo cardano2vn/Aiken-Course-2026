@@ -42,7 +42,7 @@ describe("P2P Lending on Cardano", function () {
             principal: 10 * DECIMAL_PLACE,
             interestRate: 500,
             loanDuration: 60 * 60 * 1000,
-            collateralUnit: `d9b15df3faee3a39677378562806a4d01d269b7f5898ae30b3c72561487964726120436f757273652032303236`,
+            collateralUnit: `8b2a065ab2fb6b36930fe715922a914efaa2ad926e8044e8a784f226000de1404275696c64696e6720576974682041696b656e`,
             collateralAmount: 1,
         });
 
