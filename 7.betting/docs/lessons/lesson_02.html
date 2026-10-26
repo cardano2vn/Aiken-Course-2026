@@ -1,0 +1,485 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#thiet-ke-validator">1. Thiết kế Multi-Purpose Validator</a></li>
+    <li><a href="#trien-khai-logic">2. Triển khai Logic On-chain</a></li>
+    <li><a href="#unit-testing">3. Unit Testing</a></li>
+    <li><a href="#bai-tap-tong-ket">4. Bài tập và Tổng kết</a></li>
+  </ul>
+</blockquote>
+
+<p>Ở Bài 1, chúng ta đã tìm hiểu luật chơi và vòng đời của một bet. Trong bài này, chúng ta sẽ chuyển các quy tắc đó thành mã hợp đồng thông minh on-chain hoàn chỉnh bằng ngôn ngữ Aiken.</p>
+
+<hr />
+
+<h2 id="thiet-ke-validator">1. Thiết kế Multi-Purpose Validator</h2>
+
+<h4>Phân chia nhiệm vụ giữa Mint handler và Spend handler</h4>
+<p>Trong vòng đời của một ván cược, có 4 loại hành động tương tác với validator. Để xác định trách nhiệm của từng handler đối với mỗi hành động, trước hết hãy xem hành động đó có tiêu thụ Bet UTxO hoặc mint/burn Bet Token hay không:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Hành động</th>
+      <th>Tiêu thụ Bet UTxO?</th>
+      <th>Mint/Burn Bet Token?</th>
+      <th>Nhiệm vụ</th>
+      <th>Handler được kích hoạt</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>CREATE</code></td>
+      <td>Không</td>
+      <td>Mint</td>
+      <td>Tạo Bet UTxO ban đầu tại Script</td>
+      <td><code>mint</code></td>
+    </tr>
+    <tr>
+      <td><code>JOIN</code></td>
+      <td>Có</td>
+      <td>Không</td>
+      <td>Tạo Bet UTxO tiếp nối (cập nhật Player)</td>
+      <td><code>spend</code></td>
+    </tr>
+    <tr>
+      <td><code>ANNOUNCE_WINNER</code></td>
+      <td>Có</td>
+      <td>Burn</td>
+      <td>Đóng bet và giải ngân tiền cược cho người thắng</td>
+      <td><code>spend</code> và <code>mint</code></td>
+    </tr>
+    <tr>
+      <td><code>CANCEL</code></td>
+      <td>Có</td>
+      <td>Burn</td>
+      <td>Đóng bet và hoàn trả tiền cọc cho Chủ phòng</td>
+      <td><code>spend</code> và <code>mint</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Hành động <code>CREATE</code> không tiêu thụ Bet UTxO, nó đúc 1 Bet Token và tạo trạng thái ban đầu trong một Bet UTxO mới. Do đó, mint handler kiểm tra cả thao tác mint lẫn tính hợp lệ của Bet UTxO mới.</p>
+<p>Ba hành động còn lại đều tiêu thụ Bet UTxO nên đều kích hoạt spend handler. Trong đó, <code>JOIN</code> được kiểm tra hoàn toàn bởi spend handler. Riêng <code>ANNOUNCE_WINNER</code> và <code>CANCEL</code> còn đốt Bet Token nên kích hoạt đồng thời cả mint handler. Với 2 hành động này, toàn bộ logic kiểm tra nghiệp vụ chính được đặt tại spend handler; còn mint handler chỉ thuần túy làm nhiệm vụ kiểm tra việc đốt token hợp lệ.</p>
+
+<hr />
+
+<h4>Bet Datum</h4>
+<p>Trong dApp này, <strong>mỗi Bet UTxO đại diện cho một ván cược độc lập</strong>. Datum lưu trữ những dữ liệu validator cần để kiểm tra các hành động của bet:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Trường</th>
+      <th>Kiểu dữ liệu</th>
+      <th>Ý nghĩa</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>owner</code></td>
+      <td><code>Address</code></td>
+      <td>Địa chỉ của người tạo bet (Chủ phòng)</td>
+    </tr>
+    <tr>
+      <td><code>player</code></td>
+      <td><code>Option&lt;Address&gt;</code></td>
+      <td><code>None</code> trước khi có người tham gia; <code>Some(address)</code> sau khi JOIN</td>
+    </tr>
+    <tr>
+      <td><code>referee</code></td>
+      <td><code>Address</code></td>
+      <td>Địa chỉ ví của Trọng tài được quyền công bố kết quả</td>
+    </tr>
+    <tr>
+      <td><code>expiration</code></td>
+      <td><code>Int</code></td>
+      <td>Thời điểm hết hạn, tính bằng POSIX milliseconds</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Khai báo cấu trúc <code>BetDatum</code> trong Aiken:</p>
+<pre><code>pub type BetDatum {
+  owner: Address,
+  player: Option&lt;Address&gt;,
+  referee: Address,
+  expiration: Int,
+}</code></pre>
+
+<p>Trạng thái ứng dụng được suy ra từ trường <code>player</code> và mốc thời gian hiện tại so với <code>expiration</code>. Frontend tự động tính toán các trạng thái này, vì vậy Datum không cần lưu thêm trường trạng thái riêng:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Giá trị <code>player</code></th>
+      <th>Mốc thời gian</th>
+      <th>Trạng thái suy diễn</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>None</code></td>
+      <td><code>&lt; expiration</code></td>
+      <td><code>OPEN</code></td>
+    </tr>
+    <tr>
+      <td><code>None</code></td>
+      <td><code>&gt;= expiration</code></td>
+      <td><code>EXPIRED</code></td>
+    </tr>
+    <tr>
+      <td><code>Some(...)</code></td>
+      <td><code>&lt; expiration</code></td>
+      <td><code>CLOSED</code></td>
+    </tr>
+    <tr>
+      <td><code>Some(...)</code></td>
+      <td><code>&gt;= expiration</code></td>
+      <td><code>AWAITING_RESULT</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h4>Redeemer và Tham số Hợp đồng</h4>
+<p>Redeemer của spend handler biểu diễn ba hành động mà nó xử lý:</p>
+<pre><code>pub type Action {
+  JOIN
+  ANNOUNCE_WINNER { is_owner_win: Bool }
+  CANCEL
+}</code></pre>
+
+<p>Riêng hành động <code>ANNOUNCE_WINNER</code> cần thêm thông tin để xác định người thắng. Do ván cược chỉ có hai người chơi, chúng ta chỉ cần một trường Boolean <code>is_owner_win</code> cho biết Owner có thắng hay không; không cần truyền trực tiếp địa chỉ người thắng. Với hành động <code>JOIN</code>, địa chỉ Player được ghi trực tiếp vào Datum mới nên Redeemer không cần chứa địa chỉ này.</p>
+<p>Mint handler phân biệt thao tác đúc/đốt dựa vào số lượng trong trường <code>mint</code> (<code>1</code> là đúc, <code>-1</code> là đốt). Vì vậy, để đơn giản chúng ta không cần tạo thêm kiểu redeemer riêng cho mint handler.</p>
+<p>Validator nhận hai tham số cấu hình cố định:</p>
+<ul>
+  <li><code>bet_token_name: ByteArray</code>: Tên token, dùng để xác định chính xác Bet Token của dApp.</li>
+  <li><code>minimum_bet_amount: Int</code>: Số lovelace tối thiểu Chủ phòng phải đặt khi khởi tạo bet (ví dụ: 5.000.000 Lovelace = 5 ADA).</li>
+</ul>
+
+<hr />
+
+<h2 id="trien-khai-logic">2. Triển khai Logic On-chain</h2>
+
+<h4>Khung Checklist 5 thành phần giao dịch</h4>
+<p>Để tránh bỏ sót các logic cần kiểm tra, chúng ta thiết lập một khung <strong>Checklist</strong> gồm 5 thành phần cơ bản:</p>
+
+<p style="text-align: center;"><img src="../resources/checklist.png" alt="Checklist rà logic on-chain" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Áp dụng checklist này cho từng hành động để xây dựng logic cho nhánh code tương ứng:</p>
+<ul>
+  <li><strong>Inputs:</strong> Có đầu vào giao dịch nào validator cần phải kiểm tra không? Với mỗi đầu vào này, có 3 yếu tố cần kiểm tra: địa chỉ, Value và Datum.</li>
+  <li><strong>Outputs:</strong> Tương tự, validator cần kiểm soát các output nào? Mỗi output cần quan tâm đến 3 yếu tố: địa chỉ, Value và Datum.</li>
+  <li><strong>Mint/Burn:</strong> Bet Token được mint, giữ nguyên hay burn? Token name và quantity nào được chấp nhận?</li>
+  <li><strong>Validity range:</strong> Khoảng thời gian hợp lệ của giao dịch phải trước hay sau mốc <code>expiration</code>?</li>
+  <li><strong>Chữ ký:</strong> Giao dịch bắt buộc phải có chữ ký xác thực của ai?</li>
+</ul>
+
+<hr />
+
+<h4>CREATE: Khởi tạo Bet</h4>
+
+<p style="text-align: center;"><img src="../resources/create.png" alt="Mindmap logic của CREATE" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Hành động <code>CREATE</code> đúc đúng một Bet Token và tạo Bet UTxO tại Script address. Bet UTxO này chứa token vừa đúc cùng Datum khởi tạo:</p>
+<ul>
+  <li><strong>Inputs:</strong> Không có đầu vào nào cần kiểm tra đặc biệt (tiền lấy từ ví của Chủ phòng).</li>
+  <li><strong>Outputs:</strong> Có đúng một đầu ra duy nhất gửi về Script address (Bet UTxO):
+    <ul>
+      <li><strong>Address:</strong> Gửi đúng về địa chỉ hợp đồng (<code>from_script(policy_id)</code>).</li>
+      <li><strong>Value:</strong> Chứa ít nhất <code>minimum_bet_amount</code> lovelace và đúng một Bet Token; không chứa thêm bất kỳ native token nào khác để đảm bảo output sạch.</li>
+      <li><strong>Datum:</strong> Khởi tạo <code>BetDatum</code> với <code>player == None</code>, đồng thời mã băm Payment Key của Trọng tài phải khác Chủ phòng.</li>
+    </ul>
+  </li>
+  <li><strong>Mint:</strong> Đúc đúng một Bet Token với token name đã cấu hình.</li>
+  <li><strong>Validity range:</strong> Giao dịch phải hợp lệ trước thời điểm hết hạn <code>expiration</code> ghi trong Datum.</li>
+  <li><strong>Chữ ký:</strong> Chủ phòng (Owner) bắt buộc phải ký giao dịch.</li>
+</ul>
+
+<p>Mint handler trích xuất token thuộc policy hiện tại từ trường <code>mint</code> và xác nhận token name khớp với tham số cấu hình:</p>
+<pre><code>expect [Pair(token_name, quantity)] = dict.to_pairs(tokens(mint, policy_id))
+expect token_name == bet_token_name</code></pre>
+
+<p>Phân nhánh xử lý theo số lượng <code>quantity</code>:</p>
+<pre><code>when quantity is {
+  1 -&gt; {
+    // Kiểm tra giao dịch tạo bet
+    ...
+  }
+  -1 -&gt; True
+  _ -&gt; False
+}</code></pre>
+
+<p>Nhánh <code>quantity == -1</code> cho phép đốt đúng một Bet Token. Khi rơi vào nhánh này, mint handler chỉ đơn giản trả về <code>True</code> vì toàn bộ điều kiện nghiệp vụ đóng bet đã được kiểm duyệt nghiêm ngặt bởi spend handler (ở hai nhánh <code>ANNOUNCE_WINNER</code> và <code>CANCEL</code>). Bet Token luôn bị khóa tại địa chỉ Script — muốn đốt nó bắt buộc phải kích hoạt spend handler để giải phóng UTxO. Cơ chế này tạo nên sự phối hợp và <strong>giám sát hai chiều</strong> chặt chẽ giữa hai handler.</p>
+
+<h5>Chi tiết nhánh CREATE (<code>quantity == 1</code>)</h5>
+<p>Validator tìm Bet UTxO mới và giải mã inline Datum:</p>
+<pre><code>expect [bet_output] = outputs_at(outputs, from_script(policy_id))
+
+let Output { value: output_value, datum, .. } = bet_output
+expect InlineDatum(bet_datum_data) = datum
+expect BetDatum { owner, player, referee, expiration } = bet_datum_data
+let owner_phk = address_payment_key(owner)</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lợi thế của Multi-Purpose Validator:</strong> <code>policy_id</code> chính là script hash của validator này. Bằng cách gọi <code>from_script(policy_id)</code>, ta tạo được chính xác địa chỉ Enterprise của hợp đồng. Hàm <code>outputs_at</code> lọc các output gửi về địa chỉ này, và pattern <code>[bet_output]</code> đảm bảo có duy nhất một output như vậy.</p>
+</blockquote>
+
+<p>Các điều kiện về Value và Datum được gom vào biến <code>bet_init_correct</code>:</p>
+<pre><code>let bet_init_correct = and {
+  (lovelace_of(output_value) &gt;= minimum_bet_amount)?,
+  has_nft_strict(output_value, policy_id, bet_token_name)?,
+  (player == None)?,
+  (address_payment_key(referee) != owner_phk)?,
+}</code></pre>
+
+<p>Hàm trợ giúp <code>has_nft_strict</code> yêu cầu output phải có đúng 1 Bet Token và không chứa bất kỳ native token nào khác ngoài ADA.</p>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Chữ "NFT" trong <code>has_nft_strict</code>:</strong> Tên hàm có chữ <code>NFT</code> đại diện cho tính chất độc bản trong phạm vi cục bộ của riêng output này: số lượng token chính xác bằng 1 và không có thêm token nào khác đi kèm.</p>
+</blockquote>
+
+<p>Tiếp theo, kiểm tra khoảng thời gian hợp lệ và chữ ký của Chủ phòng:</p>
+<pre><code>let created_before_expiration = valid_before(validity_range, expiration)
+let owner_signed = key_signed(extra_signatories, owner_phk)</code></pre>
+
+<p>Biểu thức xác thực tổng thể của nhánh CREATE:</p>
+<pre><code>bet_init_correct? &amp;&amp; created_before_expiration? &amp;&amp; owner_signed?</code></pre>
+
+<hr />
+
+<h4>JOIN: Người chơi Tham gia</h4>
+
+<p style="text-align: center;"><img src="../resources/join.png" alt="Mindmap logic của JOIN" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Hành động <code>JOIN</code> tiêu thụ Bet UTxO hiện tại và tạo một Bet UTxO tiếp nối:</p>
+<ul>
+  <li><strong>Inputs:</strong>
+    <ul>
+      <li>Own input (Script UTxO đang được chi tiêu): Phải chứa đúng 1 Bet Token và ADA, trường <code>player</code> trong Datum ban đầu phải là <code>None</code>.</li>
+      <li>Chống Double Satisfaction: Giao dịch chỉ được phép tiêu thụ duy nhất 1 Script UTxO.</li>
+    </ul>
+  </li>
+  <li><strong>Outputs:</strong> Own output là output duy nhất trả về địa chỉ Script:
+    <ul>
+      <li>Value phải có lượng ADA gấp đôi input (Owner + Player nạp đủ 2X ADA), bảo toàn đúng 1 Bet Token và không có token lạ.</li>
+      <li>Datum mới cập nhật trường <code>player</code> (khác với Owner và Referee); các trường <code>owner</code>, <code>referee</code> và <code>expiration</code> được giữ nguyên vẹn 100%.</li>
+    </ul>
+  </li>
+  <li><strong>Mint/Burn:</strong> Không được đúc hoặc đốt Bet Token.</li>
+  <li><strong>Validity range:</strong> Giao dịch phải hợp lệ trước thời điểm hết hạn <code>expiration</code>.</li>
+  <li><strong>Chữ ký:</strong> Người chơi tham gia (Player) bắt buộc phải ký giao dịch.</li>
+</ul>
+
+<h5>Pre-check chung trong spend handler</h5>
+<p>Trước khi phân nhánh xử lý từng <code>Action</code>, spend handler thực hiện các bước tiền kiểm tra chung:</p>
+<pre><code>expect Some(own_input) = find_input(inputs, own_output_ref)
+let Output { value: input_value, address: own_address, .. } = own_input.output
+
+// Lấy script hash từ UTxO đang xử lý; trong multi-purpose validator,
+// script hash này đồng thời là policy ID của Bet Token
+expect Script(policy_id) = own_address.payment_credential
+
+// Input chỉ chứa đúng một Bet Token và ADA
+expect has_nft_strict(input_value, policy_id, bet_token_name)
+
+// Mỗi giao dịch chỉ được xử lý một Bet UTxO từ địa chỉ Script này (chống Double Satisfaction)
+expect list.count(inputs, i_at(own_address)) == 1</code></pre>
+
+<h5>Chi tiết nhánh JOIN</h5>
+<p>Kiểm tra ghế Player còn trống trước khi tham gia:</p>
+<pre><code>let has_no_player_before = current_datum.player == None</code></pre>
+
+<p>Tìm và giải mã Bet UTxO tiếp nối tại địa chỉ hợp đồng:</p>
+<pre><code>expect [own_output] = outputs_at(outputs, own_address)
+
+let Output { value: output_value, datum: updated_datum, .. } = own_output
+expect InlineDatum(updated_datum) = updated_datum
+expect new_datum: BetDatum = updated_datum
+expect Some(player) = new_datum.player
+let player_payment_key = address_payment_key(player)</code></pre>
+
+<p>Kiểm tra tính toàn vẹn của Bet UTxO mới qua biến <code>bet_update_correct</code>:</p>
+<pre><code>let bet_update_correct = and {
+  (lovelace_of(output_value) == 2 * lovelace_of(input_value))?,
+  has_nft_strict(output_value, policy_id, bet_token_name)?,
+  (player_payment_key != address_payment_key(current_datum.referee))?,
+  (player_payment_key != address_payment_key(current_datum.owner))?,
+  (new_datum == BetDatum { ..current_datum, player: Some(player) })?,
+}</code></pre>
+
+<p>Kiểm tra thời gian và chữ ký của Player:</p>
+<pre><code>let joined_before_expiration = valid_before(validity_range, current_datum.expiration)
+let player_signed = key_signed(extra_signatories, player_payment_key)</code></pre>
+
+<p>Biểu thức xác thực tổng hợp của nhánh JOIN:</p>
+<pre><code>has_no_player_before? &amp;&amp; bet_update_correct? &amp;&amp; joined_before_expiration? &amp;&amp; player_signed?</code></pre>
+
+<hr />
+
+<h4>ANNOUNCE_WINNER: Công bố Người Thắng</h4>
+
+<p style="text-align: center;"><img src="../resources/announce.png" alt="Mindmap logic của ANNOUNCE_WINNER" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Hành động này diễn ra khi ván cược đã có Player và đã hết hạn. Trọng tài (Referee) công bố người thắng và toàn bộ quỹ cược được giải ngân về ví người đó:</p>
+<ul>
+  <li><strong>Inputs:</strong> Ván cược bắt buộc phải đã có Player (<code>player != None</code>).</li>
+  <li><strong>Outputs:</strong> Giới hạn toàn bộ giao dịch chỉ tạo ra duy nhất một output gửi về người thắng cuộc và chỉ chứa ADA (khấu trừ phí mạng trực tiếp từ pot).</li>
+  <li><strong>Mint/Burn:</strong> Đốt đúng một Bet Token.</li>
+  <li><strong>Validity range:</strong> Giao dịch chỉ hợp lệ sau mốc <code>expiration</code>.</li>
+  <li><strong>Chữ ký:</strong> Trọng tài (Referee) bắt buộc phải ký giao dịch.</li>
+</ul>
+
+<p>Xác định người nhận tiền thưởng dựa trên cờ <code>is_owner_win</code> trong Redeemer:</p>
+<pre><code>let BetDatum { owner, player, referee, expiration } = current_datum
+
+// Bet phải có Player mới được công bố kết quả
+expect Some(player_addr) = player
+
+// Chọn Owner hoặc Player làm người thắng
+let winner =
+  if is_owner_win {
+    owner
+  } else {
+    player_addr
+  }</code></pre>
+
+<p>Kiểm tra output trao thưởng duy nhất gửi về ví người chiến thắng:</p>
+<pre><code>let single_output_to_winner = {
+  expect [output_to_winner] = outputs
+  (output_to_winner.address == winner)? &amp;&amp; (output_to_winner.value
+    |&gt; without_lovelace
+    |&gt; is_zero)?
+}</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Tại sao không cần kiểm tra trường <code>mint</code>?</strong> Trong giao dịch này, input từ Script chứa đúng 1 Bet Token, trong khi output duy nhất của giao dịch chỉ chứa ADA. Để bảo toàn số dư tài sản trên sổ cái, giao dịch bắt buộc phải đốt token đi, điều này đảm bảo chắc chắn mint handler sẽ được kích hoạt để kiểm duyệt việc đốt token.</p>
+</blockquote>
+
+<p>Kiểm tra chữ ký của Trọng tài và thời gian sau hạn:</p>
+<pre><code>let referee_signed = key_signed(
+  extra_signatories,
+  address_payment_key(referee),
+)
+
+let announced_after_expiration = valid_after(validity_range, expiration)</code></pre>
+
+<p>Biểu thức xác thực nhánh ANNOUNCE_WINNER:</p>
+<pre><code>single_output_to_winner? &amp;&amp; referee_signed? &amp;&amp; announced_after_expiration?</code></pre>
+
+<hr />
+
+<h4>CANCEL: Hủy cược &amp; Hoàn tiền cho Chủ phòng</h4>
+
+<p style="text-align: center;"><img src="../resources/cancel.png" alt="Mindmap logic của CANCEL" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Nếu hết hạn mà ván cược vẫn chưa có Player tham gia, Chủ phòng (Owner) có quyền hủy cược và thu hồi lại toàn bộ tiền cọc ban đầu:</p>
+<ul>
+  <li><strong>Inputs:</strong> Bet input bắt buộc phải chưa có người chơi tham gia (<code>player == None</code>).</li>
+  <li><strong>Outputs:</strong> Toàn giao dịch chỉ có duy nhất một output gửi về ví Owner và chỉ chứa ADA.</li>
+  <li><strong>Mint/Burn:</strong> Đốt đúng một Bet Token.</li>
+  <li><strong>Validity range:</strong> Giao dịch chỉ hợp lệ sau mốc <code>expiration</code> (Owner không thể hủy cược sớm khi phòng vẫn đang mở).</li>
+  <li><strong>Chữ ký:</strong> Chủ phòng (Owner) bắt buộc phải ký giao dịch.</li>
+</ul>
+
+<p>Kiểm tra điều kiện bet chưa có Player:</p>
+<pre><code>let has_no_player_before = player == None</code></pre>
+
+<p>Kiểm tra output hoàn tiền duy nhất gửi về Owner:</p>
+<pre><code>let single_output_to_owner = {
+  expect [output_to_owner] = outputs
+  (output_to_owner.address == owner)? &amp;&amp; (output_to_owner.value
+    |&gt; without_lovelace
+    |&gt; is_zero)?
+}</code></pre>
+
+<p>Kiểm tra thời gian sau hạn và chữ ký của Chủ phòng:</p>
+<pre><code>let canceled_after_expiration = valid_after(validity_range, expiration)
+
+let owner_signed = key_signed(
+  extra_signatories,
+  address_payment_key(owner),
+)</code></pre>
+
+<p>Biểu thức xác thực nhánh CANCEL:</p>
+<pre><code>has_no_player_before? &amp;&amp; single_output_to_owner? &amp;&amp; canceled_after_expiration? &amp;&amp; owner_signed?</code></pre>
+
+<hr />
+
+<h2 id="unit-testing">3. Unit Testing</h2>
+<p>Bộ kiểm thử tự động trong tệp <code>onchain/validators/tests/bet.test.ak</code> bao gồm <strong>45 test case</strong> bao phủ toàn bộ các nhánh hành động và các trường hợp tấn công biên:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Nhóm kiểm thử</th>
+      <th>Positive Test Cases (Thành công)</th>
+      <th>Negative Test Cases (Bị từ chối)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>CREATE</strong><br />(13 tests)</td>
+      <td><code>create_the_bet</code></td>
+      <td><code>fail_create_owner_is_referee</code><br /><code>fail_create_invalid_token_name</code><br /><code>fail_create_below_minimum_bet</code><br /><code>fail_create_after_expiration</code><br /><code>fail_create_missing_owner_signature</code><br /><code>fail_create_wrong_script_address</code><br /><code>fail_create_output_contains_extra_token</code><br /><code>fail_create_when_player_not_none</code><br /><code>fail_create_multiple_script_outputs</code><br /><code>fail_create_mint_more_than_one</code><br /><code>fail_create_missing_inline_datum</code><br /><code>fail_create_missing_token_in_script_output</code></td>
+    </tr>
+    <tr>
+      <td><strong>JOIN</strong><br />(12 tests)</td>
+      <td><code>join_the_bet</code></td>
+      <td><code>fail_join_player_is_referee</code><br /><code>fail_join_player_is_owner</code><br /><code>fail_join_missing_player_signature</code><br /><code>fail_join_wrong_amount</code><br /><code>fail_join_after_expiration</code><br /><code>fail_join_two_bets_at_once</code><br /><code>fail_join_invalid_output_token</code><br /><code>fail_join_when_already_joined</code><br /><code>fail_join_changes_owner</code><br /><code>fail_join_changes_referee</code><br /><code>fail_join_changes_expiration</code></td>
+    </tr>
+    <tr>
+      <td><strong>CANCEL</strong><br />(8 tests)</td>
+      <td><code>cancel_the_bet</code></td>
+      <td><code>fail_cancel_before_expiration</code><br /><code>fail_cancel_when_player_joined</code><br /><code>fail_cancel_missing_owner_signature</code><br /><code>fail_cancel_multiple_outputs</code><br /><code>fail_cancel_output_contains_token</code><br /><code>fail_cancel_invalid_input_token</code><br /><code>fail_cancel_wrong_destination_address</code></td>
+    </tr>
+    <tr>
+      <td><strong>ANNOUNCE_WINNER</strong><br />(9 tests)</td>
+      <td><code>announce_owner_win</code><br /><code>announce_player_win</code></td>
+      <td><code>fail_announce_before_expiration</code><br /><code>fail_announce_missing_referee_signature</code><br /><code>fail_announce_multiple_outputs</code><br /><code>fail_announce_output_contains_token</code><br /><code>fail_announce_invalid_input_token</code><br /><code>fail_announce_when_no_player</code><br /><code>fail_announce_wrong_winner_address</code></td>
+    </tr>
+    <tr>
+      <td><strong>BURN</strong><br />(3 tests)</td>
+      <td><code>burn_the_bet</code></td>
+      <td><code>fail_burn_more_than_one</code><br /><code>fail_burn_wrong_token_name</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Chạy kiểm thử toàn bộ từ thư mục <code>onchain</code>:</p>
+<pre><code>aiken check</code></pre>
+
+<p>Hoặc lọc chạy riêng từng nhóm bằng cờ <code>-m</code>:</p>
+<pre><code>aiken check -m create     # Chạy 13 test nhóm CREATE
+aiken check -m join       # Chạy 12 test nhóm JOIN
+aiken check -m cancel     # Chạy 8 test nhóm CANCEL
+aiken check -m announce   # Chạy 9 test nhóm ANNOUNCE_WINNER
+aiken check -m burn       # Chạy 3 test nhóm BURN</code></pre>
+
+<hr />
+
+<h2 id="bai-tap-tong-ket">4. Bài tập và Tổng kết</h2>
+
+<h4>Bài tập 1: Gộp nhiều giao dịch Hủy cược</h4>
+<p>Hiện tại mỗi lần hủy bet tạo ra một giao dịch riêng biệt. Hãy thiết kế logic mở rộng cho phép Chủ phòng gom nhiều ván cược hết hạn của mình để hủy cùng lúc trong một giao dịch duy nhất nhằm tiết kiệm tối đa phí mạng.</p>
+
+<h4>Bài tập 2: Cải thiện cơ chế Trọng tài</h4>
+<p>Trọng tài hiện là điểm tập trung rủi ro trong thiết kế. Hãy thử hai cải tiến sau:</p>
+<ul>
+  <li><strong>2a. Chứng chỉ Trọng tài bằng NFT:</strong> Chỉ những địa chỉ sở hữu NFT chứng chỉ trọng tài hợp lệ mới được chỉ định và phân xử kết quả. Đưa UTxO chứa NFT chứng chỉ vào giao dịch qua <code>reference_inputs</code> và xác thực quyền sở hữu.</li>
+  <li><strong>2b. Cơ chế hoàn tiền khẩn cấp (FORCE_REFUND):</strong> Nếu trọng tài trì hoãn việc công bố kết quả quá 2 ngày kể từ mốc hết hạn, cho phép bất kỳ người chơi nào (Owner hoặc Player) gửi yêu cầu hoàn lại 50% tiền cọc cho mỗi bên.</li>
+</ul>
+
+<h4>Bài tập 3: Bổ sung cơ chế Phí hoa hồng</h4>
+<p>Thiết kế cơ chế phí mạng và thù lao cho hệ thống:</p>
+<ul>
+  <li><strong>Phí nền tảng cho nhà phát triển:</strong> Thu phí cố định 1 ADA ngay khi khởi tạo bet.</li>
+  <li><strong>Thù lao cho Trọng tài:</strong> Trích 5% – 10% tổng quỹ cược chuyển cho ví Trọng tài tại thời điểm công bố kết quả.</li>
+</ul>
+
+<hr />
+
+<p>Như vậy, chúng ta đã hoàn thành việc xây dựng toàn bộ logic on-chain của Betting dApp với mô hình Multi-Purpose Validator trong Aiken.</p>
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ kết nối Smart Contract này với thế giới thực tế thông qua MeshJS SDK, chuẩn hóa thông điệp CIP-20 Metadata và xử lý bài toán ví đa địa chỉ trên Next.js. Hẹn gặp lại các bạn ở Bài số 3!</p>

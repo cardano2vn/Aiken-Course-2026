@@ -1,0 +1,181 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#tong-quan-quy-tac">1. Tổng quan &amp; Quy tắc Trò chơi P2P Betting</a></li>
+    <li><a href="#trai-nghiem-tro-choi">2. Trải nghiệm Trò chơi</a></li>
+    <li><a href="#quyet-dinh-thiet-ke">3. Các Quyết định Thiết kế Quan trọng</a></li>
+  </ul>
+</blockquote>
+
+<hr />
+
+<h2 id="tong-quan-quy-tac">1. Tổng quan &amp; Quy tắc Trò chơi P2P Betting</h2>
+
+<h4>Mô hình cá cược ngang hàng (Peer-to-Peer)</h4>
+<p>Trong các hệ thống cá cược truyền thống, người chơi thường phải gửi tiền cược vào một tài khoản tập trung của nhà cái. Nhà cái vừa đóng vai trò giữ tiền, vừa phân xử kết quả và quyết định việc trả thưởng. Mô hình này đi kèm một số rủi ro về tính minh bạch: tiền của người chơi nằm trong tay bên thứ ba, dữ liệu cược có thể bị chỉnh sửa, và chi phí vận hành thường cao.</p>
+<p>Betting dApp trong module này triển khai ứng dụng <strong>Cá cược Ngang hàng</strong> dựa trên mô hình eUTxO của Cardano. Cơ chế như sau:</p>
+<ul>
+  <li><strong>Hai người chơi trực tiếp đối đầu theo mô hình dự đoán nhị phân (Binary Prediction):</strong> Người tạo bet (<strong>Owner</strong>) đặt ra số tiền cược ban đầu, nội dung cược và thời hạn kết thúc. Người thứ hai (<strong>Player</strong>) nếu đồng ý với điều kiện cược sẽ nạp đúng số tiền tương ứng vào quỹ cược chung, và lựa chọn của người này mặc định là đối lập với Owner. Người thắng cuộc sẽ nhận toàn bộ quỹ cược sau khi trừ phí giao dịch mạng.</li>
+  <li><strong>Hợp đồng thông minh giữ tiền:</strong> Toàn bộ tiền cược của cả hai bên được khóa tại địa chỉ của Smart Contract. Không người chơi nào, và cũng không phải trọng tài, có thể đơn phương chiếm đoạt khoản tiền này nếu không thỏa mãn các điều kiện định sẵn.</li>
+  <li><strong>Trọng tài độc lập công bố kết quả:</strong> Trọng tài (<strong>Referee</strong>) được chỉ định từ đầu bằng địa chỉ ví on-chain. Sau khi bet hết hạn, trọng tài có nhiệm vụ ký giao dịch công bố người chiến thắng để ván cược được giải ngân.</li>
+</ul>
+
+<pre><code>[Chủ phòng (Owner): Đặt cọc X ADA] ────────> [Smart Contract UTxO] <──────── [Người chơi (Player): Đặt cọc X ADA]
+                                                    │
+                                                    │ (Quỹ cược: 2X ADA)
+                                                    ▼
+[Trọng tài (Referee): Ký công bố] ─────────> [Giải ngân Quỹ cược] ─────────> [Người thắng cuộc (Owner / Player)]</code></pre>
+
+<hr />
+
+<h4>Vòng đời của một bet (Game Lifecycle &amp; State Machine)</h4>
+<p>Một lượt chơi trong dApp trải qua các trạng thái rõ ràng, tương ứng với vòng đời của Bet UTxO trên blockchain Cardano:</p>
+
+<pre><code>[Khởi tạo] ──(CREATE)──> [OPEN] ──(JOIN trước hạn)──> [CLOSED] ──(Qua hạn, có Player)──> [AWAITING_RESULT] ──(ANNOUNCE)──> [Kết thúc]
+                           │
+                           └──(Qua hạn, không Player)─> [EXPIRED] ──(CANCEL)──> [Hoàn tiền Owner]</code></pre>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Trạng thái</th>
+      <th>Điều kiện xác định (trên UI)</th>
+      <th>Ý nghĩa nghiệp vụ</th>
+      <th>Hành động hợp lệ</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>OPEN</code></td>
+      <td><code>player == None</code> và <code>now &lt; expiration</code></td>
+      <td>Bet vừa được tạo, đang mở chờ người chơi tham gia</td>
+      <td><code>JOIN</code> (Bất kỳ ai khác Trọng tài và Chủ phòng)</td>
+    </tr>
+    <tr>
+      <td><code>CLOSED</code></td>
+      <td><code>player != None</code> và <code>now &lt; expiration</code></td>
+      <td>Đã có người chơi tham gia, chờ đến thời điểm hết hạn</td>
+      <td><em>(Chờ hết hạn, không ai được can thiệp)</em></td>
+    </tr>
+    <tr>
+      <td><code>EXPIRED</code></td>
+      <td><code>player == None</code> và <code>now &gt;= expiration</code></td>
+      <td>Hết thời gian mà không có ai tham gia cược</td>
+      <td><code>CANCEL</code> (Chỉ Chủ phòng / Owner)</td>
+    </tr>
+    <tr>
+      <td><code>AWAITING_RESULT</code></td>
+      <td><code>player != None</code> và <code>now &gt;= expiration</code></td>
+      <td>Hết thời gian và đã đủ 2 người chơi, chờ phân định</td>
+      <td><code>ANNOUNCE_WINNER</code> (Chỉ Trọng tài / Referee)</td>
+    </tr>
+  </tbody>
+</table>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Trạng thái suy diễn (Derived State):</strong> Các trạng thái trên là trạng thái của ứng dụng được front-end tính toán và ghi nhận dựa trên dữ liệu on-chain (trường <code>player</code> trong Datum) và thời gian thực (<code>now &lt; expiration</code> hay <code>now &gt;= expiration</code>). Chúng không phải là các enum trạng thái được lưu cứng on-chain.</p>
+</blockquote>
+
+<p>Vòng đời của bet có 4 hành động chính tương ứng với 4 loại giao dịch:</p>
+<ol>
+  <li><strong>CREATE (Tạo bet):</strong> Chủ phòng (Owner) chọn mức tiền cược (tối thiểu là 5 ADA theo quy định hợp đồng), thời hạn kết thúc (<code>expiration</code>), chỉ định ví Trọng tài (<code>referee</code>), và nhập mô tả nội dung bet. Tiền cược ban đầu <code>X ADA</code> được khóa vào địa chỉ Script. Trạng thái ban đầu: <code>OPEN</code> - sẵn sàng nhận người chơi tham gia.</li>
+  <li><strong>JOIN (Tham gia bet):</strong> Người chơi thứ hai (Player) tham gia trước mốc thời gian hết hạn. Người tham gia gửi thêm đúng <code>X ADA</code> vào hợp đồng, tổng quỹ cược (Pot) tăng gấp đôi thành <code>2X ADA</code>. Trạng thái bet chuyển sang: <code>CLOSED</code> - chờ đến khi hết hạn, không ai có quyền tham gia nữa.</li>
+  <li><strong>Sau mốc thời gian Expiration:</strong> Việc chuyển trạng thái sau mốc Expiration được front-end tự động nhận diện theo thời gian thực: Bet đang ở trạng thái <code>OPEN</code> sau khi qua thời điểm <code>expiration</code> sẽ chuyển sang trạng thái <code>EXPIRED</code>. Bet đang ở trạng thái <code>CLOSED</code> sau khi qua thời điểm <code>expiration</code> sẽ chuyển sang trạng thái <code>AWAITING_RESULT</code>.</li>
+  <li><strong>CANCEL (Hủy bet &amp; Hoàn cọc):</strong> Khi bet ở trạng thái <code>EXPIRED</code> (quá hạn và chưa có ai tham gia), duy nhất Chủ phòng có quyền gửi giao dịch CANCEL để thu hồi lại tiền cọc ban đầu. Toàn bộ số tiền cược trong Script (sau khi trừ phí mạng) được hoàn trả về ví Owner. Bet kết thúc và biến mất khỏi danh sách các ván cược đang hoạt động.</li>
+  <li><strong>ANNOUNCE_WINNER (Công bố người chiến thắng &amp; Trao thưởng):</strong> Khi bet ở trạng thái <code>AWAITING_RESULT</code> (hết hạn và đã đủ người chơi), chỉ duy nhất Trọng tài có quyền ký giao dịch xác nhận ai là người chiến thắng. Hợp đồng giải ngân toàn bộ quỹ cược <code>2X ADA</code> (sau khi trừ phí mạng) chuyển thẳng cho người thắng cuộc, ván cược kết thúc.</li>
+</ol>
+
+<hr />
+
+<h2 id="trai-nghiem-tro-choi">2. Trải nghiệm Trò chơi</h2>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Khởi chạy dApp:</strong> Chi tiết các bước cài đặt, cấu hình được hướng dẫn trong tệp README.md của dự án. Hãy mở dApp và trực tiếp kết nối ví để trải nghiệm.</p>
+</blockquote>
+
+<p>Các bước cơ bản để trải nghiệm:</p>
+<ol>
+  <li><strong>Kết nối ví:</strong> Mở giao diện dApp và kết nối ví Cardano (Lace, Eternl) trên mạng Preprod.</li>
+  <li><strong>Tạo ván cược (Create Bet):</strong> Nhập nội dung câu hỏi dự đoán, số tiền cược (tối thiểu 5 ADA), chọn thời hạn và dán địa chỉ ví của Trọng tài. Bấm "Initialize Bet" và ký giao dịch.</li>
+  <li><strong>Tham gia cược (Join Bet):</strong> Dùng một ví thứ hai (đóng vai Người chơi), tìm ván cược đang mở, bấm "Join Bet", nạp tiền đối ứng và ký giao dịch.</li>
+  <li><strong>Công bố kết quả (Announce Winner):</strong> Khi ván cược đã hết hạn, kết nối ví Trọng tài, chọn người chiến thắng và ký duyệt giao dịch để chuyển toàn bộ tiền thưởng về ví người thắng.</li>
+</ol>
+
+<hr />
+
+<h2 id="quyet-dinh-thiet-ke">3. Các Quyết định Thiết kế Quan trọng</h2>
+
+<h4>Định danh trạng thái bằng Bet Token (State Thread Token)</h4>
+<p>Như chúng ta đã biết, một UTxO nằm tại địa chỉ Smart Contract không đảm bảo nó là một Bet UTxO hợp lệ. Bất kỳ ai cũng có thể gửi một UTxO rác vào địa chỉ hợp đồng.</p>
+<p>Giải pháp chúng ta lựa chọn để định danh Bet UTxO là <strong>State Thread Token (STT)</strong> nhưng có một điều chỉnh quan trọng:</p>
+<ul>
+  <li><strong>Bản chất token:</strong> Token này không nhất thiết phải là NFT. Nó là một <strong>fungible token</strong> của hệ thống, được đúc ra giống nhau cho tất cả các bet. Chúng ta gọi nó là <strong>Bet Token</strong>.</li>
+  <li><strong>Vòng đời token:</strong> Mỗi khi một ván cược được tạo ra, giao dịch bắt buộc phải đúc ra đúng <code>1</code> Bet Token. Token này được khóa cùng tiền cược tại địa chỉ Script và đồng hành cùng UTxO đó qua các trạng thái (từ <code>OPEN</code>, <code>CLOSED</code> cho đến khi kết thúc).</li>
+  <li><strong>Tiêu hủy bắt buộc:</strong> Ở hành động cuối cùng (<code>CANCEL</code> hoặc <code>ANNOUNCE_WINNER</code>), Bet Token bắt buộc phải bị đốt đi (<code>mint = -1</code>) để không thể bị tái sử dụng hay tẩu tán.</li>
+  <li><strong>Lợi ích off-chain:</strong> Nhờ có token này, ứng dụng off-chain chỉ cần truy vấn các UTxO tại địa chỉ hợp đồng có chứa Bet Token tương ứng là có thể xác định chính xác danh sách các ván cược đang hoạt động.</li>
+</ul>
+
+<hr />
+
+<h4>Multi-Purpose Validator</h4>
+<p>Để quản lý việc đúc và đốt Bet Token, chúng ta cần một <strong>Minting Policy</strong>. Đồng thời, để quản lý việc giữ tiền cược, chuyển đổi trạng thái và giải ngân, chúng ta cần một <strong>Spending Validator</strong>.</p>
+<p>Hai logic này cần liên lạc và kiểm tra chéo lẫn nhau:</p>
+<ul>
+  <li>Khi đúc token, <strong>logic mint</strong> phải đảm bảo token được gửi đúng vào địa chỉ giữ tiền cược.</li>
+  <li>Khi chi tiêu Bet UTxO, <strong>logic spend</strong> phải chắc chắn rằng UTxO đó chứa Bet Token. Token này phải được bảo toàn qua các trạng thái và bị đốt hoàn toàn khi công bố kết quả hoặc hủy bet.</li>
+</ul>
+<p>Ở Module 04 (Membership NFT), chúng ta đã sử dụng kỹ thuật Multi-Validator với hai hợp đồng tách biệt tham chiếu đến nhau. Trong module này, chúng ta sử dụng <strong>Multi-Purpose Validator</strong> — một hợp đồng duy nhất xử lý đồng thời cả hai vai trò:</p>
+
+<h4>Ưu điểm vượt trội của Multi-Purpose Validator:</h4>
+<ul>
+  <li><strong>Tham chiếu 2 chiều tự nhiên:</strong> Hai handler nằm chung trong một script, chia sẻ cùng một Script Hash (hay Policy ID). Nhờ đó, cả hai handler có thể kiểm tra chéo nhau hai chiều một cách tự nhiên mà không gặp vấn đề phụ thuộc vòng tròn (Circular Dependency).</li>
+  <li><strong>Đơn giản hóa triển khai on-chain và off-chain:</strong> Toàn bộ logic tập trung tại một nơi, giúp theo dõi luồng nghiệp vụ dễ dàng. Phía off-chain không phải quản lý phân tán nhiều script hash, policy ID hay địa chỉ script khác nhau. Khi triển khai và sử dụng script bằng Reference Script, chỉ cần lưu trữ và gọi trên một UTxO duy nhất.</li>
+</ul>
+
+<hr />
+
+<h4>Tách biệt dữ liệu: Tại sao không lưu nội dung bet vào Datum?</h4>
+<p>Nội dung mô tả bet là một chuỗi văn bản tự do, có thể ngắn hoặc dài (ví dụ: <em>"Manchester United sẽ vô địch giải bóng đá Ngoại Hạng Anh mùa giải 2026/2027"</em>).</p>
+<p>Nếu đưa chuỗi văn bản này vào trong <code>BetDatum</code> của UTxO on-chain:</p>
+<ul>
+  <li><strong>Lãng phí tài nguyên sổ cái:</strong> Trình xác thực on-chain chỉ cần xác minh chữ ký phán quyết của trọng tài mà không quan tâm đến nội dung bet để quyết định logic đúng sai.</li>
+  <li><strong>Tăng chi phí lưu trữ min ADA:</strong> Kích thước byte của Datum càng lớn thì lượng ADA tối thiểu (min ADA) phải khóa trong UTxO càng cao (dù trong dApp này tiền cược tối thiểu 5 ADA đã dư sức bù đắp).</li>
+</ul>
+<p>Tuy nhiên, để tối ưu thiết kế dữ liệu và làm quen với chuẩn CIP-20 Metadata, chúng ta quyết định tách dữ liệu làm hai phần:</p>
+<ol>
+  <li><strong>Dữ liệu logic (lưu trong Datum on-chain):</strong> Chỉ lưu các trường thiết yếu để xác thực: <code>owner</code>, <code>player</code>, <code>referee</code>, <code>expiration</code>.</li>
+  <li><strong>Dữ liệu hiển thị (lưu bằng Transaction Metadata):</strong> Toàn bộ nội dung văn bản mô tả bet được đính kèm vào giao dịch CREATE với nhãn <code>674</code> (chuẩn <a href="https://cips.cardano.org/cip/CIP-0020" target="_blank" rel="noopener">CIP-20 Transaction Message</a>). Dữ liệu này được lưu vĩnh viễn trên sổ cái Cardano nhưng không nằm trong UTxO, giúp tiết kiệm kích thước trạng thái UTxO mà vẫn đảm bảo tính minh bạch.</li>
+</ol>
+
+<hr />
+
+<h4>Khác biệt của eUTxO: Cơ chế Trọng tài không trả phí</h4>
+<p>Trong mô hình hiện tại của dApp, Trọng tài chưa được hưởng lợi ích kinh tế. Họ cũng không nên bị mất phí mạng khi thực hiện giao dịch công bố kết quả.</p>
+<ul>
+  <li>Trên hệ thống Ethereum (Account-based), ai là người phát lệnh gửi giao dịch thì tài khoản đó bắt buộc phải có ETH để trả phí Gas.</li>
+  <li>Trên hệ thống Cardano (eUTxO), một giao dịch có thể tự tài trợ phí cho chính nó từ chính UTxO mà nó đang tiêu thụ, nhờ sự tách biệt hoàn toàn giữa <strong>người ký xác thực</strong> và <strong>nguồn tài trợ phí</strong>.</li>
+</ul>
+<p>Do đó, chúng ta có thể triển khai tính năng <strong>Trọng tài không trả phí</strong> một cách tự nhiên trên Cardano:</p>
+<ul>
+  <li>Toàn bộ phí mạng của giao dịch <code>ANNOUNCE_WINNER</code> được khấu trừ trực tiếp từ số ADA đang có trong Script UTxO.</li>
+  <li>Ví của trọng tài chỉ cần cung cấp chữ ký xác thực mà không cần đưa bất kỳ UTxO nào vào làm input để trả phí và cũng không nhận về output nào.</li>
+  <li>Người thắng nhận về toàn bộ số tiền quỹ cược sau khi đã trừ đi phần phí giao dịch này.</li>
+</ul>
+<p>Đây là một giao dịch đặc biệt: trọng tài là người ký giao dịch, nhưng không cần đóng góp bất kỳ input nào và cũng không nhận về output nào. Giao dịch CANCEL của Chủ phòng cũng được thực hiện tương tự.</p>
+
+<hr />
+
+<h4>Hỗ trợ ví đa địa chỉ (Multi-Address Mode)</h4>
+<p>Cardano sử dụng mô hình ví phân cấp (HD Wallet theo chuẩn BIP-32/44). Để tăng cường bảo mật và quyền riêng tư, các ví web3 hiện đại (như Eternl, Lace, Yoroi...) thường tự động thay đổi địa chỉ nhận tiền thừa (Change Address) sau mỗi giao dịch phát sinh nếu ví đang bật chế độ đa địa chỉ.</p>
+<p>Điều này đặt ra một bài toán kinh điển về mặt trải nghiệm người dùng (UX) cho các dApp Cardano:</p>
+<ul>
+  <li>Giả sử bạn dùng một địa chỉ trong ví để tạo bet, địa chỉ đó sẽ được ghi nhận vào Datum trên blockchain.</li>
+  <li>Sau giao dịch tạo bet, ví của bạn tự động chuyển sang một địa chỉ nhận tiền thừa hoàn toàn mới.</li>
+  <li>Khi bạn tải lại trang hoặc kết nối lại, nếu dApp chỉ so sánh địa chỉ hiển thị hiện tại với địa chỉ lưu trong Datum, ứng dụng sẽ nhận định nhầm bạn là "khách lạ" và ẩn mất các nút chức năng quan trọng (như Hủy cược của Chủ phòng hay Công bố kết quả của Trọng tài).</li>
+</ul>
+<p><strong>Giải pháp:</strong> Sử dụng <strong>địa chỉ stake (Stake Address / Stake Credential)</strong> để nhận diện người dùng thay vì dùng địa chỉ thanh toán đơn lẻ. Chúng ta sẽ cùng tìm hiểu chi tiết kỹ thuật này trong Bài số 3.</p>
+
+<hr />
+
+<p>Như vậy, chúng ta đã hoàn thành Bài học số 1 và có được cái nhìn tổng thể về kiến trúc dự án Betting dApp. dApp này tuân thủ kiến trúc 3 lớp quen thuộc: on-chain, off-chain và front-end.</p>
+<p><strong>Trong bài học tiếp theo</strong>, chúng ta sẽ trực tiếp bắt tay vào xây dựng thành phần on-chain với một Multi-Purpose Validator toàn diện bằng Aiken. Hẹn gặp lại các bạn ở Bài số 2!</p>

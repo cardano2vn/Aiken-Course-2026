@@ -1,6 +1,6 @@
 # Module 07: Betting dApp — Sàn Cá cược Ngang hàng P2P
 
-# Bài 1: Kiến trúc Betting DApp & Mô hình Multi-Purpose Validator
+# Bài 1: Kiến trúc Betting DApp & Các Quyết định Thiết kế Quan trọng
 
 > ### Mục lục bài học
 > 1. [Tổng quan & Quy tắc Trò chơi P2P Betting](#1-tổng-quan--quy-tắc-trò-chơi-p2p-betting)
@@ -57,7 +57,7 @@ stateDiagram-v2
 | `AWAITING_RESULT` | `player != None` và `now >= expiration` | Hết thời gian và đã đủ 2 người chơi, chờ phân định | `ANNOUNCE_WINNER` (Chỉ Trọng tài / Referee) |
 
 > [!NOTE]
-> **Trạng thái suy diễn (Derived State):** Các trạng thái trên là trạng thái của ứng dụng được front-end tính toán và ghi nhận dựa trên dữ liệu on-chain (trường `player` trong Datum) và thời gian thực (`now < expiration` hay `now >= expiration`). Chúng không phải là các enum trạng thái được lưu cứng on-chain, giúp hệ thống vận hành mượt mà và không cần phát sinh thêm bất kỳ giao dịch blockchain trung gian nào khi bước qua mốc hết hạn.
+> **Trạng thái suy diễn (Derived State):** Các trạng thái trên là trạng thái của ứng dụng được front-end tính toán và ghi nhận dựa trên dữ liệu on-chain (trường `player` trong Datum) và thời gian thực (`now < expiration` hay `now >= expiration`). Chúng không phải là các enum trạng thái được lưu cứng on-chain.
 
 Vòng đời của bet có 4 hành động chính tương ứng với 4 loại giao dịch:
 
@@ -150,6 +150,8 @@ Do đó, chúng ta có thể triển khai tính năng **Trọng tài không tr�
 - Toàn bộ phí mạng của giao dịch `ANNOUNCE_WINNER` được khấu trừ trực tiếp từ số ADA đang có trong Script UTxO.
 - Ví của trọng tài chỉ cần cung cấp chữ ký xác thực mà không cần đưa bất kỳ UTxO nào vào làm input để trả phí và cũng không nhận về output nào.
 - Người thắng nhận về toàn bộ số tiền quỹ cược sau khi đã trừ đi phần phí giao dịch này.
+
+Đây là một giao dịch đặc biệt: trọng tài là người ký giao dịch, nhưng không cần đóng góp bất kỳ input nào và cũng không nhận về output nào. 
 
 Giao dịch CANCEL của Chủ phòng cũng được thực hiện tương tự.
 
@@ -597,16 +599,17 @@ has_no_player_before? && single_output_to_owner? && canceled_after_expiration? &
 
 ## 3. Unit Testing
 
-Bộ test trong `onchain/validators/tests/bet.test.ak` gồm 33 test case cho bốn hành động:
+Bộ test trong `onchain/validators/tests/bet.test.ak` gồm 45 test case cho toàn bộ các nhánh hành động:
 
 | Nhóm | Positive Test Cases | Negative Test Cases |
 |---|---|---|
-| **CREATE** | `create_the_bet` | `fail_create_owner_is_referee`<br/>`fail_create_invalid_token_name`<br/>`fail_create_below_minimum_bet`<br/>`fail_create_after_expiration`<br/>`fail_create_missing_owner_signature`<br/>`fail_create_wrong_script_address`<br/>`fail_create_output_contains_extra_token` |
-| **JOIN** | `join_the_bet` | `fail_join_player_is_referee`<br/>`fail_join_player_is_owner`<br/>`fail_join_missing_player_signature`<br/>`fail_join_wrong_amount`<br/>`fail_join_after_expiration`<br/>`fail_join_two_bets_at_once`<br/>`fail_join_invalid_output_token` |
-| **CANCEL** | `cancel_the_bet` | `fail_cancel_before_expiration`<br/>`fail_cancel_when_player_joined`<br/>`fail_cancel_missing_owner_signature`<br/>`fail_cancel_multiple_outputs`<br/>`fail_cancel_output_contains_token`<br/>`fail_cancel_wrong_destination_address`<br/>`fail_cancel_invalid_input_token` |
-| **ANNOUNCE_WINNER** | `announce_owner_win`<br/>`announce_player_win` | `fail_announce_before_expiration`<br/>`fail_announce_missing_referee_signature`<br/>`fail_announce_multiple_outputs`<br/>`fail_announce_output_contains_token`<br/>`fail_announce_wrong_winner_address`<br/>`fail_announce_invalid_input_token`<br/>`fail_announce_when_no_player` |
+| **CREATE** (13 tests) | `create_the_bet` | `fail_create_owner_is_referee`<br/>`fail_create_invalid_token_name`<br/>`fail_create_below_minimum_bet`<br/>`fail_create_after_expiration`<br/>`fail_create_missing_owner_signature`<br/>`fail_create_wrong_script_address`<br/>`fail_create_output_contains_extra_token`<br/>`fail_create_when_player_not_none`<br/>`fail_create_multiple_script_outputs`<br/>`fail_create_mint_more_than_one`<br/>`fail_create_missing_inline_datum`<br/>`fail_create_missing_token_in_script_output` |
+| **JOIN** (12 tests) | `join_the_bet` | `fail_join_player_is_referee`<br/>`fail_join_player_is_owner`<br/>`fail_join_missing_player_signature`<br/>`fail_join_wrong_amount`<br/>`fail_join_after_expiration`<br/>`fail_join_two_bets_at_once`<br/>`fail_join_invalid_output_token`<br/>`fail_join_when_already_joined`<br/>`fail_join_changes_owner`<br/>`fail_join_changes_referee`<br/>`fail_join_changes_expiration` |
+| **CANCEL** (8 tests) | `cancel_the_bet` | `fail_cancel_before_expiration`<br/>`fail_cancel_when_player_joined`<br/>`fail_cancel_missing_owner_signature`<br/>`fail_cancel_multiple_outputs`<br/>`fail_cancel_output_contains_token`<br/>`fail_cancel_invalid_input_token`<br/>`fail_cancel_wrong_destination_address` |
+| **ANNOUNCE_WINNER** (9 tests) | `announce_owner_win`<br/>`announce_player_win` | `fail_announce_before_expiration`<br/>`fail_announce_missing_referee_signature`<br/>`fail_announce_multiple_outputs`<br/>`fail_announce_output_contains_token`<br/>`fail_announce_invalid_input_token`<br/>`fail_announce_when_no_player`<br/>`fail_announce_wrong_winner_address` |
+| **BURN** (3 tests) | `burn_the_bet` | `fail_burn_more_than_one`<br/>`fail_burn_wrong_token_name` |
 
-Tổng số theo nhóm là CREATE 8, JOIN 8, CANCEL 8 và ANNOUNCE_WINNER 9, tổng cộng **33 test case**. Chạy lệnh sau từ thư mục `onchain` để chạy toàn bộ:
+Tổng số theo nhóm là CREATE 13, JOIN 12, CANCEL 8, ANNOUNCE_WINNER 9 và BURN 3, tổng cộng **45 test case** (`45 passed | 0 failed`). Chạy lệnh sau từ thư mục `onchain` để chạy toàn bộ:
 
 ```bash
 aiken check
@@ -615,10 +618,11 @@ aiken check
 Hoặc lọc chạy riêng từng nhóm bằng cờ `-m`:
 
 ```bash
-aiken check -m create     # Chạy 8 test nhóm CREATE
-aiken check -m join       # Chạy 8 test nhóm JOIN
+aiken check -m create     # Chạy 13 test nhóm CREATE
+aiken check -m join       # Chạy 12 test nhóm JOIN
 aiken check -m cancel     # Chạy 8 test nhóm CANCEL
 aiken check -m announce   # Chạy 9 test nhóm ANNOUNCE_WINNER
+aiken check -m burn       # Chạy 3 test nhóm BURN
 ```
 
 > Toán tử `?` giúp trace chỉ ra điều kiện không đạt trong quá trình kiểm thử.
@@ -694,25 +698,26 @@ Kiến trúc giao diện dApp được module hóa thành các component chuyên
    - **Cung cấp Context:** Quản lý và lưu trữ trạng thái kết nối ví vào React Context, cung cấp phiên làm việc dùng chung cho `CreateBet` và `BetList`.
 
 2. **`CreateBet` (Khởi tạo ván cược):**
-   - **Thu thập & Xác thực:** Form nhập liệu số tiền cược, địa chỉ Trọng tài, thời điểm hết hạn và nội dung ván cược (tối đa 250 ký tự).
+   - **Thu thập & Tiền kiểm tra dữ liệu đầu vào:** Form nhập liệu số tiền cược (>= 5 ADA), địa chỉ Trọng tài (định dạng địa chỉ hợp lệ), thời điểm hết hạn (trong tương lai) và nội dung ván cược (tối đa 250 ký tự).
    - **Điều phối Giao dịch:** Kích hoạt hàm `createBetTx` từ tầng Off-chain để tạo giao dịch, khóa tiền cọc ADA và đính kèm nội dung cược dưới dạng CIP-20 metadata.
    - **Cập nhật Tiến trình:** Truyền trạng thái giao dịch sang `TxStatus` để hiển thị tiến độ và lưu `pending_create_bet` vào LocalStorage chống mất trạng thái khi reload.
 
 3. **`BetList` (Danh sách ván cược & Điều phối Hành động):**
    - **Hiển thị State:** Nhận dữ liệu ván cược và nội dung câu hỏi đã giải mã từ `queries.ts` để hiển thị danh sách trực quan kèm phân trang.
    - **Phân quyền Hành động:** Tự động nhận diện vai trò của ví đang kết nối (`Owner` / `Player` / `Referee`) để mở khóa các nút thao tác tương ứng:
-     - **Join Bet** (Người chơi nạp tiền đối ứng qua `joinBetTx`).
+     - **Join Bet** (Người chơi tham gia, nạp tiền đối ứng qua `joinBetTx`).
      - **Announce Result** (Trọng tài công bố kết quả qua `announceWinnerTx`).
      - **Cancel Bet** (Chủ phòng hủy bet quá hạn qua `cancelBetTx`).
    - **Lưu trữ Tiến trình:** Quản lý `pending_bet_action` trong LocalStorage để tự động tiếp tục polling khi người dùng F5 trang.
 
-4. **`TxStatus` (Lớp phủ Trạng thái Giao dịch):**
+4. **`TxStatus` (Lớp phủ Trạng thái Giao dịch & Quản lý Khóa Toàn cục):**
    - Đóng vai trò lớp phủ giao diện (modal overlay), phản hồi trực quan 8 trạng thái xuyên suốt vòng đời giao dịch (`idle` $\rightarrow$ `building` $\rightarrow$ `signing` $\rightarrow$ `submitting` $\rightarrow$ `confirming` $\rightarrow$ `success` / `submitted` / `failed`).
-   - **Bảo vệ thao tác:** Vô hiệu hóa các nút bấm trên màn hình khi giao dịch đang xử lý nhằm ngăn chặn nhấp đúp hoặc gửi trùng lặp, đồng thời cung cấp liên kết tra cứu trực tiếp trên Cardanoscan.
+   - **Cơ chế Khóa 2 lớp (`isLocked = isProcessing || isTxBusy`):** Khi giao dịch đang dựng, ký hoặc gửi lên mạng, cờ toàn cục `isTxBusy` được kích hoạt để vô hiệu hóa đồng loạt tất cả các nút bấm trên giao diện (`CreateBet`, `Join`, `Announce`, `Cancel`). Cơ chế này loại trừ triệt để nguy cơ người dùng click đúp (double-click) hoặc gửi giao dịch chồng chéo gây lỗi xung đột UTxO.
+   - **Truy vết On-chain:** Tích hợp bộ đếm thời gian xác thực on-chain và cung cấp liên kết tra cứu trực tiếp TxHash trên Cardanoscan ngay khi giao dịch được submit thành công.
 
 ---
 
-### 1.2. Tầng Xử lý Ngoài chuỗi (Off-chain SDK - MeshJS)
+### 1.2. Tầng Xử lý Ngoài chuỗi (Off-chain - MeshJS)
 
 Lớp Off-chain đóng vai trò cầu nối logic giữa giao diện người dùng và hợp đồng thông minh on-chain, thực hiện 2 nhóm nhiệm vụ cốt lõi:
 
@@ -733,7 +738,7 @@ Lớp Off-chain đóng vai trò cầu nối logic giữa giao diện người d�
 Bốn luồng tương tác chính diễn ra xuyên suốt vòng đời ứng dụng:
 1. **Kết nối & Quản trị Phiên (`Ví CIP-30` $\leftrightarrow$ `WalletConnect`):** Thiết lập kết nối hai chiều theo chuẩn CIP-30, lưu giữ trạng thái ví và chia sẻ phiên làm việc cho `CreateBet` và `BetList`.
 2. **Cung cấp State & Metadata (`queries.ts` $\rightarrow$ `BetList`):** Quét trạng thái on-chain, giải mã Datum và truy vết nội dung CIP-20 có cache để cung cấp dữ liệu nhanh chóng cho `BetList` hiển thị bảng cược.
-3. **Kích hoạt Giao dịch (`CreateBet` / `BetList` $\rightarrow$ `transactions.ts` $\rightarrow$ `Ví`):** UI thu thập form/hành động, gọi các hàm dựng giao dịch tương ứng trong SDK, sau đó chuyển giao dịch thô sang ví để người dùng ký và phát sóng lên Cardano.
+3. **Kích hoạt Giao dịch (`CreateBet` / `BetList` $\rightarrow$ `transactions.ts` $\rightarrow$ `Ví`):** UI thu thập form/hành động, gọi các hàm dựng giao dịch tương ứng trong SDK, sau đó chuyển giao dịch thô sang ví để người dùng ký và phát tán lên Cardano.
 4. **Đồng bộ Tiến trình Giao dịch (`UI` $\rightarrow$ `TxStatus`):** Cập nhật thời gian thực qua 8 trạng thái vòng đời, tự động lưu `pendingTxStorage` và khôi phục polling mượt mà ngay cả khi người dùng reload / F5 trang.
 
 ---
@@ -792,14 +797,14 @@ Nội dung ván cược được lưu dưới dạng metadata theo chuẩn CIP-2
 ##### Rủi ro tiềm ẩn khi xử lý chuỗi UTF-8 đa byte:
 * Ký tự tiếng Việt có dấu (`ệ`, `ờ`, `đ`, `ư`...) chiếm từ 2 đến 3 bytes UTF-8.
 * **Rủi ro 1 (Cắt theo ký tự `slice(0, 64)`):** 64 ký tự tiếng Việt có thể nặng tới $64 \times 3 = 192$ bytes $\rightarrow$ Node từ chối giao dịch ngay lập tức vì vượt quá 64 bytes.
-* **Rủi ro 2 (Cắt theo byte thô `Uint8Array.slice(0, 64)`):** Nếu cắt ngang lưng một ký tự 3 byte, bộ giải mã `TextDecoder` sẽ chèn ký tự lỗi `\uFFFD` (chiếm 3 bytes) $\rightarrow$ làm chuỗi phình to thành 65–66 bytes và bị Cardano Node ném lỗi `MAX_LENGTH_LIMIT`.
+* **Rủi ro 2 (Cắt theo byte thô `Uint8Array.slice(0, 64)`):** Nếu cắt ngang lưng một ký tự 3 byte, bộ giải mã `TextDecoder` sẽ chèn ký tự lỗi `\uFFFD` (chiếm 3 bytes) $\rightarrow$ làm chuỗi phình to thành 65–66 bytes.
 
 ##### Giải pháp: Thuật toán cắt chuỗi an toàn (`formatCip20Message`):
 Hàm duyệt nguyên vẹn từng ký tự, dùng `TextEncoder` đo độ dài byte thực tế trước khi ghép vào chunk, đảm bảo kết quả luôn trả về mảng các chuỗi (`string[]`) không quá 64 bytes theo đúng đặc tả CIP-20:
 
 ```typescript
 // Trích từ offchain/src/transactions.ts:
-export const formatCip20Message = (message: string, maxChunkBytes = 64): string[] => {
+export const formatCip20Message = (message: string): string[] => {
   if (!message) return [];
   const encoder = new TextEncoder();
   const chunks: string[] = [];
@@ -808,8 +813,10 @@ export const formatCip20Message = (message: string, maxChunkBytes = 64): string[
 
   for (const char of message) {
     const charBytes = encoder.encode(char).length;
-    if (currentBytes + charBytes > maxChunkBytes) {
-      if (currentChunk) chunks.push(currentChunk);
+    if (currentBytes + charBytes > 64) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
       currentChunk = char;
       currentBytes = charBytes;
     } else {
@@ -818,7 +825,9 @@ export const formatCip20Message = (message: string, maxChunkBytes = 64): string[
     }
   }
 
-  if (currentChunk) chunks.push(currentChunk);
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
   return chunks;
 };
 ```
@@ -855,7 +864,7 @@ const unsignedTx = await createBetTx(
 );
 ```
 
-##### Dựng giao dịch On-chain trong `createBetTx` (`transactions.ts`)
+##### Dựng giao dịch `createBetTx` (`transactions.ts`)
 
 * **Khởi tạo Datum ban đầu, mảng chuỗi metadata & tính toán Slot hết hạn:**
   ```typescript
@@ -974,7 +983,7 @@ useEffect(() => {
 
 * **Truy vấn nội dung ván cược `fetchBetMessage`:**
   Nội dung cược (CIP-20) chỉ được đính kèm duy nhất tại giao dịch khởi tạo (`CREATE`). Xuyên suốt vòng đời bet, nó trải qua chuỗi giao dịch tiếp nối nhưng không mang theo metadata này. Vì vậy, để lấy lại nội dung cược, ta phải truy vết về đúng transaction tạo lập ban đầu căn cứ theo trạng thái ván cược hiện tại:
-  * **Ván cược OPEN / EXPIRED (`datum.playerAddress === null`):** Bet UTxO hiện tại chính là output của giao dịch `CREATE`. Ta chỉ cần lấy `betUtxo.input.txHash` và gọi API Blockfrost `/txs/{txHash}/metadata` là lấy được tin nhắn CIP-20.
+  * **Ván cược OPEN / EXPIRED (`datum.playerAddress === null`):** Bet UTxO hiện tại chính là output của giao dịch `CREATE`. Ta chỉ cần lấy `betUtxo.input.txHash`.
   * **Ván cược CLOSED / AWAITING_RESULT (`datum.playerAddress !== null`):** Bet UTxO hiện tại lại là output sinh ra từ giao dịch `JOIN`. Bản thân giao dịch `JOIN` không hề đính kèm lại nội dung cược.
     ```typescript
     let createTxHash: string | null;
@@ -1047,23 +1056,17 @@ useEffect(() => {
 ##### 1. Giải phẫu Địa chỉ Kỷ nguyên Shelley – Cơ chế "Tách quyền" Độc đáo
 
 * **1.1. Đặt vấn đề: Vì sao Cardano Staking không cần khóa cứng tài sản?**  
-  Trên phần lớn các blockchain Proof-of-Stake truyền thống (Ethereum, Solana hay Cosmos), khi người dùng ủy quyền Staking, tài sản bắt buộc phải gửi vào pool/validator, bị khóa cứng (Lock-up) và cần thời gian chờ giải phóng (Unbonding) khi muốn rút.  
-  Trên Cardano, bạn vừa có thể ủy quyền (Delegate) toàn bộ số dư ADA cho Stake Pool nhận lãi mỗi 5 ngày (1 Epoch), nhưng cùng lúc đó **vẫn có thể tự do chi tiêu mua NFT, chuyển khoản hoặc đặt cược dApp bất cứ lúc nào**.  
-  Điều kỳ diệu này xuất phát từ kiến trúc địa chỉ kỷ nguyên Shelley (**Shelley Address Scheme**): **Quyền Chi tiêu (Payment)** và **Quyền Ủy quyền/Rút thưởng (Staking)** được tách bạch hoàn toàn thành hai thành phần độc lập nhưng được ghép chung vào một địa chỉ duy nhất.
+  Trên phần lớn các blockchain Proof-of-Stake truyền thống (Ethereum, Solana hay Cosmos), khi người dùng ủy quyền Staking, tài sản bắt buộc phải gửi vào pool/validator, bị khóa cứng và cần thời gian chờ giải phóng khi muốn rút.  
+  Trên Cardano, bạn vừa có thể ủy quyền (Delegate) toàn bộ số dư ADA cho Stake Pool nhận lãi mỗi 5 ngày (1 Epoch), nhưng cùng lúc đó **vẫn có thể tự do chi tiêu mua NFT, chuyển khoản hoặc tương tác dApp bất cứ lúc nào**.  
+  Điều kỳ diệu này xuất phát từ kiến trúc địa chỉ kỷ nguyên Shelley: **Quyền Chi tiêu (Payment)** và **Quyền Ủy quyền/Rút thưởng (Staking)** được tách bạch hoàn toàn thành hai thành phần độc lập nhưng được ghép chung vào một địa chỉ duy nhất.
 
 * **1.2. Hai mảnh ghép cấu thành Địa chỉ Shelley (Credentials):**  
   Một địa chỉ ví Cardano tiêu chuẩn (Base Address) là sự lắp ráp có cấu trúc từ 2 thành phần định danh (Credentials):
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        CARDANO BASE ADDRESS                            │
-├───────────────────┬───────────────────────────┬────────────────────────┤
-│   Network Header  │    Payment Credential     │    Stake Credential    │
-│      (1 Byte)     │        (28 Bytes)         │       (28 Bytes)       │
-└───────────────────┴───────────────────────────┴────────────────────────┘
-```
+![Cấu trúc Địa chỉ Cardano Base Address](../resources/Shelley_addr.png)
 
-  1. **Payment Credential (Quyền định đoạt tài sản - 28 bytes):** Quyết định *ai có quyền ký mở khóa và chi tiêu các UTxO* tại địa chỉ này. Có thể là **KeyHash** (`VerificationKeyHash` của Private Key) hoặc **ScriptHash** (địa chỉ hợp đồng Validator).
+
+  1. **Payment Credential (Quyền định đoạt tài sản - 28 bytes):** Quyết định *ai có quyền ký mở khóa và chi tiêu các UTxO* tại địa chỉ này. Có thể là **KeyHash** (VerificationKeyHash/PublicKeyHash) hoặc **ScriptHash** (mã băm của Validator loại Spending).
   2. **Stake Credential (Quyền ủy quyền & Nhận thưởng - 28 bytes):** Quyết định *số dư ADA nằm trong địa chỉ sẽ được tính gộp sức mạnh biểu quyết (delegation) cho Stake Pool nào và ai có quyền rút phần thưởng*. Có thể là **Stake KeyHash** hoặc **Stake ScriptHash**.
 
 * **1.3. Phân loại địa chỉ: Base Address vs. Enterprise Address vs. Reward Address:**  
@@ -1075,7 +1078,7 @@ useEffect(() => {
 | **Độ dài Payload** | **57 bytes** (1 Header + 28 Payment + 28 Stake) | **29 bytes** (1 Header + 28 Payment) | **29 bytes** (1 Header + 28 Stake) |
 | **Tiền tố Bech32** | `addr1q...` (Mainnet) / `addr_test1q...` (Testnet) | `addr1v...` (Mainnet) / `addr_test1v...` (Testnet) | `stake1u...` (Mainnet) / `stake_test1u...` (Testnet) |
 | **Tham gia Staking?** | **Có.** Tự động cộng dồn số dư ADA vào Stake Key để nhận thưởng mỗi Epoch. | **Không.** Hoàn toàn không tham gia Staking. ADA nằm ở đây không sinh lãi. | Nơi ghi nhận và tích lũy phần thưởng staking nhận về từ pool. |
-| **Ứng dụng thực tế** | Ví người dùng cá nhân (Lace, Eternl, Yoroi), các dApp DeFi tối ưu lợi tức. | Các sàn giao dịch tập trung (Binance, Coinbase), cổng thanh toán, UTxO Script trung gian tạm thời. | Dùng để ủy quyền Stake Pool và rút phần thưởng staking về ví chính. |
+| **Ứng dụng thực tế** | Ví người dùng cá nhân (Lace, Eternl, Yoroi), các dApp DeFi tối ưu lợi tức. | Các sàn giao dịch tập trung (Binance, Coinbase), cổng thanh toán, Địa chỉ script no-stake. | Dùng để ủy quyền Stake Pool và rút phần thưởng staking về ví chính. |
 
   **Trực quan hóa giải mã nhị phân Địa chỉ Shelley (Chuẩn CIP-19):**  
   Quy chuẩn địa chỉ Cardano được đặc tả trong **CIP-19 (Cardano Addresses)**. Khi giải mã Bech32 của một Base Address, chúng ta thu được chuỗi nhị phân 57 bytes:
@@ -1100,30 +1103,33 @@ Hex:     01      5986bfcc0cbfc60dec8df87715cc95d03817aac386b0e9d33da03b39   f7e1
   **Giải phẫu chi tiết cấu trúc 1 Byte Header (8 bits) theo CIP-19:**
   * **4 bit đầu (Bit 7..4 - Header Type):** Xác định cấu trúc lắp ghép:
     * `0..3`: **Base Address** (`0`: Payment Key + Stake Key, `1`: Payment Script + Stake Key, `2`: Payment Key + Stake Script, `3`: Payment Script + Stake Script).
-    * `4..5`: **Pointer Address** (chỉ định vị trí Stake Key trên blockchain qua slot/txIndex, hiện không khuyến khích sử dụng).
-    * `6..7`: **Enterprise Address** (`6`: Payment Key không Stake, `7`: Payment Script không Stake).
-    * `14..15`: **Reward / Stake Address** (`14`: Stake KeyHash, `15`: Stake ScriptHash).
-  * **4 bit sau (Bit 3..0 - Network Tag):** Xác định môi trường mạng (`0`: Testnet/Preprod/Preview, `1`: Mainnet).
+    * `4` hoặc `5`: **Pointer Address** (chỉ định vị trí Stake Key trên blockchain qua slot/txIndex, hiện không còn khuyến khích sử dụng).
+    * `6` hoặc `7`: **Enterprise Address** (`6`: Payment Key không Stake, `7`: Payment Script không Stake).
+    * `14` hoặc `15`: **Reward / Stake Address** (`14`: Stake KeyHash, `15`: Stake ScriptHash).
+  * **4 bit sau (Bit 3..0 - Network Tag):** Xác định môi trường mạng (`0`: Testnet - Preprod/Preview, `1`: Mainnet).
 
-* **1.4. Mối liên hệ thực chiến với On-chain Aiken Smart Contract (`bet.ak`):**  
-  Đối với Spend Script, có vô số địa chỉ hợp đồng khác nhau tùy thuộc vào thành phần Stake Credential được ghép vào. Bản thân một spending validator có thể quản lý việc chi tiêu UTxO trên rất nhiều địa chỉ Base Script Address khác nhau.  
+* **1.4. Mối liên hệ với On-chain Aiken Smart Contract (`bet.ak`):**  
+  Đối với Spending Script trên Cardano, một Script Hash có thể đứng hoàn toàn độc lập ở dạng **Script Enterprise Address** (không có thành phần Stake) hoặc được ghép với bất kỳ Stake Credential nào để tạo ra **vô số Script Base Address** khác nhau. Nguyên tắc cốt lõi: dù UTxO nằm tại Enterprise Address hay bất kỳ Base Address nào của script, khi UTxO đó được chi tiêu, Node Cardano vẫn luôn kích hoạt cùng một Spending Validator tương ứng với Script Hash để kiểm định logic.  
+
   Trong Mint handler của `bet.ak`:
-  ```aiken
+  ```rust
   expect [bet_output] = outputs_at(outputs, from_script(policy_id))
   ```
-  Hàm `from_script(policy_id)` tạo ra **Enterprise Address** của script (`stake_credential: None`). Lệnh `expect [bet_output] = outputs_at(...)` chỉ lọc output gửi về địa chỉ Enterprise này.  
-  * **Vector tấn công tiềm ẩn:** Kẻ xấu có thể tạo thêm các script output gửi vào địa chỉ Base Address của hợp đồng (ghép `policy_id` với Stake Key cá nhân của chúng) để làm nhiễu hệ thống.
-  * **Cơ chế phòng thủ của dApp chúng ta:** Nhờ **State Thread Token (Bet Token)**, mọi output hợp lệ gửi vào hợp đồng bắt buộc phải chứa đúng 1 Bet Token định danh. Output "tạo chui" không có Bet Token này sẽ bị Validator và tầng Off-chain (`getAllBets`) tự động loại bỏ hoàn toàn!
+  * Hàm `from_script(policy_id)` của thư viện `cardano/address` mặc định sinh ra **Script Enterprise Address** (`stake_credential: None`). Do đó, lệnh `expect [bet_output] = outputs_at(...)` chỉ lọc và bắt buộc có đúng 1 output gửi về chính xác địa chỉ Enterprise thuần túy này.
+  * **Vector tấn công tiềm ẩn:** Kẻ xấu có thể cố tình tạo thêm các output gửi vào Base Address của hợp đồng (ghép `policy_id` với Stake Key cá nhân của chúng để thực hiện hành vi giả mạo, gian lận hoặc gây nhiễu hệ thống).
+  * **Cơ chế phòng thủ đa tầng của dApp:**  
+    1. **On-chain State Thread Token (STT):** Bet Thread Token chỉ được mint đúng 1 đơn vị duy nhất trong giao dịch `CreateBet` và được bắt buộc khóa vào `bet_output`. Bất kỳ output Base Address "tạo chui" nào không có STT định danh sẽ bị từ chối khi thực hiện các pha chuyển tiếp trạng thái (`Join`, `Announce`, `Cancel`).
+    2. **Off-chain Filtering (`getAllBets`):** Tầng SDK ngoài chuỗi chỉ quét và công nhận các UTxO tại địa chỉ script sở hữu đúng Bet Thread Token hợp lệ, loại bỏ hoàn toàn các UTxO giả mạo trước khi dữ liệu hiển thị lên dApp.
 
-##### 2. Ví HD (CIP-1852) – "Nhà máy" Dẫn xuất và Lắp ráp Khóa Tự động
+##### 2. Ví HD (CIP-1852)
 
-* **2.1. Đặt vấn đề: Bài toán eUTxO & Hiện tượng "Ví sinh ra nhiều địa chỉ":**  
+* **2.1. Đặt vấn đề: Hiện tượng "Ví tự sinh ra nhiều địa chỉ":**
   Mô hình eUTxO khuyến khích tính riêng tư: **Mỗi khi nhận tiền hoặc trả lại tiền thừa (Change), ví nên sử dụng một địa chỉ thanh toán mới.** Nếu người dùng thực hiện 50 giao dịch, ví sẽ tạo ra 50 địa chỉ thanh toán khác nhau.  
-  Làm thế nào để người dùng không phải sao lưu 50 Private Key riêng biệt, và làm sao để 50 địa chỉ đó tự động biết gom chung toàn bộ số dư ADA vào **một hồ Staking duy nhất**?  
-  Chuẩn ví phân cấp tất định (Hierarchical Deterministic Wallet - Ví HD) khởi nguồn từ Bitcoin (**BIP-32**, **BIP-44**) và được mở rộng cho Cardano thông qua chuẩn **CIP-1852**.
+  Làm thế nào để người dùng không phải sao lưu 50 Private Key riêng biệt, và làm sao để 50 địa chỉ đó tự động biết gom chung toàn bộ số dư ADA vào **một pool Staking duy nhất**?  
+  Chuẩn ví phân cấp tất định (Hierarchical Deterministic Wallet - Ví HD) khởi nguồn từ Bitcoin (**BIP-32**, **BIP-44**) và được chuẩn hóa cho Cardano thông qua chuẩn **CIP-1852**.
 
 * **2.2. Giải mã 5 tầng dẫn xuất chuẩn CIP-1852 của Cardano:**  
-  Từ duy nhất một hạt giống gốc (12 hoặc 24 từ khóa Mnemonic - BIP-39), thuật toán Ed25519-BIP32 phái sinh cây phân cấp khóa theo đường dẫn 5 tầng:
+  Từ duy nhất một hạt giống gốc (12 - 24 từ khóa Mnemonic - BIP-39), thuật toán Ed25519-BIP32 phái sinh cây phân cấp khóa theo đường dẫn 5 tầng:
 
 $$\mathbf{m\ /\ 1852'\ /\ 1815'\ /\ account'\ /\ role\ /\ index}$$
 
@@ -1134,113 +1140,55 @@ $$\mathbf{m\ /\ 1852'\ /\ 1815'\ /\ account'\ /\ role\ /\ index}$$
 
   1. **Tầng 1 - `purpose'` (`1852'`):** Định danh kiến trúc ví kỷ nguyên Shelley (năm mất của Ada Lovelace: **1852**).
   2. **Tầng 2 - `coin_type'` (`1815'`):** Mã định danh riêng của Cardano / ADA (năm sinh của Ada Lovelace: **1815**).
-  3. **Tầng 3 - `account'` (`0'`, `1'`, ..., $(2^{31} - 1)'$):** Chia tách ví thành các tài khoản độc lập trong cùng một seed phrase.
+  3. **Tầng 3 - `account'` (`0'`, `1'`, ..., $(2^{31} - 1)'$):** Chia tách ví thành các tài khoản độc lập trong cùng một ví.
      * Số lượng tối đa lên tới hơn **hai tỷ tài khoản** ($2^{31} - 1 = 2.147.483.647$).
-     * **Bảo mật kết nối CIP-30:** Ví **chỉ chia sẻ thông tin ở cấp độ Active Account** đang được chọn. Toàn bộ các account còn lại được cô lập an toàn, dApp không thể biết sự tồn tại của chúng.
+     * **Bảo mật kết nối CIP-30:** Ví **chỉ chia sẻ thông tin ở cấp độ Account** đang được chọn. Toàn bộ các account còn lại được cô lập an toàn, dApp không thể biết sự tồn tại của chúng.
   4. **Tầng 4 - `role` (`0`, `1`, `2`) – Trái tim kiến trúc Cardano:**
      * `role = 0` (External Chain): Nhánh sinh Payment Key cho địa chỉ nhận tiền công khai.
-     * `role = 1` (Internal / Change Chain): Nhánh sinh Payment Key nội bộ để nhận **tiền thừa thối lại (Change UTxO)**.
+     * `role = 1` (Internal / Change Chain): Nhánh sinh Payment Key nội bộ để nhận **tiền thừa trả lại (Change UTxO)**.
      * `role = 2` (Staking Chain): Nhánh sinh **Stake Key**.
-  5. **Tầng 5 - `index` (`0`, `1`, ..., $2^{31} - 1$):** Số thứ tự cụ thể của từng cặp khóa trong nhánh đó (hơn 2 tỷ chỉ số).
+  5. **Tầng 5 - `index` (`0`, `1`, ..., $2^{31} - 1$):** Số thứ tự cụ thể của từng cặp khóa trong từng nhánh (hơn 2 tỷ chỉ số).
 
-* **2.3. Cơ chế Lắp ghép: "Nhiều Payment Key – Một Chùm Stake Key":**  
-  * Ở nhánh `role = 0` và `role = 1`, ví liên tục tăng chỉ số `index` (`0/0`, `0/1`, `1/0`, `1/1`...) để sinh ra vô số Payment Key khác nhau.
-  * Ở nhánh `role = 2` (Staking), ví chỉ lấy **duy nhất khóa đầu tiên: `role = 2 / index = 0`** làm Stake Key đại diện cho cả tài khoản.
-  * Ví lần lượt ghép từng Payment Key mới với chiếc Stake Key cố định (`2/0`).  
+* **2.3. Cơ chế Lắp ghép: "Nhiều Payment Key – Một Stake Key":**  
+  * Ở nhánh `role = 0` và `role = 1`, ví ở chế độ multi-address sẽliên tục tăng chỉ số `index` (`0/0`, `0/1`, `1/0`, `1/1`...) để sinh ra vô số Payment Key khác nhau.
+  * Ở nhánh `role = 2` (Staking), ví thường chỉ lấy **duy nhất khóa đầu tiên: `role = 2 / index = 0`** làm Stake Key đại diện cho cả tài khoản.
+  * Ví lần lượt ghép từng Payment Key mới với một Stake Key cố định (`2/0`).  
   **Kết quả:** Dù đổi bao nhiêu địa chỉ nhận tiền và Change Address, **toàn bộ số dư ADA nằm trên các địa chỉ đó đều được quy tụ về đúng một Stake Key duy nhất**!
+
+  > Note: Hầu hết các ví hiện hành đều mặc định chỉ tạo một Stake Key cho mỗi tài khoản, nhưng đó không phải quy định bắt buộc. Trước đây, ví Lace từng có tính năng **ủy quyền đa pool** trên một tài khoản, bản chất là tạo ra nhiều Stake Key trên cùng tài khoản đó, và mỗi khóa ủy quyền cho một pool.
 
 * **2.4. Sơ đồ Cây dẫn xuất Ví HD CIP-1852 kết nối Địa chỉ Shelley:**
 
-```mermaid
-graph TD
-    classDef seed fill:#7c2d12,stroke:#f97316,stroke-width:2px,color:#fff,rx:8,ry:8;
-    classDef pathNode fill:#1e293b,stroke:#64748b,stroke-width:1.5px,color:#e2e8f0,rx:6,ry:6;
-    classDef rolePay fill:#0c4a6e,stroke:#38bdf8,stroke-width:2px,color:#e0f2fe,rx:6,ry:6;
-    classDef roleStake fill:#3b0764,stroke:#c084fc,stroke-width:2px,color:#f3e8ff,rx:6,ry:6;
-    classDef keyLeaf fill:#0f172a,stroke:#38bdf8,stroke-width:1.5px,color:#38bdf8,rx:4,ry:4;
-    classDef stakeLeaf fill:#0f172a,stroke:#c084fc,stroke-width:2px,color:#e879f9,rx:4,ry:4;
-    classDef finalBase fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ffffff,rx:8,ry:8;
-    classDef finalEnt fill:#31102f,stroke:#a855f7,stroke-width:2px,stroke-dasharray: 5 5,color:#ffffff,rx:8,ry:8;
+![Sơ đồ Cây dẫn xuất Ví HD CIP-1852 kết nối Địa chỉ Shelley](../resources/HD_wallet.png)
 
-    Seed["🌱 <b>Mnemonic (12-24 từ)</b><br/>Root Seed (BIP-39)"]:::seed
-    Purpose["<b>1852'</b> (Purpose: Shelley)"]:::pathNode
-    Coin["<b>1815'</b> (Coin Type: ADA)"]:::pathNode
-    Acc["<b>0'</b> (Account #0)"]:::pathNode
-
-    Seed --> Purpose --> Coin --> Acc
-
-    subgraph Roles["Tầng 4: Phân nhánh Vai trò (Role)"]
-        R0["<b>role = 0</b><br/>Nhánh Nhận tiền (External)"]:::rolePay
-        R1["<b>role = 1</b><br/>Nhánh Tiền thối (Change)"]:::rolePay
-        R2["<b>role = 2</b><br/>Nhánh Staking"]:::roleStake
-    end
-
-    Acc --> R0
-    Acc --> R1
-    Acc --> R2
-
-    subgraph Indexes["Tầng 5: Dẫn xuất Khóa cụ thể (Index)"]
-        P0_0["🔑 PayKey 0/0"]:::keyLeaf
-        P0_1["🔑 PayKey 0/1"]:::keyLeaf
-        P1_0["🔑 ChangeKey 1/0"]:::keyLeaf
-        S2_0["🥩 <b>StakeKey 2/0</b><br/><i>(Cố định đại diện tài khoản)</i>"]:::stakeLeaf
-    end
-
-    R0 --> P0_0
-    R0 --> P0_1
-    R1 --> P1_0
-    R2 --> S2_0
-
-    subgraph Assembly["Cơ chế Lắp ghép thành Địa chỉ Shelley"]
-        Ent0["🏢 <b>Enterprise Address</b><br/>[PayKey 0/0] (Không Stake)"]:::finalEnt
-        Base0["🏠 <b>Base Address #1</b><br/>[PayKey 0/0] + [StakeKey 2/0]"]:::finalBase
-        Base1["🏠 <b>Base Address #2</b><br/>[PayKey 0/1] + [StakeKey 2/0]"]:::finalBase
-        BaseChange["🏠 <b>Change Address</b><br/>[ChangeKey 1/0] + [StakeKey 2/0]"]:::finalBase
-    end
-
-    P0_0 -.->|Chỉ lấy Payment| Ent0
-    P0_0 ==>|Ghép Payment| Base0
-    P0_1 ==>|Ghép Payment| Base1
-    P1_0 ==>|Ghép Payment| BaseChange
-
-    S2_0 ==>|Dùng chung đuôi Stake Key| Base0
-    S2_0 ==>|Dùng chung đuôi Stake Key| Base1
-    S2_0 ==>|Dùng chung đuôi Stake Key| BaseChange
-
-    style Roles fill:#090d16,stroke:#334155,stroke-width:1px,color:#94a3b8
-    style Indexes fill:#090d16,stroke:#334155,stroke-width:1px,color:#94a3b8
-    style Assembly fill:#041f18,stroke:#059669,stroke-width:2px,color:#6ee7b7
-```
 
 * **2.5. Case Study Thực Chiến trên Ví Eternl: Single Address Mode vs Multi Address Mode:**  
   Trong ứng dụng ví Eternl:
   * **Quản lý Đa tài khoản:** Người dùng có thể tạo `Account 0`, `Account 1`, `Account 2`... Khi kết nối dApp qua CIP-30, chỉ Account đang chọn được chia sẻ. Mỗi Account có 1 Stake Key duy nhất (`role = 2, index = 0`).
   * **Đối chiếu thực tế:**
 
-| Chế độ | Single Address Mode: BẬT (Ví dụ: `Account 2`) | Single Address Mode: TẮT (Chế độ eUTxO mặc định - Ví dụ: `Account 0`) |
+| Chế độ | Single Address Mode: BẬT | Single Address Mode: TẮT |
 |---|---|---|
 | **Mục đích** | Mô phỏng ví đơn địa chỉ kiểu Account-based để tiện dùng dApp, giao diện đơn giản. | Tối ưu hóa tính riêng tư theo mô hình eUTxO nguyên bản của Bitcoin và Cardano. |
 | **Hành vi sinh địa chỉ** | Cố định duy nhất 1 địa chỉ nhận tiền (ví dụ đuôi `...8pru`). | Liên tục sinh địa chỉ nhận tiền và địa chỉ nhận tiền thừa (Change) mới sau mỗi giao dịch. |
-| **Input & Output Giao dịch** | Cả UTxO đầu vào và UTxO tiền thừa đầu ra đều quay về cùng một địa chỉ này. | UTxO đầu vào từ Change cũ (`role = 1, index = 21`), UTxO tiền thừa trả về Change mới (`role = 1, index = 23`). |
-| **Đường dẫn Dẫn xuất (CIP-1852)** | • PayKey: Cố định `role = 0, index = 0`<br/>• StakeKey: Cố định `role = 2, index = 0` | • PayKey: Biến thiên liên tục (`role = 1, index = 21`, `index = 23`...)<br/>• StakeKey: Luôn cố định `role = 2, index = 0` |
-| **Điểm quy tụ** | Dùng duy nhất 1 địa chỉ cố định. | Địa chỉ Base liên tục đổi chuỗi ký tự, nhưng **toàn bộ đều dùng chung một đuôi Stake Key (`role = 2, index = 0`)**. |
+| **Input & Output Giao dịch** | Cả UTxO đầu vào và UTxO tiền thừa đầu ra đều quay về cùng một địa chỉ này. | UTxO đầu vào từ Change cũ (ví dụ: `role = 1, index = 21`), UTxO tiền thừa trả về Change mới (ví dụ:`role = 1, index = 23`). |
+| **Đường dẫn Dẫn xuất (CIP-1852)** | • PayKey: Cố định `role = 0, index = 0`<br/>• StakeKey: Cố định `role = 2, index = 0` | • PayKey: Biến thiên liên tục (`role = 0/1, index = 21`, `index = 23`...)<br/>• StakeKey: Luôn cố định `role = 2, index = 0` |
 
   > [!TIP]
-  > Lập trình viên Web3 chuyên nghiệp **không bao giờ được giả định người dùng luôn bật Single Address Mode**! Việc người dùng tắt Single Address Mode để bảo vệ quyền riêng tư là hành vi hoàn toàn hợp lệ và chuẩn mực trên mạng Cardano.
+  > D-App cần hỗ trợ tốt cả 2 chế độ này của ví.
 
 ##### 3. Nhận diện Ví & Phân quyền Thao tác trên Giao diện dApp (`BetList.tsx`)
 
-* **3.1. Cạm bẫy kinh điển: So sánh chuỗi địa chỉ trực tiếp:**  
+* **3.1. So sánh chuỗi địa chỉ trực tiếp:**  
   Nếu đem chuỗi địa chỉ ví đang kết nối so sánh trực tiếp với địa chỉ lưu trong Datum:
   ```typescript
-  // ❌ CẠM BẪY PHỔ BIẾN:
   const currentAddress = await wallet.getChangeAddress();
   const isOwner = (currentAddress === datum.ownerAddress);
   ```
   Khi ví thực hiện giao dịch và đổi sang Change Address mới (`addr1...BBB` thay vì `addr1...AAA`), phép so sánh trả về `false`. Giao diện lập tức ẩn sạch các nút thao tác và mất huy hiệu *"You"*, dù ván cược 100% thuộc về họ!
 
-* **3.2. Giải pháp chuẩn CIP-30: Nhận diện qua Stake Key Hash:**  
-  Dù ví HD có thay đổi bao nhiêu địa chỉ Payment, toàn bộ các địa chỉ Base Address trong cùng một tài khoản đều chia sẻ chung các **Stake Key**. Vì vậy, giải pháp triệt để là **so khớp mã băm Stake Key (`stakeCredentialHash`)**:
+* **3.2. Giải pháp: Nhận diện qua Stake Key Hash:**  
+  Dù ví HD có thay đổi bao nhiêu địa chỉ Payment, toàn bộ các địa chỉ Base Address trong cùng một tài khoản đều chia sẻ chung các **Stake Key** (mà phần lớn trong các trường hợp là một Stake Key). Vì vậy, giải pháp triệt để là **so khớp mã băm Stake Key (`stakeCredentialHash`)**:
 
 ```
 [Địa chỉ ví kết nối] ──> Trích xuất Stake Key Hash ──┐
@@ -1289,9 +1237,8 @@ useEffect(() => {
 }, [connected, wallet]);
 ```
 
-* **3.4. Xử lý triệt để bài toán Ví Đa Ủy Quyền (Multi-delegation Wallets):**  
-  Một số ví nâng cao như **Eternl** hỗ trợ Multi-delegation (một tài khoản có thể phái sinh nhiều Stake Key con để ủy quyền cho nhiều pool). Nếu code chỉ lấy `rewardAddrs[0]`, khi người dùng tạo bet bằng địa chỉ thuộc Stake Key thứ hai (`rewardAddrs[1]`), giao diện sẽ bị "nhận hụt" và từ chối phân quyền!  
-  **Giải pháp:** Lưu toàn bộ Stake Key Hashes vào mảng `string[]` và dùng `.includes()` để kiểm tra:
+* **3.4. Xử lý triệt để bài toán Ví Ủy Quyền đa pool:**  
+  Lưu toàn bộ Stake Key Hashes vào mảng `string[]` và dùng `.includes()` để kiểm tra:
 
 ```typescript
 // Trích từ frontend/src/components/BetList.tsx:
@@ -1317,38 +1264,13 @@ const isPlayer  = !!(playerStake && myStakeKeyHashes.includes(playerStake));
     * **Thông báo chờ:** Khi `status === "CLOSED"`, hiển thị `⏳ Waiting for expiration`.
 
 * **3.6. Góc nhìn Bảo mật Nâng cao: Cạm bẫy "Địa chỉ lai" (Franken Address) & Hai Lớp Phòng Thủ:**  
-  1. **Bản chất của nhận diện qua Stake Key:** Đây là cơ chế **nhận diện gián tiếp** phục vụ mục đích tiện ích hiển thị (UI/UX). Chủ thể pháp lý thực sự ký duyệt giao dịch là **Payment Key**.
+  1. **Bản chất của nhận diện qua Stake Key:** Đây là cơ chế **nhận diện gián tiếp** phục vụ mục đích tiện ích hiển thị (UI/UX). Chủ thể thực sự ký duyệt giao dịch và cần nhận diện là **Payment Key**.
   2. **Kịch bản Tấn công "Địa chỉ lai" (Franken Address):** Kẻ tấn công tạo bet và điền vào Datum địa chỉ Base ghép **Payment Credential của kẻ tấn công** với **Stake Credential của Trọng tài**.  
-     * Giao diện dApp thấy Stake Key trùng khớp sẽ mở khóa nút "Announce Winner" cho Trọng tài thật.  
+     * Giao diện dApp thấy Stake Key trùng khớp sẽ mở khóa nút "Announce Winner" như với Trọng tài thật.  
      * Nhưng khi Trọng tài bấm ký, giao dịch on-chain sẽ thất bại vì Trọng tài không nắm Private Key của Payment Key đó!
-  3. **Hai Lớp Phòng Thủ Toàn Diện:**
+  3. **Giải pháp thường dùng:** Giao diện yêu cầu ví ký một thông điệp tùy ý (Challenge/Nonce) bằng hàm `wallet.signData()` ➜ Chứng minh người dùng thực sự sở hữu quyền chi tiêu (Payment).
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        HAI LỚP PHÒNG VỆ dApp                           │
-├────────────────────────────────────┬───────────────────────────────────┤
-│    Lớp 1: Off-chain Xác thực       │    Lớp 2: On-chain Chốt chặn      │
-│     (CIP-8 Message Signing)        │        (extra_signatories)        │
-├────────────────────────────────────┼───────────────────────────────────┤
-│ • Giao diện yêu cầu ví ký một      │ • Smart Contract (bet.ak) ép buộc │
-│   thông điệp tùy ý (Challenge/Nonce│   giao dịch phải có chữ ký của    │
-│   bằng hàm wallet.signData()).     │   Payment KeyHash đã lưu.         │
-│ • Chữ ký được sinh bởi Payment Key │ • list.has(extra_signatories, pkh)│
-│   của địa chỉ.                     │                                   │
-│ ➜ Chứng minh người dùng thực sự sở │ ➜ Ngăn chặn tuyệt đối mọi nỗ lực  │
-│   hữu quyền chi tiêu (Payment).    │   gian lận hoặc mạo danh on-chain.│
-└────────────────────────────────────┴───────────────────────────────────┘
-```
-
-  * **Lớp Phòng thủ 1 (Off-chain):** DApp gọi `wallet.signData(address, payloadHex)` theo chuẩn CIP-8 để yêu cầu ví ký thông điệp bằng Payment Key, chứng minh quyền sở hữu chi tiêu trước khi liên kết.
-  * **Lớp Phòng thủ 2 (On-chain):** Smart Contract `bet.ak` ràng buộc nghiêm ngặt chữ ký của Payment Key qua `extra_signatories`:
-    ```aiken
-    // Trích từ validators/bet.ak:
-    expect list.has(extra_signatories, player_pkh)  // Khi Join
-    expect list.has(extra_signatories, referee_pkh) // Khi Announce Winner
-    expect list.has(extra_signatories, owner_pkh)   // Khi Cancel
-    ```
-    Các mã băm này được trích xuất trực tiếp từ **Payment Credential** (`address.payment_credential`). Kẻ xấu hoàn toàn không thể giả mạo chữ ký on-chain để đánh cắp quỹ cược!
+  D-App của chúng ta bỏ qua bước kiểm tra này vì nó đã có sẵn một cơ chế tương tự ở tầng on-chain: toàn bộ các hành động tương tác on-chain với bet đều bắt buộc kiểm tra chữ ký payment của chủ thể: giao dịch Join cần Người chơi ký, Announce Winner cần Trọng tài ký, và Cancel cần Owner ký.
 
 ---
 
@@ -1369,7 +1291,7 @@ const buildAndSubmit = async (
 
 * **Tùy chọn `useEvaluator` linh hoạt:**
   * Khi gọi cho `joinBetTx`, đặt `useEvaluator = true` để MeshTxBuilder dùng Evaluator tính toán ngân sách ExUnits động.
-  * Khi gọi cho `announceWinnerTx` hoặc `cancelBetTx`, đặt `false` để sử dụng bộ ngân sách ExUnits tĩnh đã ấn định trước (+30% Buffer), tránh lỗi `EvaluationFailure`.
+  * Khi gọi cho `announceWinnerTx` hoặc `cancelBetTx`, đặt `false` để tự ấn định ngân sách ExUnits tĩnh, tránh lỗi `EvaluationFailure`.
 
 * **Khóa an toàn & Quản lý `pendingBetIds`:**
   * Kế thừa cờ khóa an toàn `isLocked = isProcessing || isTxBusy` (đã phân tích ở Mục 2.1) để vô hiệu hóa nút bấm và chuyển nhãn sang `⏳ Đang xác nhận...` hoặc `⏳ Đang bận...`.
@@ -1508,22 +1430,21 @@ const handleAnnounceWinner = (b: BetItem, isOwnerWin: boolean) => {
     .complete();
   ```
 
-#### Chuyên đề Kỹ thuật: Mô hình Trọng tài 0 phí & Kỹ thuật Ấn định Execution Units (+30% Buffer)
+#### Kỹ thuật Ấn định Execution Units
 
-##### 1. Mô hình Trọng tài 0 phí:
-* Trọng tài là bên thứ ba công tâm giải quyết kết quả và **không phải bỏ tiền túi cá nhân ra trả phí mạng**.
-* Bằng cách thiết lập `.changeAddress(winnerAddress)` và không nạp UTxO từ ví cá nhân (`selectUtxosFrom` không được gọi), toàn bộ phí mạng lưới sẽ được khấu trừ trực tiếp từ quỹ cược (Script UTxO), và số tiền còn lại tự động dồn về ví của người chiến thắng.
+##### 1. Điểm đặc biệt của giao dịch
+* Giao dịch này đặc biệt ở chỗ: thiết lập `.changeAddress(winnerAddress)` và không nạp UTxO từ ví cá nhân (`selectUtxosFrom` không được gọi), toàn bộ phí mạng lưới sẽ được khấu trừ trực tiếp từ quỹ cược (Script UTxO), và số tiền còn lại tự động dồn về ví của người chiến thắng mà không chỉ định một txOut() cụ thể.
 
 ##### 2. Lỗi `EvaluationFailure` của MeshTxBuilder & Cách khắc phục:
 * **Nguyên nhân kỹ thuật:**
-  * Khác với các giao dịch thông thường có `.txOut()` cố định và nạp UTxO ví để thuật toán Coin Selection co giãn bù tiền, giao dịch `announceWinnerTx` (và `cancelBetTx`) **không chỉ định một output cụ thể bằng `.txOut()`**, mà toàn bộ số tiền còn lại sau khi khấu trừ phí mạng được dồn vào `changeAddress`.
-  * Khi phương thức `complete()` được gọi mà không có ngân sách ExUnits định sẵn, `MeshTxBuilder` phải dựng một **Giao dịch Nháp (Draft Transaction)** để gửi lên Cardano Ogmios / Node Evaluator nhằm ước tính ngân sách thực thi.
-  * Do ở thời điểm mô phỏng chưa chốt được mức phí chính xác và output chưa hoàn thiện, giao dịch nháp này không thể thỏa mãn các điều kiện kiểm tra nghiêm ngặt của Smart Contract (`expect [output_to_winner] = outputs` và bảo toàn giá trị quỹ cược). Hậu quả là validator Plutus chạy thử bị Crash/Fail và Evaluator ném ra lỗi **`EvaluationFailure`** làm treo tiến trình build.
+  * Thông thường, giao dịch luôn có output được khai báo bằng `.txOut()` và nạp UTxO từ ví để thuật toán Coin Selection cân đối phí mạng. Đối với giao dịch này, ta không khai báo bất kỳ `.txOut()` nào mà dồn toàn bộ số tiền còn lại của quỹ cược sau khi trừ phí vào `changeAddress`.
+  * Khi gọi phương thức `complete()`, `MeshTxBuilder` phải dựng một **Giao dịch Nháp (Draft Transaction)** để gửi lên Cardano Ogmios nhằm ước tính ngân sách thực thi.
+  * Với giao dịch đặc thù này, `MeshTxBuilder` gặp lỗi khi mô phỏng giao dịch dẫn đến Ogmios không ước tính được ngân sách thực thi và ném ra lỗi **`EvaluationFailure`**.
 * **Giải pháp: Kỹ thuật Ấn định Ngân sách Tĩnh (Static Budgeting)**:
   1. **Đo lường Benchmark thực tế:**
      * Sử dụng lệnh `aiken check` (hoặc công cụ chuyên nghiệp hơn là `aiken bench`) để đo đạc chính xác lượng tài nguyên tiêu tốn trên máy ảo Plutus.
      * **Điều kiện tiên quyết:** Bộ Unit Test phải có độ bao phủ (coverage) tốt và dữ liệu mock phải có độ chi tiết sát với thực tế (vì trong Plutus Core, kích thước của `Transaction Context` như số lượng inputs, outputs, tokens và chữ ký ảnh hưởng trực tiếp đến chi phí Memory và CPU Steps).
-     * **Nguyên tắc Worst-case:** Chạy toàn bộ các test case liên quan đến hành động `announce` và lấy ra con số tài nguyên tiêu tốn lớn nhất:
+     * **Nguyên tắc Worst-case:** Chạy toàn bộ các test case liên quan đến hành động `announce` và `burn`, rồi lấy ra con số tài nguyên tiêu tốn lớn nhất:
        - Chi phí Spend thực tế (nhánh announce/cancel cao nhất): `~200,000 mem` và `~90,000,000 steps`.
        - Chi phí Mint (nhánh burn token): `~37,000 mem` và `~15,000,000 steps`.
   2. **Cộng khoảng đệm an toàn (Safety Buffer +30%):**
@@ -1531,7 +1452,7 @@ const handleAnnounceWinner = (b: BetItem, isOwnerWin: boolean) => {
        - Memory: $200.000 \times 1.30 = 260.000$.
        - Steps: $90.000.000 \times 1.28 \approx 115.000.000$.
        - Burn: $37.000 \rightarrow 50.000\text{ mem}$, $15.000.000 \rightarrow 20.000.000\text{ steps}$.
-     * *Lưu ý về cơ chế tính Transaction Fee của Cardano:* Trọng số của ExUnits (CPU và Memory) trong công thức tính phí của Cardano rất nhỏ (tăng 10 triệu steps chỉ làm tăng khoảng `~0.007 ADA`). Do đó, bạn hoàn toàn có thể hào phóng cấp thêm biên độ buffer để đảm bảo an toàn tuyệt đối, tránh nguy cơ giao dịch bị lỗi `OutOfBudget` và bị mất tiền Collateral.
+     * *Lưu ý về cơ chế tính Transaction Fee của Cardano:* Trọng số của ExUnits (CPU và Memory) trong công thức tính phí của Cardano rất nhỏ (tăng 10 triệu steps chỉ làm tăng khoảng `~0.007 ADA`). Do đó, bạn hoàn toàn có thể cấp thêm biên độ buffer để tăng độ an toàn, tránh nguy cơ giao dịch bị lỗi `OutOfBudget` và bị mất tiền Collateral.
   3. **Ấn định hằng số trong mã nguồn:**
      ```typescript
      // Trích từ offchain/src/transactions.ts:
@@ -1542,14 +1463,14 @@ const handleAnnounceWinner = (b: BetItem, isOwnerWin: boolean) => {
   4. **Áp dụng vào luồng xử lý Off-chain:**
      * Đặt cờ `useEvaluator = false` khi khởi tạo `MeshTxBuilder` để vô hiệu hóa bước mô phỏng tự động của SDK.
      * Truyền trực tiếp các hằng số budget này vào tham số thứ ba của `.txInRedeemerValue(spendRedeemer, "Mesh", BET_SPEND_ANNOUNCE_BUDGET)` và `.mintRedeemerValue(..., "Mesh", BET_BURN_BUDGET)`.
-     * Nhờ có sẵn ngân sách thực thi, phương thức `complete()` bỏ qua hoàn toàn bộ Evaluator và đóng gói thẳng giao dịch với phí mạng được tính toán chính xác tuyệt đối.
+     * Nhờ có sẵn ngân sách thực thi, phương thức `complete()` bỏ qua hoàn toàn bộ Evaluator và đóng gói thẳng giao dịch với phí mạng được tính toán dựa trên budget ấn định.
 
 > [!WARNING]
 > **Bài học Thiết kế Động lực Kinh tế (Incentive Design):**
 > 
-> Giao thức Cardano chỉ ràng buộc $\text{txfee} \ge \text{minfee}$ (chấp nhận trả thừa phí). Trong mô hình Trọng tài 0 phí, Trọng tài có thể tác động đến mức phí của giao dịch công bố kết quả (bằng cách nâng cao budget hoặc đẩy fee), trong khi người chiến thắng lại là bên phải gánh chịu khoản phí này (tiền thưởng nhận về bị ít đi).
+> Giao thức Cardano chỉ ràng buộc $\text{txfee} \ge \text{minfee}$ (chấp nhận trả thừa phí). Trong giao dịch announce, Trọng tài có thể tác động đến mức phí của giao dịch công bố kết quả (bằng cách phóng đại budget hoặc chèn thêm các hành động cá nhân không ảnh hưởng đến số output của giao dịch như rút thưởng stake, burn token), trong khi người chiến thắng lại là bên phải gánh chịu khoản phí này (tiền thưởng nhận về bị ít đi).
 > 
-> **Bài học rút ra:** *Không bao giờ để một bên quyết định một vấn đề mà bên gánh chịu hậu quả lại là một bên khác.* Trong các dự án dApp thực tế ngoài đời, nếu Trọng tài được nhận thù lao hoa hồng, thì **chính Trọng tài nên là người tự trả phí mạng từ ví cá nhân của mình** để loại bỏ hoàn toàn điểm mâu thuẫn kinh tế trên.
+> **Bài học rút ra khi thiết kế hệ thống:** *Không bao giờ để một bên quyết định một vấn đề mà bên gánh chịu hậu quả lại là một bên khác.* Trong các dự án dApp thực tế ngoài đời, nếu Trọng tài được nhận thù lao hoa hồng, thì **chính Trọng tài nên là người tự trả phí mạng từ ví cá nhân của mình** để loại bỏ hoàn toàn điểm mâu thuẫn kinh tế trên.
 
 ---
 
@@ -1562,7 +1483,7 @@ Về bản chất, giao dịch `CANCEL` có cấu trúc tương đồng với `A
 1. **Chủ thể ký giao dịch:** Người ký xác thực bắt buộc là Chủ phòng (`ownerPkh`), thay vì Trọng tài.
 2. **Thời điểm hiệu lực (`invalidBefore`):** Ràng buộc giao dịch chỉ được xem là hợp lệ **sau** thời điểm hết hạn ít nhất 1 slot (`invalidBefore(expirationSlot + 1)`), đảm bảo Chủ phòng không thể tự ý hủy cược trước hạn khi phòng vẫn đang mở.
 3. **Redeemer Action:** Nhánh chi tiêu sử dụng Constructor 2 (`mConStr2([])`) tương ứng với `Action::CANCEL` trong hợp đồng Aiken.
-4. **Dòng tiền hoàn trả:** Toàn bộ số tiền cọc ban đầu được hoàn trả 100% về ví Owner qua `.changeAddress(ownerAddress)`.
+4. **Dòng tiền hoàn trả:** Toàn bộ số tiền cọc ban đầu được hoàn trả về ví Owner qua `.changeAddress(ownerAddress)`.
 
 ```typescript
 // Trích từ offchain/src/transactions.ts:
@@ -1590,14 +1511,14 @@ txBuilder
 ## 3. Bài tập Thực hành
 
 ### Bài tập 1: Xây dựng chức năng gộp nhiều giao dịch Hủy cược trên giao diện
-Trong Bài 2 chúng ta đã thiết kế và tối ưu hợp đồng thông minh để cho phép gộp hủy nhiều bet hết hạn cùng lúc qua Mint handler. Hãy mở rộng SDK off-chain (`cancelMultipleBetsTx`) và hoàn thiện giao diện cho phép Chủ phòng tích chọn nhiều ván cược quá hạn để hủy chỉ trong một giao dịch duy nhất, tiết kiệm tối đa phí mạng.
+Trong Bài tập thực hành của Bài 2, chúng ta đã thực hiện chức năng này ở tầng on-chain. Trong bài tập này, hãy hoàn thiện toàn bộ tính năng ở tầng off-chain và thiết kế giao diện người dùng tương ứng.
 
 ### Bài tập 2: Bộ lọc & Phân loại ván cược theo vai trò người dùng
 Xây dựng thanh công cụ lọc gồm 4 tab trong component `BetList`:
-* **All:** Danh sách toàn bộ ván cược hiện có trên hệ thống.
-* **My Created Bets:** Các ván cược do ví hiện tại làm Chủ phòng (`ownerPkh`).
-* **My Joined Bets:** Các ván cược do ví hiện tại tham gia làm Người chơi (`playerPkh`).
-* **Referee Role:** Các ván cược chỉ định ví hiện tại làm Trọng tài phân xử (`refereePkh`).
+* **All:** Danh sách hiển thị toàn bộ tất cả các ván cược đang tồn tại.
+* **My Created Bets:** Các ván cược do ví hiện tại làm Chủ phòng.
+* **My Joined Bets:** Các ván cược do ví hiện tại tham gia làm Người chơi.
+* **Referee Role:** Các ván cược chỉ định ví hiện tại làm Trọng tài phân xử.
 
 ---
 
@@ -1605,31 +1526,24 @@ Xây dựng thanh công cụ lọc gồm 4 tab trong component `BetList`:
 
 Nhằm hỗ trợ quá trình nghiên cứu sâu hơn về các chuẩn mực kỹ thuật (CIPs/BIPs), cơ chế vận hành giao thức Cardano, kỹ năng đo lường hiệu năng hợp đồng và các công cụ đánh giá giao dịch ngoài chuỗi (Evaluator/Ogmios), dưới đây là danh mục các tài liệu chính thức tốt nhất được chọn lọc cho Bài 3:
 
-| STT | Chủ đề | Tài liệu / Đường dẫn chính thức | Trọng tâm nghiên cứu & Giá trị ứng dụng |
-| :---: | :--- | :--- | :--- |
-| **1** | **Cấu trúc Địa chỉ Cardano** | [CIP-0019: Cardano Addresses](https://cips.cardano.org/cip/CIP-0019) | Quy cách giải mã địa chỉ Bech32 (`addr...`), cấu trúc 2 tầng gồm Payment Credential và Stake Credential, phương pháp trích xuất Public Key Hash (`pkh`) chuẩn xác cho Smart Contract. |
-| **2** | **Thông điệp Giao dịch Off-chain** | [CIP-0020: Transaction message metadata](https://cips.cardano.org/cip/CIP-0020) | Định chuẩn cấu trúc Transaction Metadata nhãn `674`, quy tắc phân tách mảng chuỗi `msg` với giới hạn 64 byte/phần tử để xử lý an toàn chuỗi ký tự UTF-8 đa byte. |
-| **3** | **Ký Thông điệp Ngoài chuỗi** | [CIP-0008: Message Signing](https://cips.cardano.org/cip/CIP-0008) | Chuẩn ký số thông điệp off-chain theo cấu trúc COSE (RFC 8152), cho phép người dùng ký chứng minh quyền sở hữu ví/địa chỉ mà không phát sinh giao dịch và không tốn phí mạng (ứng dụng cho đăng nhập Web3 và xác thực vai trò off-chain). |
-| **4** | **Cơ chế Ví HD trên Cardano** | [CIP-1852: HD Wallets for Cardano](https://cips.cardano.org/cip/CIP-1852) | Không gian dẫn xuất khóa Cardano (`m/1852'/1815'`), phân định rõ ràng giữa External Address (`role = 0`), Change Address (`role = 1`) và Staking Key (`role = 2`). |
-| **5** | **Nền tảng Ví Phân cấp** | [BIP-0032: Hierarchical Deterministic Wallets](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) | Nền tảng mật mã học của hệ thống ví phân cấp (HD Wallet), cơ chế dẫn xuất khóa con (Child Key Derivation) từ Master Seed thông qua hàm băm HMAC-SHA512. |
-| **6** | **Cấu trúc Đa Tài khoản** | [BIP-0044: Multi-Account Hierarchy for Deterministic Wallets](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki) | Tiêu chuẩn phân cấp 5 tầng kinh điển (`purpose' / coin_type' / account' / change / index`), tiền đề cốt lõi để Cardano kế thừa và chuẩn hóa thành CIP-1852. |
-| **7** | **Tối ưu & Đo lường Hợp đồng** | [Aiken Language Tour: Benchmarking](https://aiken-lang.org/language-tour/bench) | Hướng dẫn sử dụng công cụ `aiken bench` tích hợp sẵn trong compiler để đo lường chính xác CPU steps, Memory units và Script size, phục vụ tính toán Budget off-chain. |
-| **8** | **Cơ chế Phí Mạng & ExUnits** | [Cardano Docs: Fee Structure & Execution Units](https://docs.cardano.org/about-cardano/explore-more/fee-structure) | Tài liệu chính thức từ Cardano giải thích công thức phí tuyến tính $a \times \text{size} + b$, bảng giá tài nguyên thực thi Plutus ExUnits (Mem/CPU) và ngưỡng giới hạn an toàn của khối (Block Limits). |
-| **9** | **Bộ Đánh giá Cục bộ Mesh SDK** | [Mesh SDK: Offline Evaluator Guide](https://meshjs.dev/providers/offline-evaluator) | Hướng dẫn thiết lập `OfflineEvaluator` trong Mesh SDK để tính toán chi phí thực thi script cục bộ qua WebAssembly/CSL mà không cần kết nối mạng hay node trực tiếp. |
-| **10** | **Đánh giá Giao dịch qua Ogmios** | [Ogmios: Transaction Submission & Script Evaluation](https://ogmios.dev/mini-protocols/local-tx-submission/#evaluating-transactions) | Giao thức JSON-RPC của Ogmios phục vụ mô phỏng và đánh giá giao dịch (`EvaluateTransaction`), trích xuất ExUnits thực tế của từng script input trước khi gửi lên mempool. |
-
-> [!TIP]
-> **Ứng dụng thực tiễn trong thiết kế dApp:**
-> - **Tối ưu hóa ngân sách giao dịch:** Kết hợp `aiken bench` cùng **Ogmios `EvaluateTransaction`** (hoặc Mesh `OfflineEvaluator`) cho phép nhà phát triển đo lường chính xác mức tiêu thụ ExUnits thực tế, từ đó thiết lập hằng số tĩnh (`BET_SPEND_WINNER_BUDGET`) một cách tối ưu, giúp Trọng tài 0 phí thực thi trơn tru mà không lo gặp lỗi `EvaluationFailure`.
-> - **Bảo mật và chuẩn hóa nhận diện:** Nắm vững **CIP-19** và **CIP-1852** giúp lập trình viên frontend xử lý hoàn hảo bài toán đối chiếu ví đa địa chỉ (Multi-address HD Wallet), tránh nhầm lẫn giữa Payment Key Hash và Stake Key Hash khi phân quyền người dùng. Đồng thời, chuẩn **CIP-8** mở ra giải pháp xác thực danh tính người dùng (Sign-in with Cardano) ở tầng backend mà không buộc người dùng phải ký một giao dịch tốn phí on-chain.
+| STT | Tài liệu |
+| :---: | :--- |
+| **1** | [CIP-0019: Cardano Addresses](https://cips.cardano.org/cip/CIP-0019) |
+| **2** | [CIP-0020: Transaction message metadata](https://cips.cardano.org/cip/CIP-0020) |
+| **3** | [CIP-0008: Message Signing](https://cips.cardano.org/cip/CIP-0008) |
+| **4** | [CIP-1852: HD Wallets for Cardano](https://cips.cardano.org/cip/CIP-1852) |
+| **5** | [BIP-0032: Hierarchical Deterministic Wallets](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) |
+| **6** | [BIP-0044: Multi-Account Hierarchy for Deterministic Wallets](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki) |
+| **7** | [Aiken Language Tour: Benchmarking](https://aiken-lang.org/language-tour/bench) |
+| **8** | [Ogmios: Transaction Submission & Script Evaluation](https://ogmios.dev/mini-protocols/local-tx-submission/#evaluating-transactions) |
 
 ---
 
 ## 5. Tổng kết Module 7: P2P Betting dApp
 
 Trải qua 3 bài học toàn diện:
-1. **Bài 1:** Nắm vững mô hình eUTxO, máy trạng thái State Thread Token và thiết kế hệ thống cược P2P.
-2. **Bài 2:** Làm chủ kỹ thuật viết Smart Contract đa mục đích (Multi-purpose Validator) bằng Aiken, cơ chế kiểm soát 2 chiều giữa Mint và Spend, cùng bộ Unit Test 33 ca kiểm thử bảo mật.
-3. **Bài 3:** Làm chủ lập trình full-stack Web3 với MeshJS SDK và Next.js: từ chuẩn hóa thông điệp CIP-20, kỹ thuật truy vấn ngược kết hợp Cache 2 tầng, ấn định Budget tĩnh, cho đến xử lý trọn vẹn ví HD qua Stake Key.
+1. **Bài 1:** Nắm vững mô hình eUTxO, máy trạng thái và thiết kế hệ thống cược P2P.
+2. **Bài 2:** Làm chủ kỹ thuật viết Smart Contract đa mục đích (Multi-purpose Validator) bằng Aiken, cơ chế kiểm soát 2 chiều giữa Mint và Spend, cùng bộ Unit Test 45 case kiểm thử bảo mật.
+3. **Bài 3:** Làm chủ lập trình full-stack Web3 với MeshJS SDK và Next.js: từ chuẩn hóa thông điệp CIP-20, kỹ thuật truy vấn ngược kết hợp Cache dữ liệu, ấn định Budget tĩnh, cho đến xử lý ví đa địa chỉ.
 
 Chúc mừng bạn đã hoàn thành xuất sắc module dApp Betting trên nền tảng Cardano!

@@ -1,0 +1,460 @@
+<blockquote style="margin: 16px 0 24px 0;">
+  <h4>Mục lục bài học</h4>
+  <ul>
+    <li><a href="#kien-truc-luong-tuong-tac">1. Kiến trúc &amp; Luồng Tương tác giữa Frontend và Off-chain</a></li>
+    <li><a href="#thuc-thi-ky-thuat-cot-loi">2. Thực thi Kỹ thuật Cốt lõi &amp; Luồng Nghiệp vụ dApp</a></li>
+    <li><a href="#bai-tap-thuc-hanh">3. Bài tập Thực hành</a></li>
+    <li><a href="#tai-lieu-tham-khao">4. Tài liệu Tham khảo &amp; Đọc thêm</a></li>
+    <li><a href="#tong-ket-module">5. Tổng kết Module 7: P2P Betting dApp</a></li>
+  </ul>
+</blockquote>
+
+<p>Ở Bài 2, chúng ta đã hoàn thành việc xây dựng Smart Contract Multi-Purpose Validator bằng Aiken. Trong bài học này, chúng ta sẽ làm chủ tầng Frontend (Next.js) và Off-chain SDK (MeshJS) để tích hợp hoàn chỉnh hệ thống dApp.</p>
+
+<hr />
+
+<h2 id="kien-truc-luong-tuong-tac">1. Kiến trúc &amp; Luồng Tương tác giữa Frontend và Off-chain</h2>
+
+<p style="text-align: center;"><img src="../resources/lesson-03-frontend-offchain.png" alt="Kiến trúc tương tác Frontend &amp; Off-chain" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<h4>Tầng Giao diện Người dùng (Frontend Next.js Components)</h4>
+<p>Lớp giao diện được tổ chức theo kiến trúc module hóa với 4 component cốt lõi:</p>
+<ol>
+  <li><strong><code>WalletBar</code> (Quản trị Kết nối Ví CIP-30):</strong> Quản lý kết nối hai chiều với các tiện ích ví Web3 (Lace, Eternl...), giám sát thay đổi tài khoản, mạng lưới (Preprod) và cung cấp đối tượng <code>BrowserWallet</code> cho toàn bộ ứng dụng.</li>
+  <li><strong><code>CreateBet</code> (Khởi tạo Ván cược):</strong> Biểu mẫu thu thập thông tin tạo bet gồm nội dung câu hỏi, mức cược, thời hạn kết thúc và địa chỉ ví Trọng tài. Tích hợp bộ kiểm tra dữ liệu đầu vào (Validation Engine) và bộ đếm ký tự UTF-8 theo chuẩn CIP-20.</li>
+  <li><strong><code>BetList</code> (Danh sách ván cược &amp; Điều phối Hành động):</strong> Nhận dữ liệu ván cược và nội dung câu hỏi đã giải mã từ <code>queries.ts</code> để hiển thị trực quan. Tự động nhận diện vai trò của ví đang kết nối (<code>Owner</code> / <code>Player</code> / <code>Referee</code>) để mở khóa các nút thao tác tương ứng (Join Bet, Announce Winner, Cancel Bet), đồng thời quản lý khôi phục tiến trình khi người dùng tải lại trang.</li>
+  <li><strong><code>TxStatus</code> (Lớp phủ Trạng thái Giao dịch &amp; Quản lý Khóa Toàn cục):</strong> Lớp phủ giao diện (modal overlay) phản hồi trực quan 8 trạng thái xuyên suốt vòng đời giao dịch (<code>idle</code> &rarr; <code>building</code> &rarr; <code>signing</code> &rarr; <code>submitting</code> &rarr; <code>confirming</code> &rarr; <code>success</code> / <code>submitted</code> / <code>failed</code>). Kích hoạt cơ chế khóa 2 lớp (<code>isLocked = isProcessing || isTxBusy</code>) để vô hiệu hóa toàn bộ nút bấm, loại trừ triệt để nguy cơ người dùng click đúp hoặc xung đột UTxO.</li>
+</ol>
+
+<hr />
+
+<h4>Tầng Xử lý Ngoài chuỗi (Off-chain - MeshJS)</h4>
+<p>Lớp Off-chain đóng vai trò cầu nối logic giữa giao diện người dùng và hợp đồng thông minh on-chain, thực hiện 2 nhóm nhiệm vụ chính:</p>
+<ol>
+  <li><strong><code>queries.ts</code> (Truy vấn Dữ liệu &amp; Bộ nhớ đệm):</strong>
+    <ul>
+      <li><code>getAllBets()</code>: Quét toàn bộ Bet UTxOs tại script address và giải mã Datums on-chain cung cấp danh sách ván cược cho <code>BetList</code>.</li>
+      <li><code>fetchBetMessage()</code>: Truy vết ngược về giao dịch <code>CREATE</code> ban đầu để giải mã nội dung cược theo chuẩn CIP-20 Metadata, tích hợp bộ nhớ đệm Cache 2 tầng (RAM + LocalStorage) loại bỏ hoàn toàn nguy cơ vượt hạn mức Rate Limit của Blockfrost.</li>
+    </ul>
+  </li>
+  <li><strong><code>transactions.ts</code> (Xây dựng &amp; Điều phối Giao dịch MeshTxBuilder):</strong>
+    <ul>
+      <li><code>createBetTx()</code>: Khởi tạo ván cược, đúc 1 Bet Thread Token và khóa tiền cọc kèm CIP-20 metadata vào Script.</li>
+      <li><code>joinBetTx()</code>: Người chơi nạp tiền đối ứng, cập nhật địa chỉ Player vào Datum với Expiration slot bảo vệ.</li>
+      <li><code>announceWinnerTx()</code>: Trọng tài công bố người thắng, giải phóng toàn bộ pot về ví Winner theo mô hình 0 phí và ấn định Execution Units tĩnh (+30% Buffer).</li>
+      <li><code>cancelBetTx()</code>: Chủ phòng rút lại tiền cọc và đốt Bet Thread Token khi bet hết hạn mà không có người tham gia.</li>
+    </ul>
+  </li>
+</ol>
+
+<hr />
+
+<h4>Chu trình Phối hợp Điều phối Dữ liệu</h4>
+<p>Bốn luồng tương tác chính diễn ra xuyên suốt vòng đời ứng dụng:</p>
+<ol>
+  <li><strong>Kết nối &amp; Quản trị Phiên:</strong> Thiết lập kết nối hai chiều theo chuẩn CIP-30 giữa ví và dApp, chia sẻ phiên làm việc cho các component.</li>
+  <li><strong>Cung cấp State &amp; Metadata:</strong> Quét trạng thái on-chain, giải mã Datum và truy vết nội dung CIP-20 có cache để hiển thị bảng cược nhanh chóng.</li>
+  <li><strong>Kích hoạt Giao dịch:</strong> UI thu thập form/hành động, gọi các hàm dựng giao dịch tương ứng trong SDK, sau đó chuyển giao dịch thô sang ví để người dùng ký và phát tán lên mạng Cardano.</li>
+  <li><strong>Khóa giao diện &amp; Polling On-chain:</strong> Trong khi giao dịch đang được xác nhận, modal <code>TxStatus</code> kích hoạt đếm lùi, vô hiệu hóa nút bấm và tự động cập nhật lại danh sách cược khi giao dịch lên chuỗi thành công.</li>
+</ol>
+
+<hr />
+
+<h2 id="thuc-thi-ky-thuat-cot-loi">2. Thực thi Kỹ thuật Cốt lõi &amp; Luồng Nghiệp vụ dApp</h2>
+
+<h4>CREATE: Khởi tạo Ván cược &amp; Chuẩn hóa Thông điệp CIP-20</h4>
+<p>Để tối ưu kích thước UTxO on-chain, nội dung văn bản mô tả ván cược không được lưu trong Datum mà được đính kèm dưới dạng Transaction Metadata theo chuẩn CIP-20.</p>
+
+<p>Khung cấu trúc JSON Metadata theo đặc tả CIP-20 (nhãn <code>674</code>):</p>
+<pre><code>{
+  "674": {
+    "msg": [
+      "Trận Chung kết Cúp C1 Châu Âu 2026:",
+      "Đội A sẽ thắng Đội B trong 90 phút thi đấu chính thức."
+    ]
+  }
+}</code></pre>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Bẫy kích thước byte chuỗi UTF-8:</strong> Cardano Metadata quy định mỗi phần tử chuỗi trong mảng <code>msg</code> có độ dài tối đa là 64 bytes. Trong tiếng Việt có dấu, một ký tự có thể chiếm từ 2 đến 3 bytes. Nếu dùng hàm <code>substring(0, 64)</code> theo số lượng ký tự thì chuỗi có thể vượt quá 64 bytes và giao dịch sẽ bị Cardano Node từ chối ngay lập tức!</p>
+</blockquote>
+
+<p>Thuật toán cắt chuỗi an toàn theo dung lượng byte thực tế (<code>formatCip20Message</code>):</p>
+<pre><code>// Trích từ offchain/src/transactions.ts:
+export const formatCip20Message = (message: string): string[] =&gt; {
+  if (!message) return [];
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let currentChunk = "";
+  let currentBytes = 0;
+
+  for (const char of message) {
+    const charBytes = encoder.encode(char).length;
+    if (currentBytes + charBytes &gt; 64) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
+      currentChunk = char;
+      currentBytes = charBytes;
+    } else {
+      currentChunk += char;
+      currentBytes += charBytes;
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+  return chunks;
+};</code></pre>
+
+<p>Xây dựng giao dịch tạo cược với <code>createBetTx</code>:</p>
+<pre><code>// Trích từ offchain/src/transactions.ts:
+txBuilder
+  // 1. Đúc đúng 1 Bet Thread Token
+  .mintPlutusScriptV3()
+  .mint("1", policyId, BET_TOKEN_NAME)
+  .mintRedeemerValue(mConStr0([]))
+  .mintScript(SCRIPT_CBOR)
+  // 2. Khóa tiền cọc + Bet Token vào Script Address
+  .txOut(SCRIPT_ADDRESS, [
+    { unit: "lovelace", quantity: betAmountLovelace.toString() },
+    { unit: `${policyId}${stringToHex(BET_TOKEN_NAME)}`, quantity: "1" }
+  ])
+  .txOutInlineDatumValue(datum)
+  // 3. Đính kèm mô tả CIP-20 Metadata nhãn 674
+  .metadataValue("674", { msg: formatCip20Message(betMessage) })
+  .invalidHereafter(expirationSlot)
+  .changeAddress(ownerAddress)
+  .selectUtxosFrom(utxos)
+  .complete();</code></pre>
+
+<hr />
+
+<h4>JOIN: Người chơi Tham gia &amp; Kỹ thuật Xử lý Ví Đa Địa chỉ (HD Wallet)</h4>
+
+<h4>Khám phá gốc rễ kiến trúc: Cardano Shelley Address</h4>
+<p>Một địa chỉ ví Cardano tiêu chuẩn (Base Address) là sự lắp ráp có cấu trúc từ 2 thành phần định danh (Credentials):</p>
+
+<p style="text-align: center;"><img src="../resources/Shelley_addr.png" alt="Cấu trúc Địa chỉ Cardano Base Address" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Tiêu chí</th>
+      <th>Base Address (Địa chỉ Cơ sở)</th>
+      <th>Enterprise Address (Doanh nghiệp)</th>
+      <th>Reward Address (Trả thưởng)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Cấu trúc lắp ghép</strong></td>
+      <td><code>[Header] + [Payment] + [Stake]</code></td>
+      <td><code>[Header] + [Payment]</code> <em>(Không Stake)</em></td>
+      <td><code>[Header] + [Stake]</code> <em>(Không Payment)</em></td>
+    </tr>
+    <tr>
+      <td><strong>Độ dài Payload</strong></td>
+      <td><strong>57 bytes</strong> (1 Header + 28 Payment + 28 Stake)</td>
+      <td><strong>29 bytes</strong> (1 Header + 28 Payment)</td>
+      <td><strong>29 bytes</strong> (1 Header + 28 Stake)</td>
+    </tr>
+    <tr>
+      <td><strong>Tiền tố Bech32</strong></td>
+      <td><code>addr1q...</code> (Mainnet) / <code>addr_test1q...</code></td>
+      <td><code>addr1v...</code> (Mainnet) / <code>addr_test1v...</code></td>
+      <td><code>stake1u...</code> (Mainnet) / <code>stake_test1u...</code></td>
+    </tr>
+    <tr>
+      <td><strong>Tham gia Staking?</strong></td>
+      <td><strong>Có.</strong> Tự động cộng dồn số dư ADA vào Stake Key.</td>
+      <td><strong>Không.</strong> Hoàn toàn không tham gia Staking.</td>
+      <td>Nơi tích lũy phần thưởng staking nhận về từ pool.</td>
+    </tr>
+    <tr>
+      <td><strong>Ứng dụng thực tế</strong></td>
+      <td>Ví người dùng cá nhân (Lace, Eternl), dApp DeFi.</td>
+      <td>Sàn CEX (Binance, Coinbase), địa chỉ script no-stake.</td>
+      <td>Ủy quyền Stake Pool và rút phần thưởng staking.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Mối liên hệ với On-chain Aiken Smart Contract (<code>bet.ak</code>)</h4>
+<p>Đối với Spending Script trên Cardano, một Script Hash có thể đứng hoàn toàn độc lập ở dạng <strong>Script Enterprise Address</strong> (không có thành phần Stake) hoặc được ghép với bất kỳ Stake Credential nào để tạo ra <strong>vô số Script Base Address</strong> khác nhau. Nguyên tắc cốt lõi: dù UTxO nằm tại Enterprise Address hay bất kỳ Base Address nào của script, khi UTxO đó được chi tiêu, Node Cardano vẫn luôn kích hoạt cùng một Spending Validator tương ứng với Script Hash để kiểm định logic.</p>
+
+<p>Trong Mint handler của <code>bet.ak</code>:</p>
+<pre><code>expect [bet_output] = outputs_at(outputs, from_script(policy_id))</code></pre>
+<ul>
+  <li>Hàm <code>from_script(policy_id)</code> của thư viện <code>cardano/address</code> mặc định sinh ra <strong>Script Enterprise Address</strong> (<code>stake_credential: None</code>). Do đó, lệnh <code>expect [bet_output] = outputs_at(...)</code> chỉ lọc và bắt buộc có đúng 1 output gửi về chính xác địa chỉ Enterprise thuần túy này.</li>
+  <li><strong>Cơ chế phòng thủ đa tầng của dApp:</strong> Nhờ <strong>State Thread Token (Bet Token)</strong>, mọi output hợp lệ gửi vào hợp đồng bắt buộc phải chứa đúng 1 Bet Token định danh. Output "tạo chui" ở Base Address không có Bet Token sẽ bị Validator từ chối ở các pha tiếp theo và bị tầng Off-chain (<code>getAllBets</code>) tự động loại bỏ hoàn toàn.</li>
+</ul>
+
+<h4>Ví HD (CIP-1852) – Cơ chế Dẫn xuất Khóa</h4>
+<p>Từ duy nhất một hạt giống gốc (12 - 24 từ khóa Mnemonic - BIP-39), thuật toán Ed25519-BIP32 phái sinh cây phân cấp khóa theo đường dẫn 5 tầng: <code>m / 1852' / 1815' / account' / role / index</code>.</p>
+
+<p style="text-align: center;"><img src="../resources/HD_wallet.png" alt="Sơ đồ Cây dẫn xuất Ví HD CIP-1852 kết nối Địa chỉ Shelley" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" /></p>
+
+<p>Ở nhánh <code>role = 0</code> (nhận tiền) và <code>role = 1</code> (tiền thừa - change), ví ở chế độ multi-address sẽ liên tục tăng chỉ số <code>index</code> để sinh ra vô số Payment Key khác nhau. Ở nhánh <code>role = 2</code> (Staking), ví thường chỉ lấy duy nhất khóa đầu tiên (<code>role = 2 / index = 0</code>) làm Stake Key đại diện cho cả tài khoản. Dù đổi bao nhiêu địa chỉ nhận tiền, <strong>toàn bộ số dư ADA nằm trên các địa chỉ đó đều được quy tụ về đúng một Stake Key duy nhất</strong>!</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>Chế độ</th>
+      <th>Single Address Mode: BẬT</th>
+      <th>Single Address Mode: TẮT (Chế độ mặc định)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mục đích</strong></td>
+      <td>Mô phỏng ví đơn địa chỉ kiểu Account-based tiện dùng dApp.</td>
+      <td>Tối ưu hóa tính riêng tư theo mô hình eUTxO nguyên bản.</td>
+    </tr>
+    <tr>
+      <td><strong>Hành vi sinh địa chỉ</strong></td>
+      <td>Cố định duy nhất 1 địa chỉ nhận tiền và change.</td>
+      <td>Liên tục sinh địa chỉ nhận tiền và địa chỉ nhận tiền thừa (Change) mới sau mỗi giao dịch.</td>
+    </tr>
+    <tr>
+      <td><strong>Input &amp; Output Giao dịch</strong></td>
+      <td>Cả UTxO đầu vào và UTxO tiền thừa đầu ra đều quay về cùng một địa chỉ này.</td>
+      <td>UTxO đầu vào từ Change cũ, UTxO tiền thừa trả về Change mới.</td>
+    </tr>
+    <tr>
+      <td><strong>Đường dẫn Dẫn xuất</strong></td>
+      <td>PayKey và StakeKey cố định ở <code>index = 0</code>.</td>
+      <td>PayKey biến thiên liên tục qua các index; StakeKey luôn cố định ở <code>role = 2, index = 0</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Lưu ý:</strong> DApp cần hỗ trợ tốt cả 2 chế độ này của ví để đảm bảo trải nghiệm người dùng liền mạch.</p>
+</blockquote>
+
+<h4>Nhận diện Ví &amp; Phân quyền Thao tác trên Giao diện dApp (<code>BetList.tsx</code>)</h4>
+<p>Nếu đem chuỗi địa chỉ ví đang kết nối so sánh trực tiếp với địa chỉ lưu trong Datum (<code>currentAddress === datum.ownerAddress</code>), giao diện sẽ bị lỗi phân quyền khi ví tự đổi Change Address. Giải pháp chuẩn mực là <strong>so khớp mã băm Stake Key (<code>stakeCredentialHash</code>)</strong>:</p>
+
+<p>Lấy danh sách mã băm Stake Key của tài khoản kết nối:</p>
+<pre><code>// Trích từ frontend/src/components/BetList.tsx:
+const [myStakeKeyHashes, setMyStakeKeyHashes] = useState&lt;string[]&gt;([]);
+
+useEffect(() =&gt; {
+  if (!connected || !wallet) {
+    setMyStakeKeyHashes([]);
+    return;
+  }
+  let isMounted = true;
+
+  const fetchStakeKey = async () =&gt; {
+    try {
+      const rewardAddrs = await wallet.getRewardAddresses();
+      if (rewardAddrs &amp;&amp; rewardAddrs.length &gt; 0) {
+        const hashes = rewardAddrs
+          .map((addr) =&gt; resolveStakeKeyHash(addr))
+          .filter(Boolean) as string[];
+
+        if (isMounted &amp;&amp; hashes.length &gt; 0) {
+          setMyStakeKeyHashes(hashes);
+        }
+      }
+    } catch (err) {
+      console.error("Lỗi lấy reward address từ ví:", err);
+    }
+  };
+
+  fetchStakeKey();
+  return () =&gt; { isMounted = false; };
+}, [connected, wallet]);</code></pre>
+
+<p>Đối chiếu phân quyền an toàn hỗ trợ cả ví ủy quyền đa pool:</p>
+<pre><code>// 1. Trích xuất Stake Key Hash từ các địa chỉ trong Datum
+let ownerStake = null, playerStake = null, refereeStake = null;
+try { ownerStake = deserializeAddress(b.datum.ownerAddress).stakeCredentialHash; } catch {}
+try { if (b.datum.playerAddress) playerStake = deserializeAddress(b.datum.playerAddress).stakeCredentialHash; } catch {}
+try { refereeStake = deserializeAddress(b.datum.refereeAddress).stakeCredentialHash; } catch {}
+
+// 2. Đối chiếu với mảng myStakeKeyHashes
+const isOwner = Boolean(ownerStake &amp;&amp; myStakeKeyHashes.includes(ownerStake));
+const isPlayer = Boolean(playerStake &amp;&amp; myStakeKeyHashes.includes(playerStake));
+const isReferee = Boolean(refereeStake &amp;&amp; myStakeKeyHashes.includes(refereeStake));</code></pre>
+
+<hr />
+
+<h4>ANNOUNCE_WINNER: Trọng tài Công bố Kết quả &amp; Kỹ thuật Trọng tài 0 phí</h4>
+<p>Giao dịch <code>announceWinnerTx</code> đặc biệt ở chỗ: thiết lập <code>.changeAddress(winnerAddress)</code> và không nạp UTxO từ ví cá nhân của Trọng tài (không gọi <code>selectUtxosFrom</code>). Toàn bộ phí mạng lưới được khấu trừ trực tiếp từ quỹ cược (Script UTxO), và số tiền còn lại tự động dồn về ví người chiến thắng:</p>
+
+<pre><code>// Trích từ offchain/src/transactions.ts:
+txBuilder
+  .spendingPlutusScriptV3()
+  .txIn(betUtxo.input.txHash, betUtxo.input.outputIndex, betUtxo.output.amount, SCRIPT_ADDRESS)
+  .txInInlineDatumPresent()
+  .txInRedeemerValue(spendRedeemer, "Mesh", BET_SPEND_ANNOUNCE_BUDGET)
+  .txInScript(SCRIPT_CBOR)
+  .mintPlutusScriptV3()
+  .mint("-1", policyId, BET_TOKEN_NAME)
+  .mintScript(SCRIPT_CBOR)
+  .mintRedeemerValue(mConStr0([]), "Mesh", BET_BURN_BUDGET)
+  .changeAddress(winnerAddress)
+  .requiredSignerHash(refereePkh)
+  .invalidBefore(expirationSlot + 1)
+  .complete();</code></pre>
+
+<h4>Lỗi <code>EvaluationFailure</code> của MeshTxBuilder &amp; Cách khắc phục</h4>
+<p><strong>Nguyên nhân kỹ thuật:</strong></p>
+<ul>
+  <li>Thông thường, giao dịch luôn có output được khai báo bằng <code>.txOut()</code> và nạp UTxO từ ví để thuật toán Coin Selection cân đối phí mạng. Đối với giao dịch này, ta không khai báo bất kỳ <code>.txOut()</code> nào mà dồn toàn bộ số tiền còn lại của quỹ cược sau khi trừ phí vào <code>changeAddress</code>.</li>
+  <li>Khi gọi phương thức <code>complete()</code>, <code>MeshTxBuilder</code> phải dựng một Giao dịch Nháp (Draft Transaction) gửi lên Cardano Ogmios nhằm ước tính ngân sách thực thi.</li>
+  <li>Với giao dịch đặc thù này, <code>MeshTxBuilder</code> gặp lỗi khi mô phỏng giao dịch dẫn đến Ogmios không ước tính được ngân sách thực thi và ném ra lỗi <strong><code>EvaluationFailure</code></strong>.</li>
+</ul>
+
+<p><strong>Giải pháp: Kỹ thuật Ấn định Ngân sách Tĩnh (Static Budgeting):</strong></p>
+<ol>
+  <li><strong>Đo lường Benchmark thực tế:</strong> Chạy toàn bộ các test case liên quan đến hành động <code>announce</code> và <code>burn</code> qua <code>aiken check</code>, lấy ra con số tài nguyên tiêu tốn lớn nhất (Spend: ~200.000 mem, ~90.000.000 steps; Burn: ~37.000 mem, ~15.000.000 steps).</li>
+  <li><strong>Cộng khoảng đệm an toàn (Safety Buffer +30%):</strong> Do trọng số ExUnits trong công thức tính phí của Cardano rất nhỏ (tăng 10 triệu steps chỉ làm tăng khoảng ~0.007 ADA), việc cấp thêm 30% buffer giúp đảm bảo an toàn tuyệt đối, tránh lỗi OutOfBudget.</li>
+  <li><strong>Ấn định hằng số trong mã nguồn:</strong>
+<pre><code>export const BET_SPEND_ANNOUNCE_BUDGET = { mem: 260000, steps: 115000000 };
+export const BET_SPEND_CANCEL_BUDGET   = { mem: 260000, steps: 115000000 };
+export const BET_BURN_BUDGET           = { mem: 50000,  steps: 20000000 };</code></pre>
+  </li>
+  <li><strong>Áp dụng vào luồng xử lý:</strong> Đặt cờ <code>useEvaluator = false</code> khi khởi tạo <code>MeshTxBuilder</code> để vô hiệu hóa bước mô phỏng tự động, đóng gói thẳng giao dịch với phí mạng được tính toán dựa trên budget ấn định.</li>
+</ol>
+
+<blockquote style="margin: 16px 0 24px 0;">
+  <p><strong>Bài học Thiết kế Động lực Kinh tế (Incentive Design):</strong> Giao thức Cardano chỉ ràng buộc <code>txfee &gt;= minfee</code> (chấp nhận trả thừa phí). Trong giao dịch announce, Trọng tài có thể tác động đến mức phí của giao dịch công bố kết quả (bằng cách phóng đại budget hoặc chèn thêm các hành động cá nhân không ảnh hưởng đến số output của giao dịch như rút thưởng stake, burn token), trong khi người chiến thắng lại là bên phải gánh chịu khoản phí này (tiền thưởng nhận về bị ít đi).</p>
+  <p><strong>Bài học rút ra khi thiết kế hệ thống:</strong> <em>Không bao giờ để một bên quyết định một vấn đề mà bên gánh chịu hậu quả lại là một bên khác.</em> Trong các dự án dApp thực tế ngoài đời, nếu Trọng tài được nhận thù lao hoa hồng, thì <strong>chính Trọng tài nên là người tự trả phí mạng từ ví cá nhân của mình</strong> để loại bỏ hoàn toàn điểm mâu thuẫn kinh tế trên.</p>
+</blockquote>
+
+<hr />
+
+<h4>CANCEL: Hủy cược &amp; Hoàn tiền cho Owner</h4>
+<p>Nếu ván cược hết hạn mà vẫn chưa có người chơi tham gia (<code>EXPIRED</code>), Chủ phòng (Owner) có quyền hủy cược và nhận lại toàn bộ tiền cọc qua <code>cancelBetTx</code> với 4 điểm khác biệt then chốt so với Announce:</p>
+<ol>
+  <li><strong>Chủ thể ký giao dịch:</strong> Người ký xác thực bắt buộc là Chủ phòng (<code>ownerPkh</code>).</li>
+  <li><strong>Thời điểm hiệu lực:</strong> Ràng buộc giao dịch chỉ hợp lệ sau mốc hết hạn (<code>invalidBefore(expirationSlot + 1)</code>).</li>
+  <li><strong>Redeemer Action:</strong> Sử dụng Constructor 2 (<code>mConStr2([])</code>) tương ứng với <code>Action::CANCEL</code>.</li>
+  <li><strong>Dòng tiền hoàn trả:</strong> Toàn bộ số tiền cọc ban đầu được hoàn trả về ví Owner qua <code>.changeAddress(ownerAddress)</code>.</li>
+</ol>
+
+<hr />
+
+<h4>Tối ưu Hiệu năng với Cache 2 tầng: Giải mã CIP-20 Message</h4>
+<p>Để giải mã nội dung câu hỏi cược, ứng dụng cần gọi Blockfrost API để truy ngược về giao dịch tạo bet ban đầu. Nếu mỗi lần render danh sách bet đều gửi request lên Blockfrost, ứng dụng sẽ lập tức chạm ngưỡng giới hạn (Rate Limit - 500 requests/ngày trên gói miễn phí) và khiến trang web bị tê liệt.</p>
+<p>Giải pháp: Xây dựng cơ chế bộ nhớ đệm Cache 2 tầng (RAM Cache + LocalStorage Cache) trong <code>fetchBetMessage</code>:</p>
+<pre><code>// Trích từ offchain/src/queries.ts:
+const memoryCache = new Map&lt;string, string&gt;();
+
+export const fetchBetMessage = async (
+  provider: BlockfrostProvider,
+  txHash: string
+): Promise&lt;string&gt; =&gt; {
+  // Tầng 1: Kiểm tra RAM cache
+  if (memoryCache.has(txHash)) {
+    return memoryCache.get(txHash)!;
+  }
+  // Tầng 2: Kiểm tra LocalStorage cache
+  if (typeof window !== "undefined") {
+    const local = localStorage.getItem(`bet_msg_${txHash}`);
+    if (local) {
+      memoryCache.set(txHash, local);
+      return local;
+    }
+  }
+  // Tầng 3: Truy vấn API Blockfrost nếu chưa cache
+  try {
+    const metadata = await provider.get(`/txs/${txHash}/metadata`);
+    const cip20 = metadata.find((m: any) =&gt; m.label === "674");
+    if (cip20?.json_metadata?.msg) {
+      const msgArr = cip20.json_metadata.msg;
+      const fullMsg = Array.isArray(msgArr) ? msgArr.join("") : String(msgArr);
+      memoryCache.set(txHash, fullMsg);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`bet_msg_${txHash}`, fullMsg);
+      }
+      return fullMsg;
+    }
+  } catch (err) {
+    console.error("Lỗi khi fetch CIP-20 metadata:", err);
+  }
+  return "Không có nội dung cược";
+};</code></pre>
+
+<hr />
+
+<h2 id="bai-tap-thuc-hanh">3. Bài tập Thực hành</h2>
+
+<h4>Bài tập 1: Xây dựng chức năng gộp nhiều giao dịch Hủy cược trên giao diện</h4>
+<p>Trong Bài tập thực hành của Bài 2, chúng ta đã thực hiện chức năng này ở tầng on-chain. Trong bài tập này, hãy hoàn thiện toàn bộ tính năng ở tầng off-chain và thiết kế giao diện người dùng tương ứng cho phép Chủ phòng tích chọn nhiều ván cược quá hạn để hủy chỉ trong một giao dịch duy nhất.</p>
+
+<h4>Bài tập 2: Bộ lọc &amp; Phân loại ván cược theo vai trò người dùng</h4>
+<p>Xây dựng thanh công cụ lọc gồm 4 tab trong component <code>BetList</code>:</p>
+<ul>
+  <li><strong>All:</strong> Danh sách hiển thị toàn bộ tất cả các ván cược đang tồn tại.</li>
+  <li><strong>My Created Bets:</strong> Các ván cược do ví hiện tại làm Chủ phòng.</li>
+  <li><strong>My Joined Bets:</strong> Các ván cược do ví hiện tại tham gia làm Người chơi.</li>
+  <li><strong>Referee Role:</strong> Các ván cược chỉ định ví hiện tại làm Trọng tài phân xử.</li>
+</ul>
+
+<hr />
+
+<h2 id="tai-lieu-tham-khao">4. Tài liệu Tham khảo &amp; Đọc thêm</h2>
+
+<p>Nhằm hỗ trợ quá trình nghiên cứu sâu hơn về các chuẩn mực kỹ thuật (CIPs/BIPs), cơ chế vận hành giao thức Cardano, kỹ năng đo lường hiệu năng hợp đồng và các công cụ đánh giá giao dịch ngoài chuỗi (Evaluator/Ogmios), dưới đây là danh mục các tài liệu chính thức tốt nhất được chọn lọc cho Bài 3:</p>
+
+<table style="border-collapse: collapse; width: 100%; margin: 16px 0 24px 0;" border="1" cellspacing="0" cellpadding="8">
+  <thead>
+    <tr style="background-color: #f2f2f2;">
+      <th>STT</th>
+      <th>Tài liệu</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1</strong></td>
+      <td><a href="https://cips.cardano.org/cip/CIP-0019" target="_blank" rel="noopener">CIP-0019: Cardano Addresses</a></td>
+    </tr>
+    <tr>
+      <td><strong>2</strong></td>
+      <td><a href="https://cips.cardano.org/cip/CIP-0020" target="_blank" rel="noopener">CIP-0020: Transaction message metadata</a></td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td><a href="https://cips.cardano.org/cip/CIP-0008" target="_blank" rel="noopener">CIP-0008: Message Signing</a></td>
+    </tr>
+    <tr>
+      <td><strong>4</strong></td>
+      <td><a href="https://cips.cardano.org/cip/CIP-1852" target="_blank" rel="noopener">CIP-1852: HD Wallets for Cardano</a></td>
+    </tr>
+    <tr>
+      <td><strong>5</strong></td>
+      <td><a href="https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki" target="_blank" rel="noopener">BIP-0032: Hierarchical Deterministic Wallets</a></td>
+    </tr>
+    <tr>
+      <td><strong>6</strong></td>
+      <td><a href="https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki" target="_blank" rel="noopener">BIP-0044: Multi-Account Hierarchy for Deterministic Wallets</a></td>
+    </tr>
+    <tr>
+      <td><strong>7</strong></td>
+      <td><a href="https://aiken-lang.org/language-tour/bench" target="_blank" rel="noopener">Aiken Language Tour: Benchmarking</a></td>
+    </tr>
+    <tr>
+      <td><strong>8</strong></td>
+      <td><a href="https://ogmios.dev/mini-protocols/local-tx-submission/#evaluating-transactions" target="_blank" rel="noopener">Ogmios: Transaction Submission &amp; Script Evaluation</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="tong-ket-module">5. Tổng kết Module 7: P2P Betting dApp</h2>
+
+<p>Trải qua 3 bài học toàn diện:</p>
+<ol>
+  <li><strong>Bài 1:</strong> Nắm vững mô hình eUTxO, máy trạng thái và thiết kế hệ thống cược P2P.</li>
+  <li><strong>Bài 2:</strong> Làm chủ kỹ thuật viết Smart Contract đa mục đích (Multi-purpose Validator) bằng Aiken, cơ chế kiểm soát 2 chiều giữa Mint và Spend, cùng bộ Unit Test 45 case kiểm thử bảo mật.</li>
+  <li><strong>Bài 3:</strong> Làm chủ lập trình full-stack Web3 với MeshJS SDK và Next.js: từ chuẩn hóa thông điệp CIP-20, kỹ thuật truy vấn ngược kết hợp Cache dữ liệu, ấn định Budget tĩnh, cho đến xử lý ví đa địa chỉ.</li>
+</ol>
+
+<p>Chúc mừng bạn đã hoàn thành xuất sắc module dApp Betting trên nền tảng Cardano!</p>
