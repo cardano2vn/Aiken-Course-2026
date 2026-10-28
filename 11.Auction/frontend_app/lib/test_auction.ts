@@ -23,13 +23,14 @@ export async function testStartAuctionScenario() {
     mockSellerAddress,
     mockDeadline,
     mockMinBid,
+    1_000_000,
     mockNftAssets
   );
 
   console.log("Generated AuctionDatum (Inline Plutus Data):");
   console.log(JSON.stringify(generatedDatum, null, 2));
 
-  const highestBidField = (generatedDatum as any)?.fields?.[4];
+  const highestBidField = (generatedDatum as any)?.fields?.[5];
   const isHighestBidNone = highestBidField?.constructor === 1;
 
   if (isHighestBidNone) {
@@ -138,6 +139,7 @@ export async function testUpdateTxBuilding() {
     mockSellerAddress,
     deadlineMs,
     5_000_000,
+    1_000_000,
     nftAssets
   );
 
@@ -255,6 +257,7 @@ export async function testCancelTxBuilding() {
     mockSellerAddress,
     deadlineMs,
     5_000_000,
+    1_000_000,
     nftAssets
   );
 
@@ -372,6 +375,7 @@ export async function testBidTxBuilding() {
     mockSellerAddress,
     deadlineMs,
     5_000_000,
+    1_000_000,
     nftAssets
   );
 
@@ -489,31 +493,16 @@ export async function testCloseTxBuilding() {
     },
   ];
 
-  const { pubKeyHash: sellerPkh, stakeCredentialHash: sellerStake } = deserializeAddress(mockSellerAddress);
-  const { pubKeyHash: bidderPkh, stakeCredentialHash: bidderStake } = deserializeAddress(mockBidderAddress);
-
   // Datum mô phỏng: highest_bid = Some(BidState { bidder, amount })
-  const datumWithWinner = {
-    constructor: 0,
-    fields: [
-      pubKeyAddress(sellerPkh, sellerStake || ""),  // seller
-      integer(deadlineMs),                           // deadline
-      integer(5_000_000),                            // min_bid
-      { list: [] },                                  // nft (empty for test simplicity)
-      {
-        constructor: 0,  // Some
-        fields: [
-          {
-            constructor: 0,  // BidState
-            fields: [
-              pubKeyAddress(bidderPkh, bidderStake || ""),
-              integer(bidAmountLovelace),
-            ],
-          },
-        ],
-      },
-    ],
-  };
+  const datumWithWinner = auctionDatum(
+    mockSellerAddress,
+    deadlineMs,
+    5_000_000,
+    1_000_000,
+    [],
+    mockBidderAddress,
+    bidAmountLovelace
+  );
 
   const datumCbor = serializeData(datumWithWinner, "JSON");
 
@@ -585,3 +574,26 @@ export async function testCloseTxBuilding() {
 
   return txHex;
 }
+
+// Main execution runner
+async function runAllTests() {
+  console.log("==================================================");
+  console.log("🚀 STARTING CARDANO AUCTION OFF-CHAIN TEST SUITE");
+  console.log("==================================================");
+  try {
+    await testStartAuctionScenario();
+    await testStartAuctionTxBuilding();
+    await testUpdateTxBuilding();
+    await testCancelTxBuilding();
+    await testBidTxBuilding();
+    await testCloseTxBuilding();
+    console.log("\n==================================================");
+    console.log("🎉 ALL 6 OFF-CHAIN TEST SCENARIOS PASSED 100%!");
+    console.log("==================================================");
+  } catch (error) {
+    console.error("\n❌ OFF-CHAIN TEST FAILED:", error);
+    process.exit(1);
+  }
+}
+
+runAllTests();

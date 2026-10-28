@@ -1,8 +1,7 @@
 use aiken/interval
 use auction.{AuctionDatum, BidState, Cancel, Close, MkBid, Update}
-use cardano/address.{Address, Inline, VerificationKey}
 use cardano/assets.{from_asset_list, from_lovelace}
-use cardano/transaction.{InlineDatum, Input, Transaction, placeholder}
+use cardano/transaction.{InlineDatum, Input, Transaction}
 use mocktail.{
   add_input, complete, mocktail_tx, required_signer_hash, tx_out,
   tx_out_inline_datum,
@@ -40,6 +39,14 @@ fn mock_min_bid() {
   10_000_000 // 10 ADA
 }
 
+fn mock_min_increment() {
+  2_000_000 // 2 ADA bước giá tối thiểu
+}
+
+fn mock_initial_deposit() {
+  2_000_000 // 2 ADA min-ADA ban đầu của Seller
+}
+
 fn mock_seller() {
   mock_pub_key_address(1, None) // Address seller
 }
@@ -57,6 +64,7 @@ fn mock_initial_datum() -> AuctionDatum {
     seller: mock_seller(),
     deadline: mock_deadline(),
     min_bid: mock_min_bid(),
+    min_increment: mock_min_increment(),
     nft: mock_nft_mvalue(),
     highest_bid: None,
   }
@@ -67,6 +75,7 @@ fn mock_datum_with_bid1() -> AuctionDatum {
     seller: mock_seller(),
     deadline: mock_deadline(),
     min_bid: mock_min_bid(),
+    min_increment: mock_min_increment(),
     nft: mock_nft_mvalue(),
     highest_bid: Some(
       BidState { bidder: mock_bidder1(), amount: 15_000_000 },
@@ -76,6 +85,9 @@ fn mock_datum_with_bid1() -> AuctionDatum {
 
 // ---------------------------------------------------------------------------
 // TEST 1: MK_BID FIRST BID SUCCESS
+// - Nạp đủ min_bid (15 ADA >= 10 ADA)
+// - Hoàn trả tiền cọc min-ADA (2 ADA) cho Seller
+// - Đảm bảo chỉ có 1 continuing output duy nhất
 // ---------------------------------------------------------------------------
 test test_mk_bid_first_bid_success() {
   let new_bid_amount = 15_000_000
@@ -84,6 +96,7 @@ test test_mk_bid_first_bid_success() {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: Some(
         BidState { bidder: mock_bidder1(), amount: new_bid_amount },
@@ -93,10 +106,16 @@ test test_mk_bid_first_bid_success() {
   let script_value =
     mock_nft_asset_value() |> assets.merge(from_lovelace(new_bid_amount))
 
+  let initial_utxo_value =
+    mock_nft_asset_value() |> assets.merge(from_lovelace(mock_initial_deposit()))
+
   let tx =
     mocktail_tx()
+      // Output quay lại Script với NFT + số tiền bid mới (15 ADA)
       |> tx_out(True, mock_script_address(0, None), script_value)
       |> tx_out_inline_datum(True, new_datum)
+      // Output hoàn trả tiền cọc min-ADA (2 ADA) cho Seller
+      |> tx_out(True, mock_seller(), from_lovelace(mock_initial_deposit()))
       |> complete()
       |> add_input(
           True,
@@ -104,7 +123,7 @@ test test_mk_bid_first_bid_success() {
             output_reference: mock_utxo_ref(0, 1),
             output: mock_script_output(
               mock_script_address(0, None),
-              mock_nft_asset_value(),
+              initial_utxo_value,
               InlineDatum(Some(mock_initial_datum())),
             ),
           },
@@ -122,15 +141,69 @@ test test_mk_bid_first_bid_success() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 2: MK_BID OUTBID SUCCESS WITH REFUND TO PREVIOUS BIDDER
+// TEST 2: MK_BID FIRST BID FAIL — KHÔNG HOÀN TIỀN CỌC MIN-ADA CHO SELLER
 // ---------------------------------------------------------------------------
-test test_mk_bid_outbid_success() {
-  let new_bid_amount = 20_000_000 // Bidder 2 trả 20 ADA (cao hơn Bidder 1 là 15 ADA)
+test test_mk_bid_first_bid_fail_no_seller_refund() {
+  let new_bid_amount = 15_000_000
   let new_datum =
     AuctionDatum {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
+      nft: mock_nft_mvalue(),
+      highest_bid: Some(
+        BidState { bidder: mock_bidder1(), amount: new_bid_amount },
+      ),
+    }
+
+  let script_value =
+    mock_nft_asset_value() |> assets.merge(from_lovelace(new_bid_amount))
+
+  let initial_utxo_value =
+    mock_nft_asset_value() |> assets.merge(from_lovelace(mock_initial_deposit()))
+
+  let tx =
+    mocktail_tx()
+      |> tx_out(True, mock_script_address(0, None), script_value)
+      |> tx_out_inline_datum(True, new_datum)
+      // Cố tình KHÔNG hoàn trả min-ADA cho Seller
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              initial_utxo_value,
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_initial_datum()),
+    MkBid { bidder: mock_bidder1(), amount: new_bid_amount },
+    mock_utxo_ref(0, 1),
+    tx_with_time,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 3: MK_BID OUTBID SUCCESS WITH REFUND TO PREVIOUS BIDDER & MIN_INCREMENT
+// Bidder 2 trả 17 ADA (>= 15 ADA + 2 ADA min_increment)
+// ---------------------------------------------------------------------------
+test test_mk_bid_outbid_success() {
+  let new_bid_amount = 17_000_000 // Tăng đúng bằng hoặc hơn min_increment (2 ADA)
+  let new_datum =
+    AuctionDatum {
+      seller: mock_seller(),
+      deadline: mock_deadline(),
+      min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: Some(
         BidState { bidder: mock_bidder2(), amount: new_bid_amount },
@@ -142,7 +215,7 @@ test test_mk_bid_outbid_success() {
 
   let tx =
     mocktail_tx()
-      // Output quay lại Script với 20 ADA + NFT
+      // Output quay lại Script với 17 ADA + NFT
       |> tx_out(True, mock_script_address(0, None), script_value)
       |> tx_out_inline_datum(True, new_datum)
       // Output hoàn tiền 15 ADA cho Bidder 1 cũ
@@ -172,15 +245,17 @@ test test_mk_bid_outbid_success() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 3: MK_BID FAIL — BID THẤP HƠN GIÁ ĐÃ CÓ
+// TEST 4: MK_BID FAIL — OUTBID INCREMENT KHÔNG ĐỦ (CHỈ TĂNG 1 LOVELACE)
+// Bidder 2 trả 15_000_001 (chỉ tăng 1 lovelace < min_increment 2 ADA)
 // ---------------------------------------------------------------------------
-test test_mk_bid_fail_bid_too_low() {
-  let new_bid_amount = 14_000_000 // Thấp hơn 15 ADA hiện tại
+test test_mk_bid_fail_outbid_increment_too_low() {
+  let new_bid_amount = 15_000_001 // Chỉ tăng 1 lovelace!
   let new_datum =
     AuctionDatum {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: Some(
         BidState { bidder: mock_bidder2(), amount: new_bid_amount },
@@ -220,7 +295,56 @@ test test_mk_bid_fail_bid_too_low() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 4: MK_BID FAIL — SAU DEADLINE
+// TEST 5: MK_BID FAIL — BID THẤP HƠN GIÁ ĐÃ CÓ
+// ---------------------------------------------------------------------------
+test test_mk_bid_fail_bid_too_low() {
+  let new_bid_amount = 14_000_000 // Thấp hơn 15 ADA hiện tại
+  let new_datum =
+    AuctionDatum {
+      seller: mock_seller(),
+      deadline: mock_deadline(),
+      min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
+      nft: mock_nft_mvalue(),
+      highest_bid: Some(
+        BidState { bidder: mock_bidder2(), amount: new_bid_amount },
+      ),
+    }
+
+  let script_value =
+    mock_nft_asset_value() |> assets.merge(from_lovelace(new_bid_amount))
+
+  let tx =
+    mocktail_tx()
+      |> tx_out(True, mock_script_address(0, None), script_value)
+      |> tx_out_inline_datum(True, new_datum)
+      |> tx_out(True, mock_bidder1(), from_lovelace(15_000_000))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value() |> assets.merge(from_lovelace(15_000_000)),
+              InlineDatum(Some(mock_datum_with_bid1())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_datum_with_bid1()),
+    MkBid { bidder: mock_bidder2(), amount: new_bid_amount },
+    mock_utxo_ref(0, 1),
+    tx_with_time,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 6: MK_BID FAIL — SAU DEADLINE
 // ---------------------------------------------------------------------------
 test test_mk_bid_fail_after_deadline() {
   let new_bid_amount = 15_000_000
@@ -229,6 +353,7 @@ test test_mk_bid_fail_after_deadline() {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: Some(
         BidState { bidder: mock_bidder1(), amount: new_bid_amount },
@@ -242,6 +367,7 @@ test test_mk_bid_fail_after_deadline() {
     mocktail_tx()
       |> tx_out(True, mock_script_address(0, None), script_value)
       |> tx_out_inline_datum(True, new_datum)
+      |> tx_out(True, mock_seller(), from_lovelace(mock_initial_deposit()))
       |> complete()
       |> add_input(
           True,
@@ -249,7 +375,7 @@ test test_mk_bid_fail_after_deadline() {
             output_reference: mock_utxo_ref(0, 1),
             output: mock_script_output(
               mock_script_address(0, None),
-              mock_nft_asset_value(),
+              mock_nft_asset_value() |> assets.merge(from_lovelace(mock_initial_deposit())),
               InlineDatum(Some(mock_initial_datum())),
             ),
           },
@@ -267,7 +393,60 @@ test test_mk_bid_fail_after_deadline() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 5: UPDATE MIN_BID SUCCESS (SELLER UPDATE KHI CHƯA CÓ AI ĐẶT GIÁ)
+// TEST 7: MK_BID FAIL — TẠO NHIỀU HƠN 1 CONTINUING SCRIPT OUTPUT (UTXO SPLITTING)
+// Hợp đồng crash an toàn tại expect [continuing_output]
+// ---------------------------------------------------------------------------
+test test_mk_bid_fail_multiple_continuing_outputs() fail {
+  let new_bid_amount = 15_000_000
+  let new_datum =
+    AuctionDatum {
+      seller: mock_seller(),
+      deadline: mock_deadline(),
+      min_bid: mock_min_bid(),
+      min_increment: mock_min_increment(),
+      nft: mock_nft_mvalue(),
+      highest_bid: Some(
+        BidState { bidder: mock_bidder1(), amount: new_bid_amount },
+      ),
+    }
+
+  let script_value =
+    mock_nft_asset_value() |> assets.merge(from_lovelace(new_bid_amount))
+
+  let tx =
+    mocktail_tx()
+      // Output 1 gửi về Script
+      |> tx_out(True, mock_script_address(0, None), script_value)
+      |> tx_out_inline_datum(True, new_datum)
+      // Cố tình tạo thêm Output 2 gửi về Script (Spam / Splitting)
+      |> tx_out(True, mock_script_address(0, None), from_lovelace(2_000_000))
+      |> tx_out(True, mock_seller(), from_lovelace(mock_initial_deposit()))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value() |> assets.merge(from_lovelace(mock_initial_deposit())),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  auction.auction.spend(
+    Some(mock_initial_datum()),
+    MkBid { bidder: mock_bidder1(), amount: new_bid_amount },
+    mock_utxo_ref(0, 1),
+    tx_with_time,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 8: UPDATE MIN_BID SUCCESS (SELLER UPDATE KHI CHƯA CÓ AI ĐẶT GIÁ & BẢO TOÀN NFT)
 // ---------------------------------------------------------------------------
 test test_update_min_bid_success() {
   let new_min_bid = 20_000_000
@@ -276,12 +455,14 @@ test test_update_min_bid_success() {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: new_min_bid,
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: None,
     }
 
   let tx =
     mocktail_tx()
+      // Script output chứa đủ NFT
       |> tx_out(True, mock_script_address(0, None), mock_nft_asset_value())
       |> tx_out_inline_datum(True, updated_datum)
       |> required_signer_hash(True, mock_pub_key_hash(1))
@@ -310,7 +491,52 @@ test test_update_min_bid_success() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 6: UPDATE FAIL — KHI ĐÃ CÓ NGƯỜI ĐẶT GIÁ
+// TEST 9: UPDATE FAIL — KHI SELLER CỐ TÌNH RÚT NFT (KHÔNG BẢO TOÀN TÀI SẢN)
+// ---------------------------------------------------------------------------
+test test_update_fail_when_nft_missing() {
+  let new_min_bid = 20_000_000
+  let updated_datum =
+    AuctionDatum {
+      seller: mock_seller(),
+      deadline: mock_deadline(),
+      min_bid: new_min_bid,
+      min_increment: mock_min_increment(),
+      nft: mock_nft_mvalue(),
+      highest_bid: None,
+    }
+
+  let tx =
+    mocktail_tx()
+      // Cố tình chỉ gửi ADA, RÚT NFT VỀ VÍ (Gian lận)
+      |> tx_out(True, mock_script_address(0, None), from_lovelace(2_000_000))
+      |> tx_out_inline_datum(True, updated_datum)
+      |> required_signer_hash(True, mock_pub_key_hash(1))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_initial_datum()),
+    Update { new_price: new_min_bid },
+    mock_utxo_ref(0, 1),
+    tx_with_time,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 10: UPDATE FAIL — KHI ĐÃ CÓ NGƯỜI ĐẶT GIÁ
 // ---------------------------------------------------------------------------
 test test_update_fail_when_bids_exist() {
   let new_min_bid = 20_000_000
@@ -319,6 +545,7 @@ test test_update_fail_when_bids_exist() {
       seller: mock_seller(),
       deadline: mock_deadline(),
       min_bid: new_min_bid,
+      min_increment: mock_min_increment(),
       nft: mock_nft_mvalue(),
       highest_bid: Some(
         BidState { bidder: mock_bidder1(), amount: 15_000_000 },
@@ -355,51 +582,44 @@ test test_update_fail_when_bids_exist() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 7: CANCEL SUCCESS BY SELLER BEFORE DEADLINE
+// TEST 11: CANCEL SUCCESS BY SELLER BEFORE DEADLINE (CHƯA CÓ AI BID)
 // ---------------------------------------------------------------------------
-test test_cancel_success() {
+test test_cancel_success_before_deadline() {
   let tx =
-    Transaction {
-      ..placeholder,
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: interval.before(time_before_deadline()),
-    }
+    mocktail_tx()
+      |> required_signer_hash(True, mock_pub_key_hash(1))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
 
   auction.auction.spend(
     Some(mock_initial_datum()),
     Cancel,
     mock_utxo_ref(0, 1),
-    tx,
+    tx_with_time,
   )
 }
 
 // ---------------------------------------------------------------------------
-// TEST 8: CANCEL FAIL — KHI ĐÃ CÓ NGƯỜI ĐẶT GIÁ
+// TEST 12: CANCEL SUCCESS BY SELLER AFTER DEADLINE (THU HỒI TÀI SẢN KHI HẾT HẠN MÀ KHÔNG AI BID)
+// Điểm cải tiến: Seller có thể cancel sau deadline để thu hồi 100% NFT + min-ADA
 // ---------------------------------------------------------------------------
-test test_cancel_fail_when_bids_exist() {
-  let tx =
-    Transaction {
-      ..placeholder,
-      extra_signatories: [mock_pub_key_hash(1)],
-      validity_range: interval.before(time_before_deadline()),
-    }
-
-  !auction.auction.spend(
-    Some(mock_datum_with_bid1()),
-    Cancel,
-    mock_utxo_ref(0, 1),
-    tx,
-  )
-}
-
-// ---------------------------------------------------------------------------
-// TEST 9: CLOSE SUCCESS — NO BIDS (NFT TRẢ VỀ CHO SELLER)
-// ---------------------------------------------------------------------------
-test test_close_no_bids_success() {
+test test_cancel_success_after_deadline() {
   let tx =
     mocktail_tx()
-      // Seller nhận lại NFT
-      |> tx_out(True, mock_seller(), mock_nft_asset_value())
+      |> required_signer_hash(True, mock_pub_key_hash(1))
       |> complete()
       |> add_input(
           True,
@@ -418,14 +638,45 @@ test test_close_no_bids_success() {
 
   auction.auction.spend(
     Some(mock_initial_datum()),
-    Close,
+    Cancel,
     mock_utxo_ref(0, 1),
     tx_after_deadline,
   )
 }
 
 // ---------------------------------------------------------------------------
-// TEST 10: CLOSE SUCCESS — HAS WINNER (WINNER NHẬN NFT, SELLER NHẬN ADA)
+// TEST 13: CANCEL FAIL — KHI ĐÃ CÓ NGƯỜI ĐẶT GIÁ
+// ---------------------------------------------------------------------------
+test test_cancel_fail_when_bids_exist() {
+  let tx =
+    mocktail_tx()
+      |> required_signer_hash(True, mock_pub_key_hash(1))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_datum_with_bid1())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_datum_with_bid1()),
+    Cancel,
+    mock_utxo_ref(0, 1),
+    tx_with_time,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 14: CLOSE SUCCESS — HAS WINNER (WINNER NHẬN NFT, SELLER NHẬN ĐỦ ADA)
 // ---------------------------------------------------------------------------
 test test_close_with_winner_success() {
   let winning_amount = 15_000_000
@@ -460,7 +711,39 @@ test test_close_with_winner_success() {
 }
 
 // ---------------------------------------------------------------------------
-// TEST 11: CLOSE FAIL — GIAO DỊCH TRƯỚC DEADLINE
+// TEST 15: CLOSE FAIL — KHI KHÔNG CÓ AI BID (BẢO VỆ MIN-ADA CỦA SELLER)
+// Close phải từ chối khi highest_bid == None. Seller phải dùng Cancel.
+// ---------------------------------------------------------------------------
+test test_close_fail_no_bids() {
+  let tx =
+    mocktail_tx()
+      |> tx_out(True, mock_seller(), mock_nft_asset_value())
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_after_deadline =
+    Transaction { ..tx, validity_range: interval.after(time_after_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_initial_datum()),
+    Close,
+    mock_utxo_ref(0, 1),
+    tx_after_deadline,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 16: CLOSE FAIL — GIAO DỊCH TRƯỚC DEADLINE
 // ---------------------------------------------------------------------------
 test test_close_fail_before_deadline() {
   let winning_amount = 15_000_000
@@ -492,18 +775,71 @@ test test_close_fail_before_deadline() {
   )
 }
 
-test test_debug_close() {
-  let seller = mock_seller()
-  let datum = AuctionDatum {
-    seller: seller,
-    deadline: 1788339540000,
-    min_bid: 10000000,
-    nft: mock_nft_mvalue(),
-    highest_bid: None,
-  }
+// ---------------------------------------------------------------------------
+// TEST 17: CLOSE FAIL — DOUBLE SATISFACTION (2 SCRIPT INPUTS TRONG 1 TX)
+// ---------------------------------------------------------------------------
+test test_close_fail_double_satisfaction() {
+  let winning_amount = 15_000_000
   let tx =
     mocktail_tx()
-      |> tx_out(True, seller, mock_nft_asset_value())
+      |> tx_out(True, mock_bidder1(), mock_nft_asset_value())
+      |> tx_out(True, mock_seller(), from_lovelace(winning_amount))
+      |> complete()
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 1),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value() |> assets.merge(from_lovelace(winning_amount)),
+              InlineDatum(Some(mock_datum_with_bid1())),
+            ),
+          },
+        )
+      // Cố tình gộp thêm input thứ 2 từ cùng script address
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 2),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value() |> assets.merge(from_lovelace(winning_amount)),
+              InlineDatum(Some(mock_datum_with_bid1())),
+            ),
+          },
+        )
+
+  let tx_after_deadline =
+    Transaction { ..tx, validity_range: interval.after(time_after_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_datum_with_bid1()),
+    Close,
+    mock_utxo_ref(0, 1),
+    tx_after_deadline,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TEST 18: UPDATE FAIL — DOUBLE SATISFACTION (2 SCRIPT INPUTS TRONG 1 TX)
+// ---------------------------------------------------------------------------
+test test_update_fail_double_satisfaction() {
+  let new_min_bid = 20_000_000
+  let updated_datum =
+    AuctionDatum {
+      seller: mock_seller(),
+      deadline: mock_deadline(),
+      min_bid: new_min_bid,
+      min_increment: mock_min_increment(),
+      nft: mock_nft_mvalue(),
+      highest_bid: None,
+    }
+
+  let tx =
+    mocktail_tx()
+      |> tx_out(True, mock_script_address(0, None), mock_nft_asset_value())
+      |> tx_out_inline_datum(True, updated_datum)
+      |> required_signer_hash(True, mock_pub_key_hash(1))
       |> complete()
       |> add_input(
           True,
@@ -512,52 +848,41 @@ test test_debug_close() {
             output: mock_script_output(
               mock_script_address(0, None),
               mock_nft_asset_value(),
-              InlineDatum(Some(datum)),
+              InlineDatum(Some(mock_initial_datum())),
             ),
           },
         )
-  let tx_with_range = Transaction { ..tx, validity_range: interval.between(1788339542000, 1788701014000) }
-  auction.auction.spend(
-    Some(datum),
-    Close,
+      // Thêm script input thứ 2
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 2),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
+
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_initial_datum()),
+    Update { new_price: new_min_bid },
     mock_utxo_ref(0, 1),
-    tx_with_range,
+    tx_with_time,
   )
 }
 
-test test_real_close() {
-  let seller =
-    Address {
-      payment_credential: VerificationKey(
-        #"0bb1cb4836664563e52aee36e9cc645833ce2b62cddf1e4869b28906",
-      ),
-      stake_credential: Some(
-        Inline(
-          VerificationKey(
-            #"21acf37ae5d4956ba32efd86070d2f5689aa79039bd28807e9093bad",
-          ),
-        ),
-      ),
-    }
-  let nft_policy =
-    #"aa1865f70fd0798c226142258d4e237cc249867971380859279ab596"
-  let nft_name = #"0014df104e49474854"
-  let nft_mvalue = [Pair(nft_policy, [Pair(nft_name, 1)])]
-  let datum =
-    AuctionDatum {
-      seller,
-      deadline: 1788339540000,
-      min_bid: 10000000,
-      nft: nft_mvalue,
-      highest_bid: None,
-    }
-
-  let nft_val = assets.from_asset(nft_policy, nft_name, 1)
-  let output0_val = assets.merge(assets.from_lovelace(1159390), nft_val)
-
+// ---------------------------------------------------------------------------
+// TEST 19: CANCEL FAIL — DOUBLE SATISFACTION (2 SCRIPT INPUTS TRONG 1 TX)
+// ---------------------------------------------------------------------------
+test test_cancel_fail_double_satisfaction() {
   let tx =
     mocktail_tx()
-      |> tx_out(True, seller, output0_val)
+      |> required_signer_hash(True, mock_pub_key_hash(1))
       |> complete()
       |> add_input(
           True,
@@ -565,23 +890,31 @@ test test_real_close() {
             output_reference: mock_utxo_ref(0, 1),
             output: mock_script_output(
               mock_script_address(0, None),
-              output0_val,
-              InlineDatum(Some(datum)),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
             ),
           },
         )
-  let tx_with_range =
-    Transaction {
-      ..tx,
-      validity_range: interval.between(1788339542000, 1788701014000),
-    }
+      // Thêm script input thứ 2
+      |> add_input(
+          True,
+          Input {
+            output_reference: mock_utxo_ref(0, 2),
+            output: mock_script_output(
+              mock_script_address(0, None),
+              mock_nft_asset_value(),
+              InlineDatum(Some(mock_initial_datum())),
+            ),
+          },
+        )
 
-  auction.auction.spend(
-    Some(datum),
-    Close,
+  let tx_with_time =
+    Transaction { ..tx, validity_range: interval.before(time_before_deadline()) }
+
+  !auction.auction.spend(
+    Some(mock_initial_datum()),
+    Cancel,
     mock_utxo_ref(0, 1),
-    tx_with_range,
+    tx_with_time,
   )
 }
-
-

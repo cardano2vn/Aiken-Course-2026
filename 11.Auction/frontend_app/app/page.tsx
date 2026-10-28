@@ -71,6 +71,7 @@ export default function Home() {
   // Form: Start Auction (English Auction)
   const [selectedAuctionAsset, setSelectedAuctionAsset] = useState<string>("");
   const [auctionMinBid, setAuctionMinBid] = useState<string>("5");
+  const [auctionMinIncrement, setAuctionMinIncrement] = useState<string>("1");
   const [auctionDeadlineDateTime, setAuctionDeadlineDateTime] = useState<string>(
     getDefaultDeadlineIsoString()
   );
@@ -172,10 +173,11 @@ export default function Home() {
     try {
       const contract = buildAuctionContract();
       const minBidLovelace = Math.floor(Number(auctionMinBid) * 1_000_000);
+      const minIncrementLovelace = Math.floor((Number(auctionMinIncrement) || 1) * 1_000_000);
 
       const nftAssets: Asset[] = [{ unit: selectedAuctionAsset, quantity: "1" }];
-      console.log(">>> [UI] Building startAuction transaction...", { nftAssets, minBidLovelace, deadlineMs });
-      const txHex = await contract.startAuction(nftAssets, minBidLovelace, deadlineMs);
+      console.log(">>> [UI] Building startAuction transaction...", { nftAssets, minBidLovelace, deadlineMs, minIncrementLovelace });
+      const txHex = await contract.startAuction(nftAssets, minBidLovelace, deadlineMs, minIncrementLovelace);
       console.log(">>> [UI] txHex generated successfully. Requesting wallet signature...");
 
       const signedTx = await wallet.signTx(txHex);
@@ -193,6 +195,7 @@ export default function Home() {
       setAuctionScriptAddr(contract.scriptAddress);
       setSelectedAuctionAsset("");
       setAuctionMinBid("5");
+      setAuctionMinIncrement("1");
       setTimeout(fetchAuctionItems, 4000);
       setTimeout(fetchAssets, 4000);
     } catch (e: any) {
@@ -414,18 +417,32 @@ export default function Home() {
                   </select>
                 </div>
 
-                {/* Minimum Bid */}
-                <div>
-                  <label className="block text-xs font-bold uppercase text-neutral-500 mb-1">Min Starting Bid (ADA)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.5"
-                    className="w-full p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-transparent text-xl font-bold"
-                    placeholder="5.0"
-                    value={auctionMinBid}
-                    onChange={(e) => setAuctionMinBid(e.target.value)}
-                  />
+                {/* Minimum Bid & Min Increment */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-neutral-500 mb-1">Min Bid (ADA)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="0.5"
+                      className="w-full p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-transparent text-xl font-bold"
+                      placeholder="5.0"
+                      value={auctionMinBid}
+                      onChange={(e) => setAuctionMinBid(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-neutral-500 mb-1">Min Increment (ADA)</label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      className="w-full p-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-transparent text-xl font-bold"
+                      placeholder="1.0"
+                      value={auctionMinIncrement}
+                      onChange={(e) => setAuctionMinIncrement(e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 {/* Calendar Deadline Picker */}
@@ -480,6 +497,7 @@ export default function Home() {
               const sellerPkh = decoded.sellerPkh;
               const deadlineMs = decoded.deadlineMs;
               const minBidAda = decoded.minBidAda;
+              const minIncrementAda = decoded.minIncrementAda || 1;
               const hasBidder = !!decoded.highestBidderAddress;
               const highestBidderAddr = decoded.highestBidderAddress || "";
               const highestBidAda = decoded.highestBidAda || 0;
@@ -549,6 +567,10 @@ export default function Home() {
                         <span className="font-bold">{minBidAda} ₳</span>
                       </div>
                       <div className="flex justify-between text-xs">
+                        <span className="text-neutral-400">Min Increment:</span>
+                        <span className="font-bold text-neutral-600 dark:text-neutral-300">+{minIncrementAda} ₳</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
                         <span className="text-neutral-400">Highest Bid:</span>
                         <span className="font-bold text-amber-600 dark:text-amber-400">
                           {hasBidder ? `${highestBidAda} ₳` : "No bids yet"}
@@ -597,20 +619,36 @@ export default function Home() {
                           </button>
                         </div>
                       ) : isExpired ? (
-                        <button
-                          onClick={() => handleCloseAuction(item)}
-                          disabled={loading}
-                          className="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-lg transition-all shadow disabled:opacity-50"
-                        >
-                          🔨 {isSeller ? (hasBidder ? "Claim Highest Bid (Close)" : "Reclaim NFT (Close)") : (hasBidder ? "Claim Won NFT (Close)" : "Close Auction")}
-                        </button>
+                        !hasBidder ? (
+                          isSeller ? (
+                            <button
+                              onClick={() => handleCancelAuction(item)}
+                              disabled={loading}
+                              className="w-full py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-bold rounded-lg transition-all shadow disabled:opacity-50 flex items-center justify-center gap-1"
+                            >
+                              🗑️ Reclaim NFT & Deposit (Cancel)
+                            </button>
+                          ) : (
+                            <div className="text-center text-xs text-neutral-400 py-1 font-medium">
+                              Auction expired with no bids
+                            </div>
+                          )
+                        ) : (
+                          <button
+                            onClick={() => handleCloseAuction(item)}
+                            disabled={loading}
+                            className="w-full py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-lg transition-all shadow disabled:opacity-50"
+                          >
+                            🔨 {isSeller ? "Claim Highest Bid (Close)" : "Claim Won NFT (Close)"}
+                          </button>
+                        )
                       ) : (
                         <div className="flex gap-2">
                           <input
                             type="number"
-                            min={hasBidder ? highestBidAda + 0.1 : minBidAda}
+                            min={hasBidder ? highestBidAda + minIncrementAda : minBidAda}
                             step="0.5"
-                            placeholder={`${hasBidder ? highestBidAda + 1 : minBidAda} ₳`}
+                            placeholder={`${hasBidder ? highestBidAda + minIncrementAda : minBidAda} ₳`}
                             className="w-1/2 p-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-transparent text-xs font-bold"
                             value={bidAmount[item.utxo.input.txHash] || ""}
                             onChange={(e) =>

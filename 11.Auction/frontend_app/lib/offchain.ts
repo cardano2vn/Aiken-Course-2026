@@ -61,6 +61,7 @@ export type AuctionDatum = {
     PubKeyAddress,
     { int: number } | number,
     { int: number } | number,
+    { int: number } | number,
     any,
     OptionBidStateDatum | any
   ];
@@ -69,17 +70,19 @@ export type AuctionDatum = {
 
 /**
  * Helper tạo AuctionDatum Plutus Data
- * @param sellerAddress        - bech32 address người bán
- * @param deadlineMs           - Thời gian POSIX timestamp (ms)
- * @param minBidInLovelace     - Giá khởi điểm tối thiểu (lovelace)
- * @param nftAssets            - Danh sách NFT/Token đem ra đấu giá
- * @param highestBidderAddress - (Tuỳ chọn) bech32 address người trả giá cao nhất hiện tại
- * @param highestBidAmount     - (Tuỳ chọn) Số tiền đặt giá (lovelace)
+ * @param sellerAddress           - bech32 address người bán
+ * @param deadlineMs              - Thời gian POSIX timestamp (ms)
+ * @param minBidInLovelace        - Giá khởi điểm tối thiểu (lovelace)
+ * @param minIncrementInLovelace   - Bước giá tối thiểu cho các lượt bid tiếp theo (lovelace)
+ * @param nftAssets               - Danh sách NFT/Token đem ra đấu giá
+ * @param highestBidderAddress    - (Tuỳ chọn) bech32 address người trả giá cao nhất hiện tại
+ * @param highestBidAmount        - (Tuỳ chọn) Số tiền đặt giá (lovelace)
  */
 export const auctionDatum = (
   sellerAddress: string,
   deadlineMs: number,
   minBidInLovelace: number,
+  minIncrementInLovelace: number = 1_000_000,
   nftAssets: Asset[],
   highestBidderAddress?: string,
   highestBidAmount?: number
@@ -88,6 +91,7 @@ export const auctionDatum = (
     sellerAddress,
     deadlineMs,
     minBidInLovelace,
+    minIncrementInLovelace,
     nftAssets,
     highestBidderAddress,
     highestBidAmount,
@@ -118,6 +122,7 @@ export const auctionDatum = (
     pubKeyAddress(sellerPkh, sellerStake || ""),
     integer(Math.floor(deadlineMs)),
     integer(Math.floor(minBidInLovelace)),
+    integer(Math.floor(minIncrementInLovelace)),
     value(nftAssets),
     highestBidField,
   ]);
@@ -226,8 +231,13 @@ export function decodeAuctionDatum(plutusData: string | object, networkId: numbe
     ? Number(rawMinBid.int)
     : Number(rawMinBid ?? 0);
 
-  // Extract Highest Bid
-  const highestBidField = safe?.fields?.[4];
+  const rawMinIncrement = safe?.fields?.[3];
+  const minIncrementInLovelace = typeof rawMinIncrement === "object" && rawMinIncrement !== null && "int" in rawMinIncrement
+    ? Number(rawMinIncrement.int)
+    : Number(rawMinIncrement ?? 1_000_000);
+
+  // Extract Highest Bid (bây giờ ở vị trí index 5 sau khi thêm min_increment)
+  const highestBidField = safe?.fields?.[5];
   const tag = highestBidField && typeof highestBidField === "object"
     ? (highestBidField.constructor !== undefined ? Number(highestBidField.constructor) : Number(highestBidField.alternative))
     : 1;
@@ -258,6 +268,8 @@ export function decodeAuctionDatum(plutusData: string | object, networkId: numbe
     deadlineFormatted: new Date(deadlineMs).toLocaleString(),
     minBidInLovelace,
     minBidAda: minBidInLovelace / 1_000_000,
+    minIncrementInLovelace,
+    minIncrementAda: minIncrementInLovelace / 1_000_000,
     highestBidderAddress,
     highestBidderPkh,
     highestBidAmount,
@@ -313,12 +325,13 @@ export class AuctionContract extends TxInitiator {
   startAuction = async (
     nftAssets: Asset[],
     minBidInLovelace: number,
-    deadlineMs: number
+    deadlineMs: number,
+    minIncrementInLovelace: number = 1_000_000
   ) => {
     // Làm tròn deadlineMs về giây tròn để tránh lệch miligiây với Slot conversion của Cardano
     deadlineMs = Math.floor(deadlineMs / 1000) * 1000;
     console.log("=== [AuctionContract.startAuction] START ===");
-    console.log("Inputs:", { nftAssets, minBidInLovelace, deadlineMs });
+    console.log("Inputs:", { nftAssets, minBidInLovelace, deadlineMs, minIncrementInLovelace });
 
     if (!nftAssets || nftAssets.length === 0) {
       console.error("[AuctionContract.startAuction] Validation Error: nftAssets is empty");
@@ -327,6 +340,10 @@ export class AuctionContract extends TxInitiator {
     if (minBidInLovelace <= 0) {
       console.error("[AuctionContract.startAuction] Validation Error: minBidInLovelace <= 0");
       throw new Error("minBidInLovelace must be greater than 0.");
+    }
+    if (minIncrementInLovelace <= 0) {
+      console.error("[AuctionContract.startAuction] Validation Error: minIncrementInLovelace <= 0");
+      throw new Error("minIncrementInLovelace must be greater than 0.");
     }
     if (deadlineMs <= Date.now()) {
       console.error("[AuctionContract.startAuction] Validation Error: deadlineMs is in the past", { deadlineMs, now: Date.now() });
@@ -351,6 +368,7 @@ export class AuctionContract extends TxInitiator {
       walletAddress,
       deadlineMs,
       minBidInLovelace,
+      minIncrementInLovelace,
       cleanNftAssets
     );
 
@@ -427,7 +445,12 @@ export class AuctionContract extends TxInitiator {
       ? Number((rawDeadline as any).int)
       : Number(rawDeadline ?? 0);
 
-    const highestBidField = inlineDatum.fields[4] as any;
+    const rawMinIncrement = inlineDatum.fields[3];
+    const minIncrementInLovelace = typeof rawMinIncrement === "object" && rawMinIncrement !== null && "int" in (rawMinIncrement as any)
+      ? Number((rawMinIncrement as any).int)
+      : Number(rawMinIncrement ?? 1_000_000);
+
+    const highestBidField = inlineDatum.fields[5] as any;
     const tag = highestBidField && typeof highestBidField === "object"
       ? (Object.prototype.hasOwnProperty.call(highestBidField, "constructor")
         ? Number(highestBidField.constructor)
@@ -436,7 +459,7 @@ export class AuctionContract extends TxInitiator {
           : undefined))
       : undefined;
 
-    console.log("  Extracted Datum values:", { sellerAddress, deadlineMs, highestBidField, tag });
+    console.log("  Extracted Datum values:", { sellerAddress, deadlineMs, minIncrementInLovelace, highestBidField, tag });
 
     const { pubKeyHash: userPkh } = deserializeAddress(walletAddress);
     const { pubKeyHash: sellerPkh } = deserializeAddress(sellerAddress);
@@ -469,6 +492,7 @@ export class AuctionContract extends TxInitiator {
       sellerAddress,
       deadlineMs,
       newMinBidInLovelace,
+      minIncrementInLovelace,
       nftAssets
     );
 
@@ -536,14 +560,15 @@ export class AuctionContract extends TxInitiator {
     const sellerAddress = decoded.sellerAddress;
     const deadlineMs = decoded.deadlineMs;
     const minBidInLovelace = decoded.minBidInLovelace;
+    const minIncrementInLovelace = decoded.minIncrementInLovelace || 1_000_000;
     const previousHighestBidder = decoded.highestBidderAddress;
     const previousHighestBidAmount = decoded.highestBidAmount || 0;
 
     if (amountInLovelace < minBidInLovelace) {
       throw new Error(`Bid amount (${amountInLovelace / 1e6} ADA) must be at least min bid (${minBidInLovelace / 1e6} ADA).`);
     }
-    if (previousHighestBidAmount && amountInLovelace <= previousHighestBidAmount) {
-      throw new Error(`Bid amount (${amountInLovelace / 1e6} ADA) must be higher than current highest bid (${previousHighestBidAmount / 1e6} ADA).`);
+    if (previousHighestBidAmount && amountInLovelace < previousHighestBidAmount + minIncrementInLovelace) {
+      throw new Error(`Giá đặt mới (${amountInLovelace / 1e6} ADA) phải cao hơn giá cao nhất hiện tại ít nhất ${minIncrementInLovelace / 1e6} ADA (tối thiểu ${(previousHighestBidAmount + minIncrementInLovelace) / 1e6} ADA).`);
     }
 
     const nftAssets = targetUtxo.output.amount.filter((a) => a.unit !== "lovelace");
@@ -551,6 +576,7 @@ export class AuctionContract extends TxInitiator {
       sellerAddress,
       deadlineMs,
       minBidInLovelace,
+      minIncrementInLovelace,
       nftAssets,
       walletAddress,
       amountInLovelace
@@ -585,6 +611,13 @@ export class AuctionContract extends TxInitiator {
       builder.txOut(previousHighestBidder, [
         { unit: "lovelace", quantity: previousHighestBidAmount.toString() },
       ]);
+    } else {
+      // LƯỢT BID ĐẦU TIÊN: Hoàn trả lại tiền cọc min-ADA ban đầu cho Seller!
+      const initialLovelace = targetUtxo.output.amount.find((a) => a.unit === "lovelace")?.quantity || "2000000";
+      console.log(`  [bid] First bid placed! Refunding initial seller deposit: ${sellerAddress} (${Number(initialLovelace) / 1e6} ADA)`);
+      builder.txOut(sellerAddress, [
+        { unit: "lovelace", quantity: initialLovelace },
+      ]);
     }
 
     await builder
@@ -607,7 +640,7 @@ export class AuctionContract extends TxInitiator {
   makeBid = this.bid;
 
   // -------------------------------------------------------------------------
-  // 4. Cancel — Người bán huỷ phiên đấu giá khi chưa ai bid
+  // 4. Cancel — Người bán huỷ phiên đấu giá khi chưa ai bid (bất kỳ thời gian nào)
   // -------------------------------------------------------------------------
   cancel = async (auctionUtxo: UTxO) => {
     console.log("=== [AuctionContract.cancel] START ===");
@@ -633,11 +666,8 @@ export class AuctionContract extends TxInitiator {
     const decoded = decodeAuctionDatum(targetUtxo.output.plutusData, this.networkId);
     const deadlineMs = decoded.deadlineMs;
 
-    if (deadlineMs <= Date.now()) {
-      throw new Error("Cannot cancel auction after deadline has passed. Please use 'Close Auction' instead.");
-    }
     if (decoded.highestBidderAddress) {
-      throw new Error("Cannot cancel auction after bids have been placed!");
+      throw new Error("Không thể hủy phiên đấu giá khi đã có người đặt giá!");
     }
 
     const { pubKeyHash: userPkh } = deserializeAddress(walletAddress);
@@ -654,10 +684,8 @@ export class AuctionContract extends TxInitiator {
 
     const currentSlot = posixToSlot(Date.now(), this.networkId);
     const deadlineSlot = posixToSlot(deadlineMs, this.networkId);
-    const invalidHereafterSlot = Math.min(deadlineSlot - 2, currentSlot + 600);
-    const nftAssets = targetUtxo.output.amount.filter((a) => a.unit !== "lovelace");
 
-    await this.mesh
+    const builder = this.mesh
       .spendingPlutusScript(this.languageVersion)
       .txIn(
         targetUtxo.input.txHash,
@@ -668,9 +696,17 @@ export class AuctionContract extends TxInitiator {
       .txInInlineDatumPresent()
       .txInRedeemerValue(cancelRedeemer(), "JSON", { mem: 350000, steps: 100000000 })
       .txInScript(this.scriptCbor)
-      .txOut(walletAddress, nftAssets)
-      .invalidHereafter(invalidHereafterSlot)
-      .requiredSignerHash(sellerPkh || userPkh)
+      .txOut(walletAddress, targetUtxo.output.amount) // Hoàn trả trọn vẹn NFT + min-ADA về cho Seller
+      .requiredSignerHash(sellerPkh || userPkh);
+
+    if (Date.now() < deadlineMs) {
+      const invalidHereafterSlot = Math.min(deadlineSlot - 2, currentSlot + 600);
+      builder.invalidHereafter(invalidHereafterSlot);
+    } else {
+      builder.invalidHereafter(currentSlot + 600);
+    }
+
+    await builder
       .changeAddress(walletAddress)
       .txInCollateral(
         collateral.input.txHash,
@@ -689,7 +725,7 @@ export class AuctionContract extends TxInitiator {
   cancelAuction = this.cancel;
 
   // -------------------------------------------------------------------------
-  // 5. Close — Chốt phiên đấu giá khi đã quá thời hạn (deadline)
+  // 5. Close — Chốt phiên đấu giá khi đã quá thời hạn (deadline) và có người thắng
   // -------------------------------------------------------------------------
   close = async (auctionUtxo: UTxO) => {
     this.mesh.reset();
@@ -705,11 +741,19 @@ export class AuctionContract extends TxInitiator {
       console.warn("[AuctionContract.close] Could not refresh UTxO:", e);
     }
 
+    if (!targetUtxo.output.plutusData) {
+      throw new Error("Target auction UTxO missing Plutus inline datum.");
+    }
+
     const decoded = decodeAuctionDatum(targetUtxo.output.plutusData!, this.networkId);
     const sellerAddress = decoded.sellerAddress;
     const deadlineMs = decoded.deadlineMs;
     const highestBidderAddress = decoded.highestBidderAddress;
     const highestBidAmount = decoded.highestBidAmount || 0;
+
+    if (!highestBidderAddress || highestBidAmount <= 0) {
+      throw new Error("Không thể Close phiên đấu giá khi không có người đặt giá. Người bán vui lòng sử dụng chức năng Hủy (Cancel) để thu hồi tài sản an toàn.");
+    }
 
     const nftAssets = targetUtxo.output.amount.filter((a) => a.unit !== "lovelace");
 
@@ -725,35 +769,20 @@ export class AuctionContract extends TxInitiator {
       .txInInlineDatumPresent()
       .txInRedeemerValue(closeRedeemer(), "JSON", { mem: 700000, steps: 200000000 });
 
-    if (highestBidderAddress && highestBidAmount > 0) {
-      // Đã có winner: Gửi NFT + min ADA cho Winner, Gửi bid ADA cho Seller
-      // NOTE: Mỗi output PHẢI có min ADA.
-      //   - NFT output: thêm 2 ADA (2,000,000 lovelace) min UTxO.
-      //   - Seller output: Aiken chỉ check value_geq(from_lovelace(winner_state.amount)),
-      //     tức là seller nhận đúng bid amount. Nhưng Cardano ledger yêu cầu min UTxO ~1–2 ADA.
-      //     Đảm bảo seller output >= 2,000,000 lovelace (lấy giá trị lớn hơn).
-      const MIN_UTXO_LOVELACE = 2_000_000;
-      const sellerLovelace = Math.max(highestBidAmount, MIN_UTXO_LOVELACE);
-      const nftOutputAssets = [
-        ...nftAssets,
-        { unit: "lovelace", quantity: "2000000" }, // min ADA cho UTxO chứa NFT
-      ];
-      console.log(`  [close] Closing Auction with winner: ${highestBidderAddress} (bid=${highestBidAmount / 1e6} ADA)`);
-      console.log(`  [close] sellerAddress decoded: ${sellerAddress}`);
-      console.log(`  [close] sellerLovelace output: ${sellerLovelace} (bid=${highestBidAmount}, minUtxo=${MIN_UTXO_LOVELACE})`);
-      console.log(`  [close] NFT output assets:`, nftOutputAssets);
-      builder
-        .txOut(highestBidderAddress, nftOutputAssets)
-        .txOut(sellerAddress, [{ unit: "lovelace", quantity: sellerLovelace.toString() }]);
-    } else {
-      // Chưa ai bid & hết hạn: Trả NFT + min ADA lại cho Seller
-      const nftOutputAssets = [
-        ...nftAssets,
-        { unit: "lovelace", quantity: "2000000" },
-      ];
-      console.log(`  [close] Closing Auction with no bidders. Returning NFT to Seller: ${sellerAddress}`);
-      builder.txOut(sellerAddress, nftOutputAssets);
-    }
+    // Đã có winner: Gửi NFT + min ADA cho Winner, Gửi bid ADA cho Seller
+    const MIN_UTXO_LOVELACE = 2_000_000;
+    const sellerLovelace = Math.max(highestBidAmount, MIN_UTXO_LOVELACE);
+    const nftOutputAssets = [
+      ...nftAssets,
+      { unit: "lovelace", quantity: "2000000" }, // min ADA cho UTxO chứa NFT
+    ];
+    console.log(`  [close] Closing Auction with winner: ${highestBidderAddress} (bid=${highestBidAmount / 1e6} ADA)`);
+    console.log(`  [close] sellerAddress decoded: ${sellerAddress}`);
+    console.log(`  [close] sellerLovelace output: ${sellerLovelace} (bid=${highestBidAmount}, minUtxo=${MIN_UTXO_LOVELACE})`);
+    console.log(`  [close] NFT output assets:`, nftOutputAssets);
+    builder
+      .txOut(highestBidderAddress, nftOutputAssets)
+      .txOut(sellerAddress, [{ unit: "lovelace", quantity: sellerLovelace.toString() }]);
 
     const deadlineSlot = posixToSlot(deadlineMs, this.networkId);
     const currentSlot = posixToSlot(Date.now(), this.networkId);

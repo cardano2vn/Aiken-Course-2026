@@ -1,7 +1,7 @@
 use aiken/collection/list
 use aiken/interval
 use cardano/address.{Address}
-use cardano/assets.{AssetName, PolicyId, from_asset_list, from_lovelace}
+use cardano/assets.{AssetName, PolicyId, from_asset_list, from_lovelace, lovelace_of}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
 use vodka_address.{address_pub_key}
 use vodka_extra_signatories.{key_signed}
@@ -31,6 +31,7 @@ pub type BidState {
 //   - seller: Address (Người bán, giữ đủ stake key)
 //   - deadline: POSIXTime (Hạn chót của phiên đấu giá)
 //   - min_bid: Int (Giá khởi điểm tối thiểu bằng Lovelace)
+//   - min_increment: Int (Bước giá tối thiểu cho các lượt bid tiếp theo bằng Lovelace)
 //   - nft: MValue (Tài sản đang được đem ra đấu giá)
 //   - highest_bid: Option<BidState> (Trạng thái giá cao nhất: None hoặc Some)
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ pub type AuctionDatum {
     seller: Address,
     deadline: POSIXTime,
     min_bid: Int,
+    min_increment: Int,
     nft: MValue,
     highest_bid: Option<BidState>,
   }
@@ -54,7 +56,7 @@ pub type AuctionRedeemer {
   Update { new_price: Int }
   // Hành động hủy phiên đấu giá (chỉ dành cho seller khi chưa có người đặt giá).
   Cancel
-  // Hành động kết thúc phiên đấu giá và phân bổ tài sản (sau deadline).
+  // Hành động kết thúc phiên đấu giá và phân bổ tài sản cho người thắng (sau deadline).
   Close
 }
 
@@ -78,7 +80,7 @@ validator auction {
         expect Some(own_input) = find_input(tx.inputs, input)
         let own_address = own_input.output.address
 
-        // a. Chống Double Satisfaction: Chỉ tiêu thụ 1 UTxO từ hợp đồng này trong TX
+        // a. Chống Double Satisfaction: Chỉ tiêu thụ duy nhất 1 UTxO từ hợp đồng này trong TX
         let is_only_one_input_from_script =
           when inputs_at(tx.inputs, own_address) is {
             [_] -> True
@@ -89,25 +91,29 @@ validator auction {
         let is_before_deadline =
           interval.is_entirely_before(tx.validity_range, datum.deadline)
 
-        // c. Kiểm tra giá thầu hợp lệ
+        // c. Kiểm tra giá thầu hợp lệ: Lượt đầu >= min_bid, các lượt sau >= prev_bid + min_increment
         let is_valid_bid_amount =
           when datum.highest_bid is {
             None -> amount >= datum.min_bid
-            Some(prev_bid) -> amount > prev_bid.amount
+            Some(prev_bid) -> amount >= prev_bid.amount + datum.min_increment
           }
 
-        // d. Kiểm tra hoàn tiền cho bidder cũ (nếu có)
-        let is_prev_bidder_refunded =
+        // d. Hoàn trả tiền cọc min-ADA ban đầu cho Seller (lượt đầu) HOẶC hoàn tiền cho bidder cũ (lượt sau)
+        let is_refund_valid =
           when datum.highest_bid is {
+            None -> {
+              let initial_deposit = lovelace_of(own_input.output.value)
+              get_all_value_to(tx.outputs, datum.seller)
+                |> value_geq(from_lovelace(initial_deposit))
+            }
             Some(prev_bid) ->
               get_all_value_to(tx.outputs, prev_bid.bidder)
                 |> value_geq(from_lovelace(prev_bid.amount))
-            None -> True
           }
 
-        // e. Tìm UTxO tiếp tục nằm lại Script Address với Datum mới & Value mới
-        expect Some(continuing_output) =
-          list.find(tx.outputs, fn(out) { out.address == own_address })
+        // e. Đảm bảo có DUY NHẤT 1 UTxO tiếp tục nằm lại Script Address với Datum & Value mới
+        expect [continuing_output] =
+          list.filter(tx.outputs, fn(out) { out.address == own_address })
 
         // f. Giải mã Datum mới tại Script Output
         expect InlineDatum(raw_datum) = continuing_output.datum
@@ -115,7 +121,7 @@ validator auction {
 
         // g. Kiểm tra Datum mới giữ nguyên cấu hình, chỉ cập nhật highest_bid
         let is_datum_updated_correctly =
-          output_datum.seller == datum.seller && output_datum.deadline == datum.deadline && output_datum.min_bid == datum.min_bid && output_datum.nft == datum.nft && output_datum.highest_bid == Some(
+          output_datum.seller == datum.seller && output_datum.deadline == datum.deadline && output_datum.min_bid == datum.min_bid && output_datum.min_increment == datum.min_increment && output_datum.nft == datum.nft && output_datum.highest_bid == Some(
             BidState { bidder, amount },
           )
 
@@ -125,7 +131,7 @@ validator auction {
             |> assets.merge(from_lovelace(amount))
         let is_value_locked = value_geq(continuing_output.value, expected_script_value)
 
-        is_only_one_input_from_script && is_before_deadline && is_valid_bid_amount && is_prev_bidder_refunded && is_datum_updated_correctly && is_value_locked
+        is_only_one_input_from_script && is_before_deadline && is_valid_bid_amount && is_refund_valid && is_datum_updated_correctly && is_value_locked
       }
 
       // -----------------------------------------------------------------
@@ -134,6 +140,13 @@ validator auction {
       Update { new_price } -> {
         expect Some(own_input) = find_input(tx.inputs, input)
         let own_address = own_input.output.address
+
+        // a. Chống Double Satisfaction
+        let is_only_one_input_from_script =
+          when inputs_at(tx.inputs, own_address) is {
+            [_] -> True
+            _ -> False
+          }
 
         expect Some(seller_pkh) = address_pub_key(datum.seller)
         let is_signed_by_seller = key_signed(tx.extra_signatories, seller_pkh)
@@ -144,50 +157,69 @@ validator auction {
         // Chỉ được update khi chưa có ai đặt giá
         let is_no_bids_yet = datum.highest_bid == None
 
-        expect Some(continuing_output) =
-          list.find(tx.outputs, fn(out) { out.address == own_address })
+        // Duy nhất 1 continuing output gửi lại Script
+        expect [continuing_output] =
+          list.filter(tx.outputs, fn(out) { out.address == own_address })
 
         expect InlineDatum(raw_datum) = continuing_output.datum
         expect output_datum: AuctionDatum = raw_datum
 
         let is_datum_updated_correctly =
-          output_datum.seller == datum.seller && output_datum.deadline == datum.deadline && output_datum.min_bid == new_price && output_datum.nft == datum.nft && output_datum.highest_bid == None
+          output_datum.seller == datum.seller && output_datum.deadline == datum.deadline && output_datum.min_bid == new_price && output_datum.min_increment == datum.min_increment && output_datum.nft == datum.nft && output_datum.highest_bid == None
 
-        is_signed_by_seller && is_before_deadline && is_no_bids_yet && is_datum_updated_correctly
+        // Bảo toàn tài sản: continuing_output phải chứa NFT
+        let is_asset_preserved =
+          value_geq(continuing_output.value, from_asset_list(datum.nft))
+
+        is_only_one_input_from_script && is_signed_by_seller && is_before_deadline && is_no_bids_yet && is_datum_updated_correctly && is_asset_preserved
       }
 
       // -----------------------------------------------------------------
-      // 3. Cancel: Người bán hủy đấu giá trước deadline (khi chưa có ai trả giá)
+      // 3. Cancel: Người bán hủy đấu giá (khi chưa có ai trả giá, không giới hạn thời gian)
       // -----------------------------------------------------------------
       Cancel -> {
+        expect Some(own_input) = find_input(tx.inputs, input)
+        let own_address = own_input.output.address
+
+        // a. Chống Double Satisfaction
+        let is_only_one_input_from_script =
+          when inputs_at(tx.inputs, own_address) is {
+            [_] -> True
+            _ -> False
+          }
+
         expect Some(seller_pkh) = address_pub_key(datum.seller)
         let is_signed_by_seller = key_signed(tx.extra_signatories, seller_pkh)
 
-        let is_before_deadline =
-          interval.is_entirely_before(tx.validity_range, datum.deadline)
-
+        // Chỉ được hủy khi chưa có ai đặt giá (trước hay sau deadline đều được)
         let is_no_bids_yet = datum.highest_bid == None
 
-        is_signed_by_seller && is_before_deadline && is_no_bids_yet
+        is_only_one_input_from_script && is_signed_by_seller && is_no_bids_yet
       }
 
       // -----------------------------------------------------------------
-      // 4. Close: Kết thúc đấu giá sau deadline và phân bổ tài sản
+      // 4. Close: Kết thúc đấu giá sau deadline và phân bổ cho người thắng cuộc
       // -----------------------------------------------------------------
       Close -> {
-        // a. Thời gian: Giao dịch phải diễn ra TRỌN VẸN SAU deadline
+        expect Some(own_input) = find_input(tx.inputs, input)
+        let own_address = own_input.output.address
+
+        // a. Chống Double Satisfaction: Chỉ tiêu thụ duy nhất 1 UTxO từ hợp đồng này trong TX
+        let is_only_one_input_from_script =
+          when inputs_at(tx.inputs, own_address) is {
+            [_] -> True
+            _ -> False
+          }
+
+        // b. Thời gian: Giao dịch phải diễn ra TRỌN VẸN SAU deadline
         let is_after_deadline =
           interval.is_entirely_after(tx.validity_range, datum.deadline)
 
-        // b. Phân bổ tài sản tùy theo có người thắng hay không
+        // c. Phân bổ tài sản: Bắt buộc phải có người thắng cuộc.
+        //    (Nếu không ai bid, Seller phải dùng nhánh Cancel để thu hồi tài sản, ngăn kẻ lạ bòn rút min-ADA)
         let is_asset_distributed =
           when datum.highest_bid is {
-            // Trường hợp 1: Không ai đặt giá -> Trả NFT về cho Seller
-            None ->
-              get_all_value_to(tx.outputs, datum.seller)
-                |> value_geq(from_asset_list(datum.nft))
-
-            // Trường hợp 2: Có người thắng -> Gửi NFT cho Winner, Gửi ADA cho Seller
+            None -> False
             Some(winner_state) -> {
               let is_nft_sent_to_winner =
                 get_all_value_to(tx.outputs, winner_state.bidder)
@@ -201,7 +233,7 @@ validator auction {
             }
           }
 
-        is_after_deadline && is_asset_distributed
+        is_only_one_input_from_script && is_after_deadline && is_asset_distributed
       }
     }
   }
@@ -210,3 +242,4 @@ validator auction {
     fail
   }
 }
+
