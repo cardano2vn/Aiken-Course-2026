@@ -3,7 +3,6 @@ import { APP_NETWORK } from "../constants/enviroments";
 import { deserializeAddress, mConStr0, mConStr1, stringToHex, CIP68_222, CIP68_100, hexToString } from "@meshsdk/core";
 import { koiosFetcher } from "@/providers/cardano";
 import { AssetDetails, AssetType } from "@/types";
-import { convertToKeyValue } from "@/lib/utils";
 
 export class MeshTxBuilder extends MeshAdapter {
     /**
@@ -27,40 +26,52 @@ export class MeshTxBuilder extends MeshAdapter {
         receiver?: string;
     }): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-        const utxo = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + CIP68_100(stringToHex(assetName)));
+        const mintAmount = Number(quantity);
+        if (!Number.isSafeInteger(mintAmount) || mintAmount <= 0) {
+            throw new Error("Mint quantity must be a positive whole number.");
+        }
+        if (!assetName.trim()) {
+            throw new Error("Asset name is required.");
+        }
+        if (stringToHex(assetName).length > 56) {
+            throw new Error("Asset name must be 28 bytes or fewer.");
+        }
+
+        const refAssetUnit = this.policyId + CIP68_100(stringToHex(assetName));
+        const existingReference = await this.getAddressUTXOAsset(this.spendAddress, refAssetUnit);
+        if (existingReference) {
+            throw new Error("An asset with this name already exists under this policy.");
+        }
+
+        const issuerHash = deserializeAddress(walletAddress).pubKeyHash;
+        if (!issuerHash) {
+            throw new Error("Wallet address does not contain a payment key hash.");
+        }
+
         const unsignedTx = this.meshTxBuilder;
 
-        if (utxo) {
-            unsignedTx
-                .mintPlutusScriptV3()
-                .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
-                .mintingScript(this.mintScriptCbor)
-                .mintRedeemerValue(mConStr0([]))
-                .txOut(receiver ? receiver : walletAddress, [{ unit: this.policyId + CIP68_222(stringToHex(assetName)), quantity: quantity }]);
-        } else {
-            unsignedTx
-                .mintPlutusScriptV3()
-                .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
-                .mintingScript(this.mintScriptCbor)
-                .mintRedeemerValue(mConStr0([]))
-                .txOut(receiver ? receiver : walletAddress, [
-                    {
-                        unit: this.policyId + CIP68_222(stringToHex(assetName)),
-                        quantity: quantity,
-                    },
-                ])
-                .mintPlutusScriptV3()
-                .mint("1", this.policyId, CIP68_100(stringToHex(assetName)))
-                .mintingScript(this.mintScriptCbor)
-                .mintRedeemerValue(mConStr0([]))
-                .txOut(this.spendAddress, [
-                    {
-                        unit: this.policyId + CIP68_100(stringToHex(assetName)),
-                        quantity: "1",
-                    },
-                ])
-                .txOutInlineDatumValue(this.metadataToCip68(metadata));
-        }
+        unsignedTx
+            .mintPlutusScriptV3()
+            .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
+            .mintingScript(this.mintScriptCbor)
+            .mintRedeemerValue(mConStr0([]))
+            .txOut(receiver ? receiver : walletAddress, [
+                {
+                    unit: this.policyId + CIP68_222(stringToHex(assetName)),
+                    quantity: quantity,
+                },
+            ])
+            .mintPlutusScriptV3()
+            .mint("1", this.policyId, CIP68_100(stringToHex(assetName)))
+            .mintingScript(this.mintScriptCbor)
+            .mintRedeemerValue(mConStr0([]))
+            .txOut(this.spendAddress, [
+                {
+                    unit: this.policyId + CIP68_100(stringToHex(assetName)),
+                    quantity: "1",
+                },
+            ])
+            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash));
         unsignedTx
             .txOut(this.platformAddress, [
                 {
@@ -86,6 +97,10 @@ export class MeshTxBuilder extends MeshAdapter {
      */
     burn = async ({ assetName, quantity }: { assetName: string; quantity: string }): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
+        const burnAmount = Number(quantity);
+        if (!Number.isSafeInteger(burnAmount) || burnAmount >= 0) {
+            throw new Error("Burn quantity must be a negative whole number.");
+        }
 
         const unsignedTx = this.meshTxBuilder;
         const utxoRef = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + CIP68_100(stringToHex(assetName)));
@@ -108,7 +123,11 @@ export class MeshTxBuilder extends MeshAdapter {
             );
         }, 0);
 
-        if (-Number(quantity) === amount) {
+        if (-burnAmount > amount) {
+            throw new Error("Burn quantity exceeds the wallet balance.");
+        }
+
+        if (-burnAmount === amount) {
             unsignedTx
                 .mintPlutusScriptV3()
                 .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
@@ -174,6 +193,11 @@ export class MeshTxBuilder extends MeshAdapter {
             throw new Error("No Reference Asset Exists");
         }
 
+        const issuerHash = deserializeAddress(walletAddress).pubKeyHash;
+        if (!issuerHash) {
+            throw new Error("Wallet address does not contain a payment key hash.");
+        }
+
         unsignedTx
             .spendingPlutusScriptV3()
             .txIn(utxoRef.input.txHash, utxoRef.input.outputIndex)
@@ -186,7 +210,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     quantity: "1",
                 },
             ])
-            .txOutInlineDatumValue(this.metadataToCip68(metadata));
+            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash));
 
         unsignedTx
             .txOut(this.platformAddress, [
@@ -234,7 +258,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     if (keyHex && valueHex) {
                         const key = hexToString(keyHex);
                         const value = hexToString(valueHex);
-                        metadata[key] = value;
+                        metadata[key] = key === "author" ? valueHex : value;
                     }
                 }
             });
@@ -272,7 +296,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     if (keyHex && valueHex) {
                         const key = hexToString(keyHex);
                         const value = hexToString(valueHex);
-                        metadata[key] = value;
+                        metadata[key] = key === "author" ? valueHex : value;
                     }
                 }
             });

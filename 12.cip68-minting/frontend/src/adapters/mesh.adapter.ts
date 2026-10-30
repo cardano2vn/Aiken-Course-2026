@@ -1,12 +1,12 @@
 import {
     applyParamsToScript,
+    Data,
     deserializeAddress,
     IEvaluator,
     IFetcher,
     mConStr0,
     MeshTxBuilder,
     MeshWallet,
-    mPubKeyAddress,
     PlutusScript,
     resolveScriptHash,
     scriptAddress,
@@ -14,6 +14,7 @@ import {
     serializePlutusScript,
     UTxO,
     deserializeDatum,
+    stringToHex,
 } from "@meshsdk/core";
 import plutus from "../../contract/plutus.json";
 import { Plutus } from "../types";
@@ -103,11 +104,20 @@ export class MeshAdapter {
      */
     public initalize = async () => {
         this.issuerAddress = await this.meshWallet.getChangeAddress();
+        const issuer = deserializeAddress(this.issuerAddress).pubKeyHash;
+        const platform = deserializeAddress(this.platformAddress);
+        const platformHash = platform.pubKeyHash;
+        const platformStakeHash = platform.stakeCredentialHash || platformHash;
+
+        if (!issuer || !platformHash || !platformStakeHash) {
+            throw new Error("Issuer and platform must be payment/stake key addresses.");
+        }
+
         this.spendCompileCode = this.readValidator(plutus as Plutus, title.spend);
         this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, [
             this.platformFee,
-            mPubKeyAddress(deserializeAddress(this.issuerAddress).pubKeyHash, deserializeAddress(this.issuerAddress).stakeCredentialHash),
-            mPubKeyAddress(deserializeAddress(this.platformAddress).pubKeyHash, deserializeAddress(this.platformAddress).stakeCredentialHash),
+            issuer,
+            platformHash,
         ]);
         this.spendScript = {
             code: this.spendScriptCbor,
@@ -116,7 +126,7 @@ export class MeshAdapter {
         this.spendAddress = serializeAddressObj(
             scriptAddress(
                 deserializeAddress(serializePlutusScript(this.spendScript, undefined, APP_NETWORK_ID, false).address).scriptHash,
-                deserializeAddress(this.platformAddress).stakeCredentialHash,
+                platformStakeHash,
                 false,
             ),
             APP_NETWORK_ID,
@@ -125,9 +135,10 @@ export class MeshAdapter {
         this.mintCompileCode = this.readValidator(plutus as Plutus, title.mint);
         this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
             this.platformFee,
-            mPubKeyAddress(deserializeAddress(this.issuerAddress).pubKeyHash, deserializeAddress(this.issuerAddress).stakeCredentialHash),
-            mPubKeyAddress(deserializeAddress(this.platformAddress).pubKeyHash, deserializeAddress(this.platformAddress).stakeCredentialHash),
-            mPubKeyAddress(deserializeAddress(this.spendAddress).scriptHash, deserializeAddress(this.spendAddress).stakeCredentialHash),
+            issuer,
+            platformHash,
+            deserializeAddress(this.spendAddress).scriptHash,
+            platformStakeHash,
         ]);
         this.mintScript = {
             code: this.mintScriptCbor,
@@ -252,8 +263,11 @@ export class MeshAdapter {
         })[0];
     };
 
-    protected metadataToCip68 = (metadata: Record<string, string>): any => {
-        const results = Object.entries(metadata).map(([key, value]) => mConStr0([key, value]));
+    protected metadataToCip68 = (metadata: Record<string, string>, author: string): Data => {
+        const results: Data[] = Object.entries(metadata)
+            .filter(([key]) => key !== "author")
+            .map(([key, value]) => mConStr0([stringToHex(key), stringToHex(value)]));
+        results.push(mConStr0([stringToHex("author"), author]));
 
         return mConStr0([results, 1]);
     };

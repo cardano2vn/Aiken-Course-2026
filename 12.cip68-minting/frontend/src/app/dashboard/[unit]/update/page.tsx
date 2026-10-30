@@ -31,6 +31,7 @@ export default function UpdateMetadataPage() {
     const [step, setStep] = useState(1);
     const [isUpdating, setIsUpdating] = useState(false);
     const [txHash, setTxHash] = useState("");
+    const [txError, setTxError] = useState("");
     const [metadata, setMetadata] = useState<MetadataField[]>([]);
 
     useEffect(() => {
@@ -39,10 +40,9 @@ export default function UpdateMetadataPage() {
             return;
         }
 
-        const entries = Object.entries(data.onchain_metadata as Record<string, string>).map(([key, value]) => ({
-            key,
-            value: String(value),
-        }));
+        const entries = Object.entries(data.onchain_metadata as Record<string, string>)
+            .filter(([key]) => key !== "author")
+            .map(([key, value]) => ({ key, value: String(value) }));
 
         setMetadata(entries.length > 0 ? entries : [{ key: "", value: "" }]);
     }, [data?.onchain_metadata]);
@@ -67,26 +67,32 @@ export default function UpdateMetadataPage() {
 
     const handleUpdate = async () => {
         setIsUpdating(true);
-        const payload = metadata.reduce(
-            (acc, item) => {
-                const key = item.key.trim();
-                if (!key) return acc;
-                acc[key] = item.value.trim();
-                return acc;
-            },
-            {} as Record<string, string>,
-        );
+        setTxError("");
+        try {
+            const payload = metadata.reduce(
+                (acc, item) => {
+                    const key = item.key.trim();
+                    if (!key || key === "author") return acc;
+                    acc[key] = item.value.trim();
+                    return acc;
+                },
+                {} as Record<string, string>,
+            );
 
-        const unsignedTx = await update({
-            address: address as string,
-            metadata: payload,
-            assetName: hexToString(String(data?.asset_name).slice(8)),
-        });
-        const signedTx = await signTx(unsignedTx);
-        const txHash = await submitTx(signedTx);
-        setTxHash(txHash);
-        setIsUpdating(false);
-        next();
+            const unsignedTx = await update({
+                address: address as string,
+                metadata: payload,
+                assetName: hexToString(String(data?.asset_name).slice(8)),
+            });
+            const signedTx = await signTx(unsignedTx);
+            const submittedTxHash = await submitTx(signedTx);
+            setTxHash(submittedTxHash);
+            next();
+        } catch (error) {
+            setTxError(error instanceof Error ? error.message : "Metadata update failed.");
+        } finally {
+            setIsUpdating(false);
+        }
     };
 
     const progress = (step / 4) * 100;
@@ -148,6 +154,11 @@ export default function UpdateMetadataPage() {
                     </div>
 
                     <div className="rounded-[1.8rem] border border-slate-200/80 bg-white/80 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 md:p-8">
+                        {txError && (
+                            <p role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                {txError}
+                            </p>
+                        )}
                         {step === 1 && (
                             <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
                                 <div className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-slate-100 shadow-sm dark:border-slate-800 dark:bg-slate-950">

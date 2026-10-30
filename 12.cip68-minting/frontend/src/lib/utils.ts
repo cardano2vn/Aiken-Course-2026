@@ -101,7 +101,7 @@ export function convertDatum(plutusData: string): Record<string, string> {
             if (!keyHex || !valueHex) return;
 
             const key = Buffer.from(keyHex, "hex").toString("utf8");
-            const value = Buffer.from(valueHex, "hex").toString("utf8");
+            const value = key === "author" ? valueHex : Buffer.from(valueHex, "hex").toString("utf8");
 
             metadata[key] = value;
         });

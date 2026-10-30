@@ -19,6 +19,7 @@ export default function Page() {
     const [showBurnModal, setShowBurnModal] = useState(false);
     const [burnQuantity, setBurnQuantity] = useState<string>("1");
     const [isBurning, setIsBurning] = useState(false);
+    const [burnError, setBurnError] = useState("");
     const [expandedTxHash, setExpandedTxHash] = useState<string | null>(null);
 
     const { data, isLoading, error } = useQuery({
@@ -26,7 +27,8 @@ export default function Page() {
         queryFn: async () =>
             await getAsset({ policyId: String(unit).slice(0, 56), assetName: String(unit).slice(56), walletAddress: address as string }),
         enabled: !!address,
-        
+    });
+
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
     const {
@@ -92,15 +94,17 @@ export default function Page() {
     const handleBurn = async function () {
         try {
             setIsBurning(true);
+            setBurnError("");
             const unsignedTx = await burn({
                 address: address as string,
                 assetName: hexToString(String(data?.asset_name).slice(8)),
-                quantity: "-1",
+                quantity: String(-Number(burnQuantity)),
             });
             const signedTx = await signTx(unsignedTx);
-            const txHash = await submitTx(signedTx);
+            await submitTx(signedTx);
+            setShowBurnModal(false);
         } catch (error) {
-            console.log(error);
+            setBurnError(error instanceof Error ? error.message : "Burn transaction failed.");
         } finally {
             setIsBurning(false);
         }
@@ -241,6 +245,12 @@ export default function Page() {
                                                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Max: {data?.quantity}</p>
                                             </div>
 
+                                            {burnError && (
+                                                <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                                    {burnError}
+                                                </p>
+                                            )}
+
                                             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
                                                 This action cannot be undone. The NFT will be permanently removed from the chain after burn.
                                             </div>
@@ -255,6 +265,12 @@ export default function Page() {
                                                 </button>
                                                 <button
                                                     onClick={handleBurn}
+                                                    disabled={
+                                                        isBurning ||
+                                                        !Number.isSafeInteger(Number(burnQuantity)) ||
+                                                        Number(burnQuantity) <= 0 ||
+                                                        Number(burnQuantity) > Number(data?.quantity || 0)
+                                                    }
                                                     className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-4 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-800"
                                                 >
                                                     {isBurning ? <>Burning...</> : <>Confirm Burn</>}

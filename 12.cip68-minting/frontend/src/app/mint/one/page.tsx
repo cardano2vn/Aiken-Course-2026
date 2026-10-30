@@ -24,7 +24,7 @@ const defaultMetadata: MetadataField[] = [
     { key: "name", value: "Solvel Dragon #001" },
     { key: "description", value: "A powerful dragon from the Solvel universe." },
     { key: "image", value: "https://via.placeholder.com/600x600.png?text=Solvel+Dragon" },
-    { key: "mediaType", value: "image/png" },
+    { key: "media_type", value: "image/png" },
 ];
 
 export default function Page() {
@@ -39,6 +39,7 @@ export default function Page() {
     const [step, setStep] = useState<number>(1);
     const [isMinting, setIsMinting] = useState(false);
     const [txHash, setTxHash] = useState<string>("");
+    const [txError, setTxError] = useState("");
 
     const [formData, setFormData] = useState<FormData>({
         assetName: "",
@@ -46,7 +47,7 @@ export default function Page() {
         metadata: defaultMetadata,
     });
 
-    const updateForm = (field: keyof Omit<FormData, "metadata">, value: any) => {
+    const updateForm = <K extends keyof Omit<FormData, "metadata">>(field: K, value: FormData[K]) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
@@ -81,26 +82,32 @@ export default function Page() {
 
     const handleMint = async () => {
         setIsMinting(true);
-        const unsignedTx = await mint({
-            address: address as string,
-            assetName: formData.assetName,
-            metadata: formData.metadata.reduce(
-                (acc, item) => {
-                    const key = item.key.trim();
-                    if (!key) return acc;
-                    acc[key] = item.value.trim();
-                    return acc;
-                },
-                {} as Record<string, string>,
-            ),
-            quantity: String(formData.quantity),
-        });
-        const signedTx = await signTx(unsignedTx);
-        const hash = await submitTx(signedTx);
+        setTxError("");
+        try {
+            const unsignedTx = await mint({
+                address: address as string,
+                assetName: formData.assetName,
+                metadata: formData.metadata.reduce(
+                    (acc, item) => {
+                        const key = item.key.trim();
+                        if (!key) return acc;
+                        acc[key] = item.value.trim();
+                        return acc;
+                    },
+                    {} as Record<string, string>,
+                ),
+                quantity: String(formData.quantity),
+            });
+            const signedTx = await signTx(unsignedTx);
+            const hash = await submitTx(signedTx);
 
-        setTxHash(hash);
-        setIsMinting(false);
-        next();
+            setTxHash(hash);
+            next();
+        } catch (error) {
+            setTxError(error instanceof Error ? error.message : "Mint transaction failed.");
+        } finally {
+            setIsMinting(false);
+        }
     };
 
     const previewImage = formData.metadata.find((m) => m.key === "image")?.value || "";
@@ -161,6 +168,11 @@ export default function Page() {
                     </div>
 
                     <div className="rounded-[1.8rem] border border-slate-200/80 bg-white/80 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 md:p-8">
+                        {txError && (
+                            <p role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                {txError}
+                            </p>
+                        )}
                         {step === 1 && (
                             <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
                                 <div className="space-y-6">
@@ -225,7 +237,7 @@ export default function Page() {
                                         <h2 className="mt-2 text-2xl font-semibold">Shape the metadata payload</h2>
                                     </div>
                                     <div className="rounded-[1.1rem] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                        Follow CIP-25 / CIP-68 conventions — keys like name, description, image, and mediaType are recognized by most
+                                        Follow CIP-68 conventions — keys like name, description, image, and media_type are recognized by most
                                         wallets and explorers.
                                     </div>
                                     <div className="rounded-[1.1rem] border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
