@@ -3,7 +3,6 @@ import {
     deserializeAddress,
     IFetcher,
     MeshTxBuilder,
-    MeshWallet,
     PlutusScript,
     resolveScriptHash,
     scriptAddress,
@@ -17,6 +16,7 @@ import { Plutus } from "../types";
 import { title } from "../constants/common";
 import { APP_NETWORK_ID } from "../constants/enviroments";
 import { convertDatum } from "@/lib/utils";
+import type { WalletContext } from "@/types/wallet";
 
 /**
  * @description
@@ -36,7 +36,7 @@ export class MeshAdapter {
     protected mintScriptCbor: string;
 
     protected fetcher: IFetcher;
-    protected meshWallet: MeshWallet;
+    protected walletContext?: WalletContext;
     protected meshTxBuilder!: MeshTxBuilder;
 
     /**
@@ -47,10 +47,10 @@ export class MeshAdapter {
      * - Script addresses
      * - Policy ID resolution
      *
-     * @param {MeshWallet} meshWallet - Active Mesh wallet instance to connect.
+     * @param {WalletContext} walletContext - Account UTxOs and addresses from the connected browser wallet.
      */
-    constructor({ meshWallet = null! }: { meshWallet: MeshWallet }) {
-        this.meshWallet = meshWallet;
+    constructor({ walletContext }: { walletContext?: WalletContext }) {
+        this.walletContext = walletContext;
         this.fetcher = blockfrostProvider;
 
         this.spendCompileCode = this.readValidator(plutus as Plutus, title.crowdfund);
@@ -87,7 +87,7 @@ export class MeshAdapter {
      *
      * Flow:
      * 1. Get all wallet UTxOs.
-     * 2. Ensure collateral exists (create one if missing).
+     * 2. Select collateral from the account UTxOs.
      * 3. Get wallet change address.
      *
      * @returns {Promise<{ utxos: UTxO[]; collateral: UTxO; walletAddress: string }>}
@@ -101,17 +101,17 @@ export class MeshAdapter {
         collateral: UTxO;
         walletAddress: string;
     }> => {
-        const utxos = await this.meshWallet.getUtxos();
-        const collaterals =
-            (await this.meshWallet.getCollateral()).length === 0 ? [await this.getCollateral()] : await this.meshWallet.getCollateral();
-        const walletAddress = await this.meshWallet.getChangeAddress();
+        const walletContext = this.walletContext;
+        if (!walletContext) throw new Error("A connected wallet is required to build a transaction.");
+
+        const { utxos, collaterals = [], changeAddress: walletAddress } = walletContext;
         if (!utxos || utxos.length === 0) throw new Error("No UTXOs found in getWalletForTx method.");
-
-        if (!collaterals || collaterals.length === 0) this.meshWallet.createCollateral();
-
         if (!walletAddress) throw new Error("No wallet address found in getWalletForTx method.");
 
-        return { utxos, collateral: collaterals[0], walletAddress };
+        const collateral = [...collaterals, ...utxos].find((utxo) => this.isCollateral(utxo));
+        if (!collateral) throw new Error("A collateral UTxO with at least 5 ADA is required.");
+
+        return { utxos, collateral, walletAddress };
     };
 
     /**
@@ -218,18 +218,15 @@ export class MeshAdapter {
      * @returns {Promise<UTxO>}
      *          A UTxO that can be used as collateral.
      */
-    protected getCollateral = async (): Promise<UTxO> => {
-        const utxos = await this.meshWallet.getUtxos();
-        return utxos.filter((utxo) => {
-            const amount = utxo.output.amount;
-            return (
-                Array.isArray(amount) &&
-                amount.length === 1 &&
-                amount[0].unit === "lovelace" &&
-                typeof amount[0].quantity === "string" &&
-                Number(amount[0].quantity) >= 5_000_000
-            );
-        })[0];
+    protected isCollateral = (utxo: UTxO): boolean => {
+        const amount = utxo.output.amount;
+        return (
+            Array.isArray(amount) &&
+            amount.length === 1 &&
+            amount[0].unit === "lovelace" &&
+            typeof amount[0].quantity === "string" &&
+            Number(amount[0].quantity) >= 5_000_000
+        );
     };
 
     /**

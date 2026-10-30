@@ -5,6 +5,7 @@ import { deserializeAddress, type UTxO } from "@meshsdk/core";
 import type { BrowserWallet } from "@meshsdk/wallet";
 import { DECIMAL_PLACE } from "@/constants/common";
 import { reclaim } from "@/actions/crowdfund.action";
+import { getWalletContext } from "@/lib/wallet";
 
 interface Props {
     wallet: BrowserWallet;
@@ -37,7 +38,7 @@ export default function ReclaimPanel({ wallet, address, campaignUtxo, datum, onS
         setTxHash(null);
         try {
             const unsignedTx: string = await reclaim({
-                address: await wallet.getChangeAddress(),
+                walletContext: await getWalletContext(wallet),
                 campaignRef: campaignUtxo.input,
             });
             const signedTx = await wallet.signTx(unsignedTx);

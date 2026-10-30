@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { UTxO } from "@meshsdk/common";
 import type { BrowserWallet } from "@meshsdk/wallet";
 import { withdraw } from "@/actions/crowdfund.action";
+import { getWalletContext } from "@/lib/wallet";
 
 interface Props {
     wallet: BrowserWallet;
@@ -35,15 +36,8 @@ export default function WithdrawPanel({ wallet, address, campaignUtxo, datum, on
         setError(null);
         setTxHash(null);
         try {
-            const [unusedAddresses, usedAddresses] = await Promise.all([wallet.getUnusedAddresses(), wallet.getUsedAddresses()]);
-            const changeAddress = [...unusedAddresses, ...usedAddresses].find((candidate) => candidate !== datum.beneficiary);
-            if (!changeAddress) {
-                throw new Error("Your wallet did not provide another address for transaction change. Use a wallet with an additional address and retry.");
-            }
-
             const unsignedTx: string = await withdraw({
-                address: await wallet.getChangeAddress(),
-                changeAddress,
+                walletContext: await getWalletContext(wallet),
                 campaignRef: campaignUtxo.input,
             });
             const signedTx = await wallet.signTx(unsignedTx);

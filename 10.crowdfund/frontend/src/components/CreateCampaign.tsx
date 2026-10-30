@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { BrowserWallet } from "@meshsdk/wallet";
 import { DECIMAL_PLACE } from "@/constants/common";
 import { create } from "@/actions/crowdfund.action";
+import { getWalletContext } from "@/lib/wallet";
 
 interface Props {
     wallet: BrowserWallet;
@@ -34,7 +35,7 @@ export default function CreateCampaign({ wallet, onSuccess }: Props) {
             if (campaignDepositLovelace < 2 * DECIMAL_PLACE) throw new Error("Campaign deposit must be >= 2 ADA");
 
             const unsignedTx = await create({
-                address: await wallet.getChangeAddress(),
+                walletContext: await getWalletContext(wallet),
                 beneficiary,
                 goal: Number(goalAda) * DECIMAL_PLACE,
                 deadline: deadlinePosixMs,
