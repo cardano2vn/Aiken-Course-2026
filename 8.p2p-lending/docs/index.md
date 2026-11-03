@@ -20,7 +20,7 @@ Tài liệu học tập của Module 8 gồm ba bài, đi theo đúng mạch c�
    - [Video 8.2: On-chain Code và Cơ chế xử lý khoản vay](https://www.youtube.com/watch?v=knmcMDFqMCI)
    - Phân tích `Create`, `Fund`, `Repay`, `Cancel`, `Liquidate` trong Aiken.
    - Kiểm tra signer, identity token, value, datum và validity range.
-   - Đọc test và phân biệt điều validator bảo đảm với điều demo chưa bảo đảm.
+   - Đọc unit test và property-based test; phân biệt điều test kiểm tra với điều chưa được bảo đảm.
 3. [Bài 3: Off-chain, frontend và vòng đời dApp](./bai_giang_3.md)
    - [Video 8.3: Off-chain, Frontend & DApp Lifecycle](https://www.youtube.com/watch?v=e2M5BssueF8)
    - Đọc state từ UTxO, chuyển Plutus datum thành dữ liệu UI.

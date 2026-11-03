@@ -343,8 +343,130 @@ Không đưa private key/mnemonic vào frontend hoặc log. Chỉ dùng testnet 
 7. Dùng explorer so sánh transaction Create/Fund/Repay với sơ đồ value ở Bài 1.
 8. Viết bảng cho mỗi action gồm: script input, wallet inputs, script output, user outputs, mint/burn, redeemer, signer và validity interval.
 
-## 16. Tổng kết
+## 16. Ghi nhớ trước walkthrough
 
 Off-chain biến ý định của người dùng thành transaction cụ thể, frontend giúp người dùng hiểu state và wallet giữ khóa để ký. Dữ liệu loan được đọc từ UTxO, giải mã từ inline datum và định danh bằng reference/token. Builder cần kiểm tra state và dựng đúng output, signer, redeemer, collateral input và validity range; sau submit, ứng dụng cần theo dõi xác nhận và query lại state thay vì tin vào bản UI cũ. Validator vẫn là trọng tài cuối cùng của mỗi transition.
+
+## 17. Walkthrough end-to-end: Alice tạo, Bob fund, Alice repay
+
+Phần này nối các hàm builder với những gì người dùng nhìn thấy. Giả sử Alice tạo yêu cầu vay `10 ADA`, rate `500 bps` (5%), duration `24 giờ`, collateral `1` native asset. Bob dùng một ví khác để fund.
+
+### Bước 1: Alice điền form
+
+UI bắt đầu với các giá trị dạng người dùng đọc được. Khi submit, form đổi:
+
+```text
+10 ADA  → 10_000_000 lovelace
+5%      → 500 basis points
+24 giờ  → 86_400_000 milliseconds
+```
+
+Form kiểm tra số nguyên dương, số tiền nằm trong phạm vi an toàn, collateral amount không vượt balance và asset đã load. Nếu ví chưa kết nối hoặc asset chưa chọn, UI không tạo transaction. Những kiểm tra này giúp báo lỗi sớm; cùng điều kiện vẫn cần được xác thực lại ở builder/validator.
+
+### Bước 2: Builder tạo transaction unsigned
+
+`create` không chỉ thêm một output. Nó cần chọn seed UTxO, dùng seed để dẫn xuất asset name, mint identity token và đóng gói datum. Ngoài loan output, transaction còn có wallet inputs trả phí/change và collateral input dành cho Plutus.
+
+Mô hình trước khi ký:
+
+```text
+Mint:  +1 identity token
+Output script:
+  5 ADA theo builder hiện tại + 1 collateral native asset + 1 identity token
+  inline datum Pending của Alice
+```
+
+Con số 5 ADA hiện được ghi trực tiếp trong builder để cấp ADA cho loan output. Đây là lựa chọn của demo, không phải phép tính protocol-min-ADA động; output thực tế cần tuân theo protocol parameters và kích thước datum.
+
+Transaction chưa ký chưa thể được xem là loan đã tạo. Khi giao diện gọi `wallet.signTx(unsignedTx, true)`, ví sẽ cho người dùng xem và ký; sau đó `submitTx` gửi bản đã ký tới provider.
+
+### Bước 3: Loan xuất hiện trong market
+
+Khi provider/indexer đã nhận ra output, `getLoans` query các UTxO tại script address. Nó lọc identity token, decode inline datum rồi tạo Loan model kèm `txHash` và `outputIndex`. LoanList nhóm status Pending; LoanCard hiển thị terms và nút phù hợp với địa chỉ ví đang kết nối.
+
+Danh sách market là snapshot tại thời điểm query. Nếu Alice hoặc người khác vừa gửi transaction nhưng indexer chưa cập nhật, UI có thể tạm thời hiển thị dữ liệu cũ. Vì vậy, button state không phải lock hay reservation trên chain.
+
+### Bước 4: Bob fund
+
+Bob bấm Fund từ loan card. Server action nhận địa chỉ Bob và loan reference, khởi tạo builder, query lại UTxO theo reference rồi decode datum hiện tại. Nếu UTxO đã bị tiêu hoặc status không còn Pending, builder throw lỗi thay vì lặng lẽ build theo dữ liệu cũ.
+
+Nếu còn Pending, builder chuẩn bị:
+
+```text
+Script input: loan Pending + inline datum + redeemer Fund
+Script output: loan Active, lender=Bob, dueDate được tính
+User output: ít nhất 10 ADA cho Alice
+ADA của script output: builder hiện tăng thêm 1 ADA so với input
+Validity: lower/upper finite, upper - lower <= giới hạn validator
+Wallet: Bob ký; collateral input và phí được chọn riêng
+```
+
+Bob ký và submit. Nếu một lender khác tiêu cùng loan trước khi transaction Bob được xác nhận, giao dịch Bob không thể tiêu lại cùng input. UI cần thông báo loan đã thay đổi và tải lại market.
+
+### Bước 5: Alice xem khoản phải trả
+
+Khi loan Active, UI tính:
+
+```text
+principal = 10 ADA
+interest  = 10 ADA × 500 / 10_000 = 0.5 ADA
+repayment = 10.5 ADA
+```
+
+LoanCard có thể hiển thị tổng dự kiến, lender và due date. Giá trị đó là phép tính tiện ích; builder tính lại từ datum lúc tạo transaction để tránh dựa vào số cũ trên client.
+
+### Bước 6: Alice repay trước hạn
+
+Builder kiểm tra loan reference còn UTxO, borrower khớp ví, status Active và lender/due date tồn tại. Nó chọn validity range kết thúc không muộn hơn due date, dựng input script `Repay`, output 10.5 ADA cho Bob, trả collateral cùng 5 ADA theo cấu hình builder hiện tại cho Alice và burn identity token. Validator kiểm tra collateral quantity được trả đủ, nhưng không buộc output borrower phải đúng 5 ADA; khoản ADA đó là lựa chọn dựng output của builder.
+
+Sau khi submit, giao diện nên nói đúng rằng transaction đã được gửi/đang chờ xác nhận. Khi dữ liệu chain/indexer đã cập nhật, loan biến mất khỏi danh sách Active vì không còn script UTxO mang identity token đó.
+
+### Nếu Alice không repay?
+
+Sau hạn, chỉ lender Bob mới có thể liquidate theo validator. Builder đặt lower bound sau due date, tạo output collateral cho Bob và burn identity token. Bấm nút trước hạn không thể “ép” validator chấp nhận; transaction sẽ thất bại nếu validity bounds chưa qua mốc hoặc sai signer.
+
+## 18. Bảng theo dõi transaction ở từng tầng
+
+| Pha | Frontend | Off-chain / builder | Wallet | Validator / chain |
+|---|---|---|---|---|
+| Query loan | Hiển thị Loading/error/data | Query address UTxO, lọc token, decode datum | Không tham gia | Chỉ cung cấp state đã xác nhận cho truy vấn |
+| Build | Gọi action, hiển thị Building | Chọn input/output, redeemer, signer, bounds, phí | Chưa ký | Chưa chạy validator |
+| Review/sign | Chờ kết quả | Trả unsigned transaction | Người dùng xem và ký bằng khóa trong ví | Chưa xác nhận |
+| Submit | Nhận hash, báo đang gửi | Submit bản signed qua provider | Phê duyệt gửi | Node kiểm tra transaction/script |
+| Confirm/refresh | Cập nhật card/list và trạng thái | Query lại loan UTxO | Không tham gia | Ledger ghi nhận transaction nếu hợp lệ |
+
+Ranh giới này giúp chẩn đoán lỗi:
+
+- **Không có loan trong list:** query, provider, policy filter hoặc datum decoder.
+- **Không build được:** state stale, thiếu UTxO/collateral, lỗi chuyển đổi dữ liệu hoặc evaluator.
+- **Ví không ký được:** user từ chối, network sai, wallet không đủ quyền/UTxO.
+- **Submit bị từ chối:** kiểm tra transaction body, validity, collateral input và lỗi provider.
+- **Script validation fail:** đối chiếu datum/redeemer/signer/value/time với validator.
+- **Submit thành công nhưng chưa thấy update:** chờ confirmation/indexer rồi refresh; không gửi giao dịch lặp lại ngay khi chưa rõ trạng thái.
+
+## 19. Đọc log/lỗi theo cách có hệ thống
+
+Khi transaction không thành công, đừng chỉ thử bấm lại. Hãy lưu thông tin có thể tái hiện mà không lộ bí mật:
+
+1. Action và loan reference (transaction hash, output index).
+2. Network và thời điểm gửi.
+3. Loan state/datum đã đọc, có thể rút gọn địa chỉ nếu chia sẻ ra ngoài.
+4. Inputs, outputs, mint/burn và validity bounds trong transaction body.
+5. Lỗi evaluator hoặc provider đầy đủ.
+6. Kết quả query lại: loan UTxO còn tồn tại hay đã bị tiêu.
+
+Không ghi mnemonic, private key, wallet seed phrase hoặc dữ liệu ký nhạy cảm vào log. Cũng không nên hiển thị provider API key cho client khi phân tích lỗi. Trước khi retry, xác minh transaction hash/reference và trạng thái UTxO để tránh nhầm transaction đã submit nhưng indexer cập nhật chậm với transaction chưa được gửi.
+
+## 20. Bài kiểm tra sau walkthrough
+
+Với ví dụ Alice/Bob ở mục 17, hãy tự trả lời:
+
+1. Vì sao Alice cần một seed UTxO ngoài loan output?
+2. Trong Fund, transaction nào chuyển principal và transaction nào tiếp tục giữ collateral?
+3. Tại sao builder query lại UTxO theo reference sau khi người dùng bấm nút?
+4. Nếu ví hiển thị network khác Preprod, ở lớp nào cần chặn trước khi ký?
+5. Alice ký Repay nhưng due date đã qua: điều kiện nào thất bại và action nào có thể còn phù hợp?
+6. Wallet báo submit thành công nhưng loan card chưa đổi: nêu hai khả năng khác nhau và cách phân biệt.
+7. Có thể dùng collateral UTxO 5 ADA của transaction thay cho native asset collateral trong loan không? Vì sao hai UTxO này có mục đích khác nhau?
 
 **Hoàn tất Module 8:** quay lại [mục lục bài học](./index.md) và thử triển khai một loan end-to-end trên Preprod.

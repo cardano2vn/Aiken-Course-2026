@@ -249,8 +249,104 @@ Một mô hình lending production cần nhiều phân tích ngoài luồng giao
 7. Vì sao token identity không thể được dùng thay cho datum để lưu toàn bộ điều khoản?
 8. Hãy nêu ba kiểm soát cần bổ sung trước khi biến demo thành sản phẩm có giá trị thực.
 
-## 10. Tổng kết
+## 10. Ghi nhớ trước tình huống thực hành
 
 P2P Lending của module là một state machine trên EUTxO. Borrower tạo Pending loan và khóa collateral; lender có thể cấp vốn để chuyển loan sang Active; khoản vay kết thúc bằng repayment, cancellation hoặc liquidation. Datum mang state, redeemer chọn action, identity token nhận diện loan, còn validator kiểm tra luật chuyển state. Frontend và off-chain giúp người dùng tương tác thuận tiện, nhưng tính đúng đắn cuối cùng phụ thuộc transaction được ledger xác minh.
+
+## 11. Ví dụ xuyên suốt: theo dấu một khoản vay từ lúc tạo tới lúc đóng
+
+Giả sử Alice là borrower, Bob là lender. Alice đề nghị vay `20 ADA`, lãi suất `750 bps`, thời hạn `12 giờ`, và khóa `1` đơn vị native asset làm collateral.
+
+### 11.1. Chuẩn hóa điều khoản
+
+Trước khi builder dựng transaction, dữ liệu người dùng nhập được chuyển về đơn vị mà datum sử dụng:
+
+| Trường | Người dùng nhập | Giá trị lưu trên chain |
+|---|---:|---:|
+| Principal | 20 ADA | `20_000_000` lovelace |
+| Lãi suất | 7.5% | `750` bps |
+| Thời hạn | 12 giờ | `43_200_000` ms |
+| Collateral | 1 token | Policy ID, asset name và quantity `1` |
+| Borrower | Địa chỉ Alice | `Address` |
+| Lender / due date | Chưa có lender | `None` / `None` |
+
+Tỷ lệ được quy đổi theo `100 bps = 1%`, còn giờ được nhân với `3_600_000` để ra mili giây. Khi kiểm tra bằng tay, nên ghi riêng giá trị hiển thị và giá trị serialized để tránh lẫn ADA với lovelace hoặc phần trăm với bps.
+
+### 11.2. Giao dịch tạo Pending loan
+
+Alice chọn collateral và ký một transaction `Create`. Transaction đó tiêu seed UTxO để tạo identity token; loan output mới được đặt tại lending script address:
+
+```text
+Loan UTxO #1
+  value: 5 ADA theo builder hiện tại + 1 collateral token + 1 identity token
+  datum: borrower=Alice, lender=None, principal=20_000_000,
+         rate=750, duration=43_200_000, due_date=None
+```
+
+Builder hiện đang đặt 5 ADA vào output Create. Đây là giá trị dự phòng được hard-code cho demo, không nên hiểu là mức minimum-ADA chính xác cho mọi kích thước datum hoặc mọi protocol parameters. Sau khi xác nhận, market có thể hiển thị yêu cầu này là Pending. Tuy vậy, UI không nên xem loan là hợp lệ chỉ vì Alice thấy một unsigned transaction hoặc vì ví đã mở màn hình ký; phải đợi transaction được submit và dữ liệu mạng cập nhật.
+
+### 11.3. Giao dịch Bob cấp vốn
+
+Bob đọc datum, xác nhận đây là yêu cầu mình muốn fund rồi ký transaction. Transaction tiêu Loan UTxO #1 và tạo Loan UTxO #2 với cùng identity token/collateral, nhưng datum đổi lender thành Bob và thêm due date. Song song, Bob trả principal cho Alice:
+
+```text
+Input:
+  Loan UTxO #1 (Pending)
+  Bob's wallet inputs (phí, principal, transaction collateral)
+
+Outputs:
+  Loan UTxO #2 (Active, cùng loan identity/collateral, ADA không giảm)
+  Alice nhận ít nhất 20 ADA principal
+  Loan output được builder tăng thêm 1 ADA trong implementation hiện tại
+  Change của Bob
+```
+
+Thời hạn bắt đầu từ upper bound của validity range mà transaction Fund khai báo. Nếu giao dịch được chấp nhận, thời hạn không thể bị Alice tự đặt lại trong datum: `Fund` chỉ được thay lender và due date; validator buộc các terms còn lại giữ nguyên.
+
+### 11.4. Repayment nếu Alice trả đúng hạn
+
+Ở mức tính theo code hiện tại:
+
+```text
+interest       = 20_000_000 × 750 / 10_000
+               = 1_500_000 lovelace = 1.5 ADA
+
+total repayment = 20_000_000 + 1_500_000
+                = 21_500_000 lovelace = 21.5 ADA
+```
+
+Alice ký `Repay`. Loan UTxO #2 bị tiêu; Bob nhận ít nhất 21.5 ADA; Alice nhận lại collateral; identity token bị burn. Loan không còn một continuing output ở lending script address, vì vậy nó đã đóng.
+
+### 11.5. Nếu Alice không trả đúng hạn
+
+Sau due date, Bob là lender được phép ký `Liquidate`. Giao dịch tiêu Loan UTxO #2, trả collateral cho Bob và burn identity token. Demo không tự động bán token, xác định giá thị trường hay chuyển đổi token thành ADA; “thanh lý” ở đây chỉ là chuyển collateral tới địa chỉ lender theo luật on-chain.
+
+### 11.6. Nếu loan chưa được fund
+
+Nếu Bob chưa fund, Alice có thể ký `Cancel`. Loan UTxO Pending bị tiêu, collateral được trả lại Alice và identity token bị burn. Không có khoản principal hay repayment vì loan chưa chuyển sang Active.
+
+### Điều ví dụ này minh họa
+
+- Mỗi transition tiêu state UTxO trước và tạo output mới hoặc đóng state.
+- Datum Active xác định lender và due date; terms đã đề nghị vẫn được giữ nguyên.
+- Principal được chuyển lúc Fund, nhưng không nằm trong loan UTxO.
+- Collateral chỉ được trả khi loan đóng bằng Cancel/Repay/Liquidate.
+- Chữ ký chứng minh đúng vai trò, nhưng chữ ký đơn lẻ không thay mọi điều kiện về state, asset và thời gian.
+- Asset collateral được trả về lender khi liquidation, không có đảm bảo giá trị kinh tế tương đương principal.
+
+## 12. Cách tự phân tích một transaction
+
+Khi xem transaction trên explorer, hãy dùng thứ tự sau:
+
+1. **Tìm input loan:** script address, tx hash và output index có khớp loan đang xem không?
+2. **Đọc datum cũ:** Pending hay Active? Ai là borrower/lender? Điều khoản là gì?
+3. **Nhận diện action:** redeemer nào gắn với spending input? Có mint/burn token đi kèm không?
+4. **Kiểm tra signer:** chữ ký nào cần thiết cho action này và có được đưa vào transaction không?
+5. **Đọc validity interval:** mốc bắt đầu/kết thúc có nằm đúng phía của due date không?
+6. **Đối chiếu value:** ai nhận principal, repayment và collateral? Tổng amount qua các output có đủ không?
+7. **Đọc output state:** Fund có giữ token/collateral và cập nhật đúng datum không? Action đóng loan có để lại script output không?
+8. **Phân biệt gửi với xác nhận:** tx hash là dấu hiệu đã submit; trạng thái xác nhận cần được kiểm tra riêng.
+
+Tập phân tích này giúp nối Bài 1 (mô hình) với Bài 2 (validator) và Bài 3 (builder). Mỗi giao dịch thành công là một bằng chứng cụ thể của một transition, không chỉ là một lần bấm nút trên UI.
 
 **Đọc tiếp:** [Bài 2: On-chain code và cơ chế xử lý khoản vay](./bai_giang_2.md).

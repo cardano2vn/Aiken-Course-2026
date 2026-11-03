@@ -283,8 +283,109 @@ Khi review smart contract, luôn phân biệt “validator đã kiểm tra” v�
 6. Thêm test cho rate rất lớn và thảo luận vì sao cần product-level bound.
 7. Dùng bảng action ở mục 9 để ghi lại tất cả inputs, outputs, signatures và mint cho một giao dịch Repay.
 
-## 13. Tổng kết
+## 13. Property-based test: kiểm tra một quy tắc trên nhiều dữ liệu
 
-On-chain code không chỉ kiểm tra action name; nó xác minh toàn bộ state transition trong transaction context. `Create` thiết lập identity và collateral; `Fund` chuyển Pending thành Active; `Repay`, `Cancel` và `Liquidate` đóng loan theo đúng vai trò, tài sản, thời hạn và token. Học cách viết test cho happy path, negative path và các ranh giới là bước quan trọng trước khi tin vào validator.
+Phần này đi sâu vào property test đang có trong [tests/p2plending.ak](../onchain/validators/tests/p2plending.ak). Property-based testing khác test ví dụ thông thường ở cách tạo dữ liệu: thay vì tự viết một bộ giá trị cố định, test khai báo miền dữ liệu và một mệnh đề phải luôn đúng với mọi trường hợp được sinh trong miền đó.
+
+### 13.1. Property test hiện có trong repo
+
+Đầu file test có hàm tính lãi và property sau:
+
+```aiken
+fn calculate_interest(principal: Int, interest_rate: Int) -> Int {
+  principal * interest_rate / 10000
+}
+
+test prop_interest_always_non_negative(
+  (principal, rate) via fuzz.both(
+    fuzz.int_between(1, 1_000_000_000),
+    fuzz.int_between(0, 10000),
+  ),
+) {
+  let interest = calculate_interest(principal, rate)
+  interest >= 0
+}
+```
+
+Đọc từng phần:
+
+1. `fuzz.int_between(1, 1_000_000_000)` sinh principal nguyên dương trong miền đã chọn.
+2. `fuzz.int_between(0, 10000)` sinh interest rate từ 0 tới 10,000 bps, tức từ 0% tới 100%.
+3. `fuzz.both(...)` ghép một principal và một rate thành cặp đầu vào `(principal, rate)`.
+4. Tên `prop_interest_always_non_negative` mô tả mệnh đề muốn kiểm tra.
+5. Body tính `interest`, rồi trả về điều kiện `interest >= 0`. Nếu một trường hợp sinh ra làm điều kiện sai, property test thất bại để người phát triển điều tra.
+
+Ví dụ cụ thể trong miền đó: principal `1_000_000_000` lovelace và rate `1_000` bps cho lãi `100_000_000` lovelace; principal nhỏ nhất `1` cùng rate `0` cho lãi `0`.
+
+### 13.2. Property test này chứng minh gì — và không chứng minh gì?
+
+Property hiện tại kiểm tra một tính chất số học hẹp: với các đầu vào trong miền đã nêu, công thức nhân rồi chia nguyên không cho kết quả âm. Nó hữu ích để minh họa `fuzz`, nhưng cần đọc đúng giới hạn:
+
+- Hàm `calculate_interest` được khai báo riêng trong file test; property này không gọi trực tiếp helper bên trong validator vì validator hiện tự tính công thức ở nhánh `Repay`.
+- Property không dựng transaction và không gọi `p2plending.p2plending.spend`.
+- Nó không kiểm tra lender nhận đúng khoản trả, borrower ký, validity range hay collateral được trả.
+- Rate chỉ được fuzz tới 10,000; test không nói gì về các rate lớn hơn miền này.
+- Kết quả không chứng minh công thức tài chính hay loan design an toàn; nó chỉ hỗ trợ một invariant đã chọn.
+
+Vì thế, mô tả chính xác là: “property test xác nhận lãi không âm trong miền principal/rate được fuzz”, chứ không phải “property test chứng minh nhánh Repay an toàn”.
+
+### 13.3. So sánh test ví dụ và property test
+
+| Đặc điểm | Unit/example test | Property-based test |
+|---|---|---|
+| Dữ liệu | Thường do tác giả đặt rõ trong test | Sinh theo generator và miền được khai báo |
+| Mục đích | Kiểm tra một transaction cụ thể, thường là happy/negative path | Tìm trường hợp làm vi phạm một quy tắc tổng quát |
+| Ví dụ trong repo | `fund_fail_without_lender_signature` | `prop_interest_always_non_negative` |
+| Phần được kiểm tra | Validator với datum, redeemer và transaction giả lập | Công thức lãi riêng trong test |
+| Giới hạn chính | Có thể bỏ sót biến thể input khác | Chỉ có giá trị trong miền và mệnh đề đã mô tả |
+
+Unit test và property test bổ sung cho nhau. Property test tốt không làm mất nhu cầu viết các test cụ thể cho quy tắc quyền hạn, UTxO, token, output và thời gian.
+
+### 13.4. Các property đáng bổ sung cho phép tính lãi
+
+Trước khi thêm test, cần xác định rõ miền đầu vào. Ví dụ, nếu policy sản phẩm quyết định rate tối đa là 10,000 bps, có thể xem xét các tính chất sau cho `principal > 0`:
+
+1. **Không âm:** `interest >= 0` khi `rate >= 0`.
+2. **Rate bằng 0:** `interest == 0` khi `rate == 0`.
+3. **Không vượt principal trong miền rate 0–10,000:** `interest <= principal`.
+4. **Tổng trả không thấp hơn principal:** `repayment >= principal`.
+5. **Rate tăng không làm lãi giảm:** với cùng principal và `rate_a <= rate_b`, lãi theo `rate_a` không vượt lãi theo `rate_b`.
+6. **Đơn vị:** `100` bps tương ứng 1% theo phép tính integer hiện tại; cần test riêng các giá trị có phép chia dư để khóa cách làm tròn xuống.
+
+Đây là đề xuất cho test suite, không phải tất cả đều đã được triển khai. Đặc biệt, mệnh đề 3 chỉ đúng với miền rate tới 100%; nếu sản phẩm cho phép rate cao hơn thì phải thay giới hạn hoặc không áp dụng property đó.
+
+### 13.5. Mở rộng từ số học sang property transaction
+
+Một bước nâng cao là tạo generator cho loan datum Pending/Active và transaction mock. Khi đó có thể định nghĩa property dạng:
+
+- Với Pending loan, thay borrower/lender/terms không đúng quyền phải làm validator từ chối action tương ứng.
+- Với `Fund` thành công, datum output chỉ khác input ở lender và due date; identity token/collateral vẫn được giữ.
+- Với Active loan, nếu `upper_bound <= due_date` và các điều kiện khác hợp lệ thì Repay có thể qua; nếu bound vượt hạn thì phải bị từ chối.
+- Với Liquidate, nếu `lower_bound <= due_date` thì phải từ chối; nếu `lower_bound > due_date` vẫn cần đúng lender, collateral output và burn token.
+- Với action đóng loan thành công, không được còn continuing output mang loan identity ở script address.
+
+Đây không phải những property “miễn phí”: generator phải dựng input/output/value nhất quán để thất bại đến từ invariant đang thử, không phải lỗi tạo fixture. Nên bắt đầu bằng một biến thể gần happy path, cố ý thay đúng một thuộc tính, rồi mới tổng quát hóa generator.
+
+### 13.6. Quy trình chạy và phân tích lỗi
+
+Trong thư mục `onchain/`, chạy:
+
+```bash
+aiken check
+```
+
+Khi property thất bại:
+
+1. Ghi lại input được fuzz tạo ra và xác định nó nằm trong miền generator nào.
+2. Kiểm tra property có đúng với yêu cầu nghiệp vụ không; đôi khi test kỳ vọng mới là sai.
+3. Rút gọn trường hợp thất bại thành test cố định để dễ tái hiện và debug.
+4. Nếu lỗi là bug, sửa logic on-chain rồi giữ regression test.
+5. Nếu thay đổi miền generator hoặc mệnh đề, cập nhật giải thích để người đọc không hiểu nhầm phạm vi bảo đảm.
+
+Test Aiken hiện tại bao gồm một property số học và các ví dụ transaction cho Create/Fund/Repay/Cancel/Liquidate. Cụ thể, Fund có cả happy path và trường hợp thiếu lender signature; các action còn lại có ví dụ thành công. Vì vậy, các negative case về biên thời gian, asset/value sai và datum bị sửa vẫn là phần bài tập cần bổ sung, không nên xem là đã được bao phủ.
+
+## 14. Tổng kết
+
+On-chain code không chỉ kiểm tra action name; nó xác minh toàn bộ state transition trong transaction context. `Create` thiết lập identity và collateral; `Fund` chuyển Pending thành Active; `Repay`, `Cancel` và `Liquidate` đóng loan theo đúng vai trò, tài sản, thời hạn và token. Ví dụ transaction test kiểm tra các luồng cụ thể; property test kiểm tra mệnh đề tổng quát trên miền dữ liệu đã chọn. Muốn đánh giá độ bao phủ, cần nêu rõ chính xác property nào đang được kiểm tra, miền đầu vào và những điều nó chưa chứng minh.
 
 **Đọc tiếp:** [Bài 3: Off-chain, frontend và vòng đời dApp](./bai_giang_3.md).
