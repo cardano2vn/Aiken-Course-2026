@@ -8,6 +8,7 @@ import { MdArrowLeft, MdCheckCircle, MdAdd, MdDeleteOutline } from "react-icons/
 import { CircleLoader } from "react-spinners";
 import { mint } from "@/actions/cip68.action";
 import { useWallet } from "@/hooks/use-wallet";
+import { assetNameByteLength, paymentKeyHashOf } from "@/utils/cip68";
 
 type MetadataField = {
     key: string;
@@ -16,7 +17,6 @@ type MetadataField = {
 
 type FormData = {
     assetName: string;
-    quantity: number;
     metadata: MetadataField[];
 };
 
@@ -43,13 +43,8 @@ export default function Page() {
 
     const [formData, setFormData] = useState<FormData>({
         assetName: "",
-        quantity: 1,
         metadata: defaultMetadata,
     });
-
-    const updateForm = <K extends keyof Omit<FormData, "metadata">>(field: K, value: FormData[K]) => {
-        setFormData((prev) => ({ ...prev, [field]: value }));
-    };
 
     const updateMetadata = (index: number, field: "key" | "value", value: string) => {
         setFormData((prev) => {
@@ -96,7 +91,6 @@ export default function Page() {
                     },
                     {} as Record<string, string>,
                 ),
-                quantity: String(formData.quantity),
             });
             const signedTx = await signTx(unsignedTx);
             const hash = await submitTx(signedTx);
@@ -133,6 +127,17 @@ export default function Page() {
                             <p className="mt-3 text-base leading-7 text-slate-600 dark:text-slate-400">
                                 Fill in the asset details, shape the metadata, review the payload, and sign the transaction to mint your NFT.
                             </p>
+                            <p className="mt-3 text-sm leading-6 text-blue-700 dark:text-blue-300">
+                                Each connected wallet is the issuer for its own policy. The same asset name under another issuer&apos;s policy is a
+                                different asset; names are not globally reserved.
+                            </p>
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950/60">
+                                <p className="font-medium">Issuer payment key hash</p>
+                                <p className="mt-1 break-all font-mono">{paymentKeyHashOf(address) || "Connect a wallet to identify the issuer."}</p>
+                                <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                    This key determines the policy ID and store address. Only the recorded author can update or burn the pair.
+                                </p>
+                            </div>
                         </div>
                         <div className="rounded-[1.2rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
                             <p className="font-medium">Asset name</p>
@@ -180,7 +185,7 @@ export default function Page() {
                                         <p className="text-sm font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
                                             Step 1 · Asset Info
                                         </p>
-                                        <h2 className="mt-2 text-3xl font-semibold">Name and quantity of the NFT you want to mint</h2>
+                                        <h2 className="mt-2 text-3xl font-semibold">Name your NFT</h2>
                                     </div>
 
                                     <div>
@@ -190,26 +195,23 @@ export default function Page() {
                                         <input
                                             type="text"
                                             value={formData.assetName}
-                                            onChange={(e) => updateForm("assetName", e.target.value)}
+                                            onChange={(e) => setFormData((prev) => ({ ...prev, assetName: e.target.value }))}
                                             placeholder="Hydra Course 2026"
                                             className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-slate-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                                         />
-                                    </div>
-
-                                    <div>
-                                        <label className="mb-2 block text-sm font-medium text-slate-600 dark:text-slate-300">Quantity to mint</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            value={formData.quantity}
-                                            onChange={(e) => updateForm("quantity", Math.max(1, Number(e.target.value)))}
-                                            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-slate-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                        />
+                                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                            {assetNameByteLength(formData.assetName)} / 28 UTF-8 bytes
+                                        </p>
+                                        {assetNameByteLength(formData.assetName) > 28 && (
+                                            <p role="alert" className="mt-1 text-sm text-red-600 dark:text-red-400">
+                                                Asset name must be 28 UTF-8 bytes or fewer.
+                                            </p>
+                                        )}
                                     </div>
 
                                     <button
                                         onClick={next}
-                                        disabled={!formData.assetName.trim()}
+                                        disabled={!formData.assetName.trim() || assetNameByteLength(formData.assetName) > 28}
                                         className="rounded-2xl bg-blue-600 px-8 py-4 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                                     >
                                         Continue →
@@ -221,7 +223,7 @@ export default function Page() {
                                     <ul className="mt-3 space-y-2">
                                         <li>• The asset name will be encoded to hex when stored on-chain</li>
                                         <li>• CIP-68 keeps metadata flexible and easy to update later</li>
-                                        <li>• Quantity controls how many units of this asset are minted</li>
+                                        <li>• Mint always creates exactly one user token and one reference token</li>
                                     </ul>
                                 </div>
                             </div>
@@ -325,8 +327,8 @@ export default function Page() {
                                             <span className="font-mono text-blue-600 dark:text-blue-400">{formData.assetName || "—"}</span>
                                         </div>
                                         <div className="mb-4 flex items-center justify-between text-sm">
-                                            <span className="text-slate-500 dark:text-slate-400">Quantity</span>
-                                            <span className="font-semibold text-slate-900 dark:text-white">{formData.quantity}</span>
+                                            <span className="text-slate-500 dark:text-slate-400">CIP-68 pair</span>
+                                            <span className="font-semibold text-slate-900 dark:text-white">1 user token + 1 reference token</span>
                                         </div>
                                         <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">Metadata</p>
                                         <pre className="max-h-80 overflow-auto whitespace-pre-wrap wrap-break-word rounded-[1rem] bg-slate-900 p-4 font-mono text-sm text-slate-100 dark:bg-slate-950">
@@ -448,7 +450,6 @@ export default function Page() {
                                             setTxHash("");
                                             setFormData({
                                                 assetName: "",
-                                                quantity: 1,
                                                 metadata: defaultMetadata,
                                             });
                                         }}

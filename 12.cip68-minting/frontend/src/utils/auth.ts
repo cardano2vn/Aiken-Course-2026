@@ -1,19 +1,29 @@
 "use server";
 
-import { isNil } from "lodash";
-import { generateNonce } from "@meshsdk/core";
+import { cookies } from "next/headers";
+import { deserializeAddress, generateNonce } from "@meshsdk/core";
+import { APP_NETWORK } from "@/constants/enviroments";
+import { AUTH_NONCE_COOKIE_NAME } from "@/constants/common";
 import { parseError } from "@/utils/error/parse-error";
 
 export const getNonceAddress = async (address: string) => {
     try {
-        if (isNil(address)) {
-            throw new Error("Stake address is required");
+        if (!address?.trim()) {
+            throw new Error("Wallet address is required.");
+        }
+        if (!deserializeAddress(address).pubKeyHash) {
+            throw new Error("A payment-key wallet address is required.");
         }
 
-        if (!/^[a-z0-9_]+$/.test(address)) {
-            throw new Error("Invalid address");
-        }
-        const nonce = generateNonce("Signin with Hydra Tipjar");
+        const nonce = generateNonce(`CIP-68 wallet login\nAddress: ${address}\nNetwork: ${APP_NETWORK}\n`);
+        (await cookies()).set(AUTH_NONCE_COOKIE_NAME, nonce, {
+            httpOnly: true,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            maxAge: 5 * 60,
+            path: "/api/auth",
+        });
+
         return {
             data: nonce,
             result: true,

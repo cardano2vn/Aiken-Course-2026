@@ -9,12 +9,10 @@ export async function mint({
     address,
     assetName,
     metadata,
-    quantity,
 }: {
     address: string;
     assetName: string;
     metadata: Record<string, string>;
-    quantity: string;
 }) {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
@@ -34,7 +32,6 @@ export async function mint({
 
     return await meshTxBuilder.mint({
         assetName: assetName,
-        quantity: quantity,
         metadata: metadata,
     });
 }
@@ -73,11 +70,9 @@ export async function update({
 export async function burn({
     address,
     assetName,
-    quantity,
 }: {
     address: string;
     assetName: string;
-    quantity: string;
 }) {
     const meshWallet = new MeshWallet({
         accountIndex: 0,
@@ -97,6 +92,5 @@ export async function burn({
 
     return await meshTxBuilder.burn({
         assetName: assetName,
-        quantity: quantity,
     });
 }

@@ -3,41 +3,79 @@ import { APP_NETWORK } from "../constants/enviroments";
 import { deserializeAddress, mConStr0, mConStr1, stringToHex, CIP68_222, CIP68_100, hexToString } from "@meshsdk/core";
 import { koiosFetcher } from "@/providers/cardano";
 import { AssetDetails, AssetType } from "@/types";
+import { assetNameByteLength } from "@/utils/cip68";
+
+type Cip68AssetDetails = Pick<AssetDetails, "policy_id" | "asset_name" | "quantity" | "onchain_metadata"> & {
+    total_supply: string;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    typeof value === "object" && value !== null ? value as Record<string, unknown> : undefined;
+
+const parseCip68AssetDetails = (value: unknown): Cip68AssetDetails => {
+    const asset = asRecord(value);
+    if (!asset || typeof asset.policy_id !== "string" || typeof asset.asset_name !== "string" || typeof asset.total_supply !== "string") {
+        throw new Error("Koios returned invalid asset information.");
+    }
+
+    const metadata: Record<string, string> = {};
+    const versionedMetadata = asRecord(asRecord(asset.cip68_metadata)?.["100"]);
+    const fields = versionedMetadata?.fields;
+    const firstField = Array.isArray(fields) ? asRecord(fields[0]) : undefined;
+    const entries = firstField?.list;
+
+    if (Array.isArray(entries)) {
+        entries.forEach((entry) => {
+            const entryFields = asRecord(entry)?.fields;
+            if (!Array.isArray(entryFields) || entryFields.length < 2) return;
+
+            const keyHex = asRecord(entryFields[0])?.bytes;
+            const valueHex = asRecord(entryFields[1])?.bytes;
+            if (typeof keyHex !== "string" || typeof valueHex !== "string") return;
+
+            const key = hexToString(keyHex);
+            const value = hexToString(valueHex);
+            metadata[key] = key === "author" ? valueHex : value;
+        });
+    }
+
+    return {
+        policy_id: asset.policy_id,
+        asset_name: asset.asset_name,
+        quantity: asset.total_supply,
+        total_supply: asset.total_supply,
+        onchain_metadata: metadata,
+    };
+};
 
 export class MeshTxBuilder extends MeshAdapter {
     /**
      * @method Mint
-     * @description Mint Asset (NFT/Token) with CIP68
+     * @description Mint one user token and one reference token with CIP-68
      * @param assetName - string
      * @param metadata - Record<string, string>
-     * @param quantity - string
      *
      * @returns unsignedTx
      */
     mint = async ({
         assetName,
         metadata,
-        quantity,
         receiver,
     }: {
         assetName: string;
         metadata: Record<string, string>;
-        quantity: string;
         receiver?: string;
     }): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-        const mintAmount = Number(quantity);
-        if (!Number.isSafeInteger(mintAmount) || mintAmount <= 0) {
-            throw new Error("Mint quantity must be a positive whole number.");
-        }
         if (!assetName.trim()) {
             throw new Error("Asset name is required.");
         }
-        if (stringToHex(assetName).length > 56) {
+        if (assetNameByteLength(assetName) > 28) {
             throw new Error("Asset name must be 28 bytes or fewer.");
         }
 
-        const refAssetUnit = this.policyId + CIP68_100(stringToHex(assetName));
+        const assetNameHex = stringToHex(assetName);
+        const refAssetUnit = this.policyId + CIP68_100(assetNameHex);
         const existingReference = await this.getAddressUTXOAsset(this.spendAddress, refAssetUnit);
         if (existingReference) {
             throw new Error("An asset with this name already exists under this policy.");
@@ -52,22 +90,22 @@ export class MeshTxBuilder extends MeshAdapter {
 
         unsignedTx
             .mintPlutusScriptV3()
-            .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
+            .mint("1", this.policyId, CIP68_222(assetNameHex))
             .mintingScript(this.mintScriptCbor)
             .mintRedeemerValue(mConStr0([]))
             .txOut(receiver ? receiver : walletAddress, [
                 {
-                    unit: this.policyId + CIP68_222(stringToHex(assetName)),
-                    quantity: quantity,
+                    unit: this.policyId + CIP68_222(assetNameHex),
+                    quantity: "1",
                 },
             ])
             .mintPlutusScriptV3()
-            .mint("1", this.policyId, CIP68_100(stringToHex(assetName)))
+            .mint("1", this.policyId, CIP68_100(assetNameHex))
             .mintingScript(this.mintScriptCbor)
             .mintRedeemerValue(mConStr0([]))
             .txOut(this.spendAddress, [
                 {
-                    unit: this.policyId + CIP68_100(stringToHex(assetName)),
+                    unit: this.policyId + CIP68_100(assetNameHex),
                     quantity: "1",
                 },
             ])
@@ -89,33 +127,34 @@ export class MeshTxBuilder extends MeshAdapter {
 
     /**
      * @method Burn
-     * @description Burn Asset (NFT/Token) with CIP68
+     * @description Burn the complete CIP-68 pair
      * @param assetName - string
-     * @param quantity - string
      *
      * @returns unsignedTx
      */
-    burn = async ({ assetName, quantity }: { assetName: string; quantity: string }): Promise<string> => {
+    burn = async ({ assetName }: { assetName: string }): Promise<string> => {
         const { utxos, walletAddress, collateral } = await this.getWalletForTx();
-        const burnAmount = Number(quantity);
-        if (!Number.isSafeInteger(burnAmount) || burnAmount >= 0) {
-            throw new Error("Burn quantity must be a negative whole number.");
+        if (!assetName.trim()) {
+            throw new Error("Asset name is required.");
         }
 
         const unsignedTx = this.meshTxBuilder;
-        const utxoRef = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + CIP68_100(stringToHex(assetName)));
+        const assetNameHex = stringToHex(assetName);
+        const refUnit = this.policyId + CIP68_100(assetNameHex);
+        const userUnit = this.policyId + CIP68_222(assetNameHex);
+        const utxoRef = await this.getAddressUTXOAsset(this.spendAddress, refUnit);
 
         if (!utxoRef) {
-            throw new Error("Cannot find proposal from Treasury");
+            throw new Error("Reference token not found in the store.");
         }
 
-        const utxoUser = await this.getAddressUTXOAssets(walletAddress, this.policyId + CIP68_222(stringToHex(assetName)));
+        const utxoUser = await this.getAddressUTXOAssets(walletAddress, userUnit);
 
         const amount = utxoUser.reduce((amount, utxos) => {
             return (
                 amount +
                 utxos.output.amount.reduce((amt, utxo) => {
-                    if (utxo.unit === this.policyId + CIP68_222(stringToHex(assetName))) {
+                    if (utxo.unit === userUnit) {
                         return amt + Number(utxo.quantity);
                     }
                     return amt;
@@ -123,41 +162,24 @@ export class MeshTxBuilder extends MeshAdapter {
             );
         }, 0);
 
-        if (-burnAmount > amount) {
-            throw new Error("Burn quantity exceeds the wallet balance.");
+        if (amount !== 1) {
+            throw new Error("Burning a CIP-68 asset requires holding its single user token.");
         }
 
-        if (-burnAmount === amount) {
-            unsignedTx
-                .mintPlutusScriptV3()
-                .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
-                .mintRedeemerValue(mConStr1([]))
-                .mintingScript(this.mintScriptCbor)
-
-                .mintPlutusScriptV3()
-                .mint("-1", this.policyId, CIP68_100(stringToHex(assetName)))
-                .mintRedeemerValue(mConStr1([]))
-                .mintingScript(this.mintScriptCbor)
-
-                .spendingPlutusScriptV3()
-                .txIn(utxoRef.input.txHash, utxoRef.input.outputIndex)
-                .txInInlineDatumPresent()
-                .txInRedeemerValue(mConStr1([]))
-                .txInScript(this.spendScriptCbor);
-        } else {
-            unsignedTx
-                .mintPlutusScriptV3()
-                .mint(quantity, this.policyId, CIP68_222(stringToHex(assetName)))
-                .mintRedeemerValue(mConStr1([]))
-                .mintingScript(this.mintScriptCbor)
-
-                .txOut(walletAddress, [
-                    {
-                        unit: this.policyId + CIP68_222(stringToHex(assetName)),
-                        quantity: String(amount + Number(quantity)),
-                    },
-                ]);
-        }
+        unsignedTx
+            .mintPlutusScriptV3()
+            .mint("-1", this.policyId, CIP68_222(assetNameHex))
+            .mintRedeemerValue(mConStr1([]))
+            .mintingScript(this.mintScriptCbor)
+            .mintPlutusScriptV3()
+            .mint("-1", this.policyId, CIP68_100(assetNameHex))
+            .mintRedeemerValue(mConStr1([]))
+            .mintingScript(this.mintScriptCbor)
+            .spendingPlutusScriptV3()
+            .txIn(utxoRef.input.txHash, utxoRef.input.outputIndex)
+            .txInInlineDatumPresent()
+            .txInRedeemerValue(mConStr1([]))
+            .txInScript(this.spendScriptCbor);
 
         unsignedTx
             .txOut(this.platformAddress, [
@@ -179,7 +201,6 @@ export class MeshTxBuilder extends MeshAdapter {
      * @description Update Asset (NFT/Token) with CIP68
      * @param assetName - string
      * @param metadata - Record<string, string>
-     * @param txHash - string
      * @returns
      */
     update = async ({ assetName, metadata }: { assetName: string; metadata: Record<string, string> }): Promise<string> => {
@@ -190,7 +211,7 @@ export class MeshTxBuilder extends MeshAdapter {
         const utxoRef = await this.getAddressUTXOAsset(this.spendAddress, this.policyId + CIP68_100(stringToHex(assetName)));
 
         if (!utxoRef) {
-            throw new Error("No Reference Asset Exists");
+            throw new Error("Reference token not found in the store.");
         }
 
         const issuerHash = deserializeAddress(walletAddress).pubKeyHash;
@@ -242,34 +263,11 @@ export class MeshTxBuilder extends MeshAdapter {
         const asset_list = assetsSlice.map((asset) => {
             return [asset.policy_id, asset.asset_name];
         });
-        const data = await koiosFetcher.fetchAssetsInfo(asset_list);
-        const assetDetails: AssetDetails[] = data.map((asset: any) => {
-            const metadata: Record<string, string> = {};
-
-            if (!asset.cip68_metadata?.["100"]?.fields[0]?.list || !Array.isArray(asset.cip68_metadata?.["100"]?.fields[0].list)) {
-                return metadata;
-            }
-
-            asset.cip68_metadata?.["100"]?.fields[0].list.forEach((item: any) => {
-                if (item.fields && Array.isArray(item.fields) && item.fields.length >= 2) {
-                    const keyHex = item.fields[0]?.bytes;
-                    const valueHex = item.fields[1]?.bytes;
-
-                    if (keyHex && valueHex) {
-                        const key = hexToString(keyHex);
-                        const value = hexToString(valueHex);
-                        metadata[key] = key === "author" ? valueHex : value;
-                    }
-                }
-            });
-
-            return {
-                policy_id: asset.policy_id,
-                asset_name: asset.asset_name,
-                total_supply: asset.total_supply,
-                onchain_metadata: metadata,
-            };
-        });
+        const response: unknown = await koiosFetcher.fetchAssetsInfo(asset_list);
+        if (!Array.isArray(response)) {
+            throw new Error("Koios returned invalid asset information.");
+        }
+        const assetDetails = response.map(parseCip68AssetDetails);
         return {
             total_item: total,
             data: assetDetails,
@@ -280,34 +278,14 @@ export class MeshTxBuilder extends MeshAdapter {
     };
 
     asset = async ({ policyId, assetName }: { policyId: string; assetName: string }) => {
-        const data = await koiosFetcher.fetchAssetsInfo([[policyId, assetName]]);
-        const assetDetails: AssetDetails[] = data.map((asset: any) => {
-            const metadata: Record<string, string> = {};
-
-            if (!asset.cip68_metadata?.["100"]?.fields[0]?.list || !Array.isArray(asset.cip68_metadata?.["100"]?.fields[0].list)) {
-                return metadata;
-            }
-
-            asset.cip68_metadata?.["100"]?.fields[0].list.forEach((item: any) => {
-                if (item.fields && Array.isArray(item.fields) && item.fields.length >= 2) {
-                    const keyHex = item.fields[0]?.bytes;
-                    const valueHex = item.fields[1]?.bytes;
-
-                    if (keyHex && valueHex) {
-                        const key = hexToString(keyHex);
-                        const value = hexToString(valueHex);
-                        metadata[key] = key === "author" ? valueHex : value;
-                    }
-                }
-            });
-
-            return {
-                policy_id: asset.policy_id,
-                asset_name: asset.asset_name,
-                total_supply: asset.total_supply,
-                onchain_metadata: metadata,
-            };
-        });
+        const response: unknown = await koiosFetcher.fetchAssetsInfo([[policyId, assetName]]);
+        if (!Array.isArray(response)) {
+            throw new Error("Koios returned invalid asset information.");
+        }
+        const assetDetails = response.map(parseCip68AssetDetails);
+        if (!assetDetails[0]) {
+            throw new Error("Koios did not return the requested asset.");
+        }
         return assetDetails[0];
     };
 }

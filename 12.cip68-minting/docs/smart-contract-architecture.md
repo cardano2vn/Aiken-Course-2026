@@ -1,39 +1,25 @@
-# Kiến trúc Smart Contract
+# Smart-contract architecture
 
-## 1. Redeemer và validator
+## Validator parameters and identities
 
-```rust
-pub type MintRedeemer { Mint Burn }
-pub type StoreRedeemer { Update Remove }
-```
+`onchain/validators/contract.ak` defines one Plutus V3 validator used for both minting and spending. Its parameters are:
 
-`mint` chạy ở script purpose `mint`; `store` chạy ở purpose `spend`. Các purpose khác đều fail.
+- `platform_fee`: minimum fee paid for each supported action;
+- `issuer`: the payment key hash that signs a new mint;
+- `platform_address`: the address that receives the platform fee.
 
-## 2. Mint policy
+The minting policy ID is also the store script payment credential. The frontend parameterizes the validator with the connected wallet's payment key hash, so each issuer produces a separate policy ID and store address.
 
-Validator được parameter hóa bởi `fee`, `issuer`, `platform` và `store`. Với cả `Mint` và `Burn`, logic hiện tại yêu cầu:
+## Mint
 
-- có output trả ít nhất `fee` lovelace đến platform;
-- issuer phải ký transaction.
+`Mint` requires exactly two assets under the policy: a reference token with prefix `100` and quantity `1`, and its matching user token with prefix `222` and quantity `1`. The reference token is stored with an inline CIP-68 datum. The issuer must sign, the datum author must equal that issuer, and the platform fee must be paid.
 
-Các helper trong `contract/utils.ak` cung cấp các phép kiểm tra sâu hơn cho pair asset, quantity và author metadata. Khi mở rộng production, mint policy phải gọi đầy đủ các kiểm tra này để ràng buộc quantity và prefix, thay vì chỉ dựa vào output fee và chữ ký.
+## Update and remove
 
-## 3. Store validator
+The store UTxO's datum contains the immutable `author` key. `Update` requires the author signature, keeps exactly one reference token at the store, preserves the author, and pays the fee. `Remove` requires the same author signature and fee, plus a burn quantity of `-1` for both the reference and user token.
 
-Datum là cấu trúc CIP-68 được lưu inline tại output chứa reference token. Với `Update` hoặc `Remove`, validator hiện yêu cầu output platform fee và issuer signature. State transition đúng cần giữ reference token tại store khi update; remove cần tiêu state UTxO và burn tài sản tương ứng.
+## Full-pair burn
 
-Metadata phải chứa khóa `author`. Helper `check_output_utxo` xác định author từ datum, yêu cầu author ký và đảm bảo output chỉ còn một native asset ngoài lovelace.
+Partial burn is not supported. The transaction must burn the sole user token and the reference token together, spend the store UTxO with `Remove`, and be signed by the author. The frontend also checks the author and holder state before building the transaction; the on-chain validator remains authoritative.
 
-## 4. Kiểm tra cặp token
-
-Một cặp hợp lệ phải có cùng phần tên sau prefix. Các helper hỗ trợ:
-
-- `check_pair_asset_name`: so sánh tên sau 4 byte prefix;
-- `check_minting_reference`: mint đúng một reference token khi cặp chưa tồn tại;
-- `check_asset_mint`: xác minh reference output, user quantity và prefix;
-- `check_asset_burn`: xác minh lượng burn tương ứng;
-- `check_remove_asset`: tìm reference asset trong input và kiểm tra burn.
-
-## 5. Phí và bảo mật
-
-Platform fee là invariant của mọi thao tác theo thiết kế dApp. Issuer không nên được thay đổi trong metadata update. Cần bổ sung test cho quantity, policy ID, pair mapping, author không ký, fee thiếu và output store sai địa chỉ trước khi xem contract là production-ready.
+Run `aiken check` and `aiken build` from `onchain/`. The frontend consumes the generated `onchain/plutus.json` snapshot in `frontend/contract/plutus.json`; use `bun run contract:sync` from `frontend/` after changing the validator.

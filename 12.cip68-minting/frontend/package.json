@@ -7,7 +7,9 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
-        "contract:check": "cd ./contract && aiken check"
+        "test": "bun test",
+        "contract:check": "cd ../onchain && aiken check",
+        "contract:sync": "cd ../onchain && aiken build && cp plutus.json ../frontend/contract/plutus.json"
     },
     "dependencies": {
         "@blockfrost/blockfrost-js": "^6.1.1",

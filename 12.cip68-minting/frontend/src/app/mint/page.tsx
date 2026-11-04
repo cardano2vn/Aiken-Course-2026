@@ -41,13 +41,6 @@ export default function Page() {
                                 description:
                                     "Create a single NFT with a focused transaction flow. Ideal for one-off drops, creative experiments, and fine-grained control over metadata.",
                             },
-                            {
-                                title: "Mint Multiple – Batch Minting",
-                                image: "https://i.pinimg.com/736x/99/68/0e/99680e56e17f5150040515565a1a9725.jpg",
-                                routes: routers.mintMultiple,
-                                description:
-                                    "Launch a full collection efficiently by batching multiple assets into one transaction. This is the best choice for large-scale launches and generative projects.",
-                            },
                         ].map((result, index: number) => (
                             <motion.div
                                 key={index}

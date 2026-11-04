@@ -7,10 +7,9 @@ import {
     mConStr0,
     MeshTxBuilder,
     MeshWallet,
+    mPubKeyAddress,
     PlutusScript,
     resolveScriptHash,
-    scriptAddress,
-    serializeAddressObj,
     serializePlutusScript,
     UTxO,
     deserializeDatum,
@@ -21,6 +20,8 @@ import { Plutus } from "../types";
 import { DECIMAL_PLACE, title } from "../constants/common";
 import { APP_NETWORK_ID, APP_WALLET_ADDRESS } from "@/constants/enviroments";
 import { blockfrostProvider } from "@/providers/cardano";
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
 /**
  * @description
@@ -77,20 +78,9 @@ export class MeshAdapter {
      *
      * This function performs the following steps:
      * 1. Retrieves the issuer (wallet) address from the connected Mesh wallet.
-     * 2. Reads and compiles the `spend` validator from the compiled Plutus scripts.
-     * 3. Applies required parameters to the spend script:
-     *    - Platform fee
-     *    - Issuer credential (pubKeyHash and stakeCredentialHash)
-     *    - Platform credential (pubKeyHash and stakeCredentialHash)
-     * 4. Creates the final spend script object and derives the corresponding script address.
-     * 5. Reads and compiles the `mint` validator.
-     * 6. Applies parameters to the mint script including:
-     *    - Platform fee
-     *    - Issuer public key hash
-     *    - Platform public key hash
-     *    - Spend script hash
-     *    - Platform stake credential hash
-     * 7. Constructs the minting policy script and calculates the policyId.
+     * 2. Reads both purposes of the same compiled validator.
+     * 3. Applies the fee, issuer payment key hash, and platform address to both purposes.
+     * 4. Derives the store address and minting policy ID from the parameterized script.
      *
      * After initialization, the following properties will be available:
      * - issuerAddress
@@ -107,7 +97,7 @@ export class MeshAdapter {
         const issuer = deserializeAddress(this.issuerAddress).pubKeyHash;
         const platform = deserializeAddress(this.platformAddress);
         const platformHash = platform.pubKeyHash;
-        const platformStakeHash = platform.stakeCredentialHash || platformHash;
+        const platformStakeHash = platform.stakeCredentialHash;
 
         if (!issuer || !platformHash || !platformStakeHash) {
             throw new Error("Issuer and platform must be payment/stake key addresses.");
@@ -117,28 +107,19 @@ export class MeshAdapter {
         this.spendScriptCbor = applyParamsToScript(this.spendCompileCode, [
             this.platformFee,
             issuer,
-            platformHash,
+            mPubKeyAddress(platformHash, platformStakeHash),
         ]);
         this.spendScript = {
             code: this.spendScriptCbor,
             version: "V3",
         };
-        this.spendAddress = serializeAddressObj(
-            scriptAddress(
-                deserializeAddress(serializePlutusScript(this.spendScript, undefined, APP_NETWORK_ID, false).address).scriptHash,
-                platformStakeHash,
-                false,
-            ),
-            APP_NETWORK_ID,
-        );
+        this.spendAddress = serializePlutusScript(this.spendScript, undefined, APP_NETWORK_ID, false).address;
 
         this.mintCompileCode = this.readValidator(plutus as Plutus, title.mint);
         this.mintScriptCbor = applyParamsToScript(this.mintCompileCode, [
             this.platformFee,
             issuer,
-            platformHash,
-            deserializeAddress(this.spendAddress).scriptHash,
-            platformStakeHash,
+            mPubKeyAddress(platformHash, platformStakeHash),
         ]);
         this.mintScript = {
             code: this.mintScriptCbor,
@@ -219,7 +200,7 @@ export class MeshAdapter {
      * @returns {Promise<UTxO>}
      *          The last matching UTxO for the specified asset.
      */
-    protected getAddressUTXOAsset = async (address: string, unit: string): Promise<UTxO> => {
+    protected getAddressUTXOAsset = async (address: string, unit: string): Promise<UTxO | undefined> => {
         const utxos = await this.fetcher.fetchAddressUTxOs(address, unit);
         return utxos[utxos.length - 1];
     };
@@ -276,22 +257,29 @@ export class MeshAdapter {
         const datum = deserializeDatum(plutusData);
         const metadata: Record<string, string> = {};
         try {
-            const list = datum?.fields?.[0]?.list || datum?.fields?.[0];
+            const datumRecord = isRecord(datum) ? datum : undefined;
+            const datumFields = datumRecord?.fields;
+            const firstField = Array.isArray(datumFields) ? datumFields[0] : undefined;
+            const list =
+                isRecord(firstField) && Array.isArray(firstField.list)
+                    ? firstField.list
+                    : firstField;
 
             if (!Array.isArray(list)) {
                 console.warn("Invalid CIP68 format: list not found");
                 return metadata;
             }
 
-            list.forEach((item: any) => {
-                const fields = item?.fields || item;
+            list.forEach((item: unknown) => {
+                const itemFields = isRecord(item) ? item.fields : undefined;
+                const fields = Array.isArray(itemFields) ? itemFields : item;
 
                 if (!Array.isArray(fields) || fields.length < 2) return;
 
-                const keyHex = fields[0]?.bytes;
-                const valueHex = fields[1]?.bytes;
+                const keyHex = isRecord(fields[0]) ? fields[0].bytes : undefined;
+                const valueHex = isRecord(fields[1]) ? fields[1].bytes : undefined;
 
-                if (!keyHex || !valueHex) return;
+                if (typeof keyHex !== "string" || typeof valueHex !== "string") return;
 
                 const key = Buffer.from(keyHex, "hex").toString("utf8");
                 const value = Buffer.from(valueHex, "hex").toString("utf8");

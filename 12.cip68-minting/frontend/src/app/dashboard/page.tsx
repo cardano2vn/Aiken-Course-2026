@@ -33,7 +33,7 @@ export default function Page() {
     });
 
     if (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load tippers");
+        toast.error(error instanceof Error ? error.message : "Failed to load assets");
         return (
             <motion.div
                 className="flex flex-col items-center justify-center rounded-[2rem] border border-slate-200/80 bg-white/80 px-8 py-16 text-center shadow-[0_20px_80px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80"

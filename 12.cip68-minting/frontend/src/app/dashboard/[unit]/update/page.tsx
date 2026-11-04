@@ -10,6 +10,7 @@ import { useWallet } from "@/hooks/use-wallet";
 import { update } from "@/actions/cip68.action";
 import { getAsset } from "@/actions/assets.action";
 import { hexToString } from "@meshsdk/core";
+import { isAssetAuthor } from "@/utils/cip68";
 
 type MetadataField = {
     key: string;
@@ -27,6 +28,7 @@ export default function UpdateMetadataPage() {
             await getAsset({ policyId: String(unit).slice(0, 56), assetName: String(unit).slice(56), walletAddress: address as string }),
         enabled: !!address,
     });
+    const isAuthor = isAssetAuthor(data?.onchain_metadata?.author, address);
 
     const [step, setStep] = useState(1);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -66,6 +68,10 @@ export default function UpdateMetadataPage() {
     const prev = () => step > 1 && setStep(step - 1);
 
     const handleUpdate = async () => {
+        if (!isAuthor) {
+            setTxError("Only the asset author can update its metadata.");
+            return;
+        }
         setIsUpdating(true);
         setTxError("");
         try {
@@ -157,6 +163,11 @@ export default function UpdateMetadataPage() {
                         {txError && (
                             <p role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
                                 {txError}
+                            </p>
+                        )}
+                        {data && !isAuthor && (
+                            <p role="alert" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+                                Only the author recorded in this asset&apos;s on-chain datum can update it.
                             </p>
                         )}
                         {step === 1 && (
@@ -306,7 +317,7 @@ export default function UpdateMetadataPage() {
                                     </button>
                                     <button
                                         onClick={handleUpdate}
-                                        disabled={isUpdating}
+                                        disabled={isUpdating || !isAuthor}
                                         className="flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                                     >
                                         {isUpdating ? (
