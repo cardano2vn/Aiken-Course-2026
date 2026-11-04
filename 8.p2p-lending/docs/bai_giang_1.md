@@ -1,6 +1,4 @@
-# Bài 1: Kiến trúc P2P Lending và các pattern cốt lõi
-
-**Video:** [Building with Aiken - Bài 8.1 (P2P Lending) - Kiến trúc P2P Lending & Các Pattern Cốt lõi](https://www.youtube.com/watch?v=IB3rE-HaToY)
+# Kiến trúc P2P Lending và các pattern cốt lõi
 
 ## Mục tiêu bài học
 
@@ -38,6 +36,45 @@ Mô hình này khác một khoản vay do ứng dụng trung tâm quản lý. �
 
 Một máy chủ có thể ngừng hoạt động khiến UI không query được dữ liệu, nhưng máy chủ không thể thay đổi quy tắc của validator. Ngược lại, nếu builder dựng sai transaction, validator có thể từ chối dù giao diện đã hiển thị nút thao tác.
 
+### Một tình huống thực tế để hình dung luồng
+
+Giả sử Alice đang có một native asset và muốn vay ADA. Bob có ADA và muốn cho vay:
+
+1. **Alice lập đề nghị:** Alice chọn asset làm collateral, nhập principal, rate và duration. Ví ký transaction để tạo một loan UTxO Pending. Collateral bị khóa trong output script; Alice vẫn là borrower.
+2. **Bob xem đề nghị:** giao diện đọc UTxO và datum, hiển thị số tiền, tài sản bảo đảm và thời hạn. Việc nhìn thấy card không khóa đề nghị cho riêng Bob; một lender khác cũng có thể cùng lúc xây dựng transaction Fund.
+3. **Bob cấp vốn:** Bob ký transaction tiêu loan UTxO Pending. Transaction tạo loan UTxO Active mới, ghi Bob là lender và trả principal cho Alice. Collateral/identity token tiếp tục nằm trong output loan mới.
+4. **Alice trả nợ hoặc không trả:** Alice ký Repay và trả gốc+lãi đúng hạn để lấy collateral. Nếu không trả, Bob có thể ký Liquidate sau hạn để nhận collateral theo quy tắc demo.
+5. **Loan kết thúc:** Cancel, Repay hoặc Liquidate tiêu UTxO loan cuối cùng và burn identity token. Không có bản ghi trạng thái “Closed” được ghi lên script address.
+
+Ví dụ này tách rõ hai chuyển động tài sản thường bị nhầm:
+
+```text
+Khi Fund:
+  principal: Bob → Alice
+  collateral: tiếp tục bị khóa tại lending script
+
+Khi Repay:
+  repayment: Alice → Bob
+  collateral: lending script → Alice
+
+Khi Liquidate:
+  collateral: lending script → Bob
+  (demo không tự định giá hay bán token collateral)
+```
+
+### Câu hỏi kiến trúc cần trả lời trước khi đọc code
+
+Với mỗi nút trên giao diện, hãy xác định:
+
+1. UTxO nào đang bị tiêu và ai là chủ thể phải ký?
+2. Datum đầu vào nói loan đang ở state nào?
+3. Transaction tạo output mới hay đóng state?
+4. Tiền vay, khoản repayment và collateral đi tới địa chỉ nào?
+5. Identity token được giữ, mint hay burn?
+6. Validator dùng điều kiện nào để quyết định transaction hợp lệ?
+
+Nếu chỉ biết tên action mà chưa xác định được input/output/value/signer, ta chưa hiểu đầy đủ transaction đó.
+
 ## 2. Bốn khái niệm tài chính quan trọng
 
 ### 2.1. Principal
@@ -73,6 +110,19 @@ repayment = principal + interest
 
 Phép tính trên Aiken và TypeScript sử dụng số nguyên. Nếu kết quả lãi không chia hết theo lovelace, phần dư nhỏ hơn một lovelace bị cắt bỏ. Rate trong demo là tỷ lệ áp dụng một lần trên principal, không phải lãi suất APR theo thời gian; thời lượng khoản vay không được đưa vào công thức tính lãi.
 
+Ví dụ:
+
+```text
+principal = 20 ADA = 20_000_000 lovelace
+rate      = 750 bps = 7.5%
+
+interest  = 20_000_000 × 750 / 10_000
+          = 1_500_000 lovelace = 1.5 ADA
+repayment = 21_500_000 lovelace = 21.5 ADA
+```
+
+Rate không có đơn vị thời gian trong công thức này. Loan 12 giờ và loan 12 ngày có cùng principal/rate sẽ cho cùng khoản lãi nếu được tạo với các trường khác như nhau. Đây là quyết định đơn giản hóa của demo, không phải mô hình lãi suất đầy đủ cho thị trường.
+
 ### 2.3. Loan duration và due date
 
 `loan_duration` là thời hạn tính bằng mili giây. UI hiện nhận số giờ, sau đó đổi sang mili giây trước khi tạo datum. Ví dụ:
@@ -84,6 +134,17 @@ Phép tính trên Aiken và TypeScript sử dụng số nguyên. Nếu kết qu�
 
 Borrower không trực tiếp đặt `due_date` khi tạo loan. Ở trạng thái Pending, lender và due date đều chưa có. Khi lender fund, validator tính hạn từ thời điểm kết thúc validity interval của giao dịch cộng với duration. Như vậy, thời hạn bắt đầu quanh thời điểm funding được đưa vào ledger, thay vì lúc borrower soạn yêu cầu.
 
+Ví dụ minh họa: nếu Fund dùng validity upper bound tương ứng khoảng 10:00 và duration là 12 giờ, due date xấp xỉ 22:00 theo đơn vị thời gian của ledger. Validator dùng upper bound hữu hạn này để tính due date; trong implementation, validity window của Fund phải không dài hơn 10 phút để hạn không bị tính từ một thời điểm tùy ý xa.
+
+Hai điều kiện thời gian khi đóng loan là:
+
+```text
+Repay:     validity upper bound <= due_date
+Liquidate: validity lower bound > due_date
+```
+
+Do đó không nên diễn giải “quá hạn” chỉ bằng đồng hồ trên máy người dùng hoặc trạng thái nút trong giao diện. Mốc quyết định là validity interval mà transaction khai báo và validator kiểm tra.
+
 ### 2.4. Collateral
 
 Collateral là native asset bị khóa cùng loan UTxO. Datum lưu:
@@ -93,6 +154,25 @@ Collateral là native asset bị khóa cùng loan UTxO. Datum lưu:
 - `collateral_amount`: số lượng cần khóa.
 
 Ở nhánh tạo loan, validator kiểm tra rằng output script chứa đúng identity token và lượng collateral đã khai báo (không tính lovelace); collateral không được là ADA và không được dùng chính policy identity của lending. Demo vì vậy hướng tới native asset làm collateral, không nhận lovelace làm tài sản bảo đảm theo trường asset này.
+
+### 2.5. Các giá trị này nằm ở đâu trong transaction?
+
+Nên phân biệt **điều khoản loan** với **value đang bị khóa**:
+
+| Thông tin | Nơi lưu/di chuyển trong demo |
+|---|---|
+| Borrower, lender, principal, rate, duration, due date | Inline datum của loan UTxO |
+| Collateral quantity và identity token | Value của loan UTxO; datum cũng ghi asset ID/quantity để validator đối chiếu |
+| ADA tối thiểu của loan UTxO | Lovelace trong value của output script |
+| Tiền principal lúc Fund | Output riêng chuyển thẳng tới borrower |
+| Tiền trả nợ lúc Repay | Output lovelace gửi tới lender |
+| Danh tính UTxO loan cụ thể | `txHash#outputIndex`; identity token giúp lọc/theo dõi loan |
+| Chữ ký | Witness/signatory của transaction, không phải trường datum |
+| Hành động được yêu cầu | Redeemer đính với spending input hoặc minting policy |
+
+Datum khai báo collateral nào được mong đợi; value mới là tài sản ledger thực sự khóa. Validator so sánh hai phần để bảo đảm loan output giữ đúng asset. Nếu chỉ ghi “collateral = 1 token” trong datum mà output không có token đó thì borrower chưa thực sự khóa tài sản.
+
+Principal cũng có trong datum để xác định số tiền lender phải cấp, nhưng ADA principal không nằm sẵn trong loan UTxO. Khi fund, lender cung cấp ADA từ wallet inputs của mình và transaction tạo output trả cho borrower.
 
 ## 3. Khoản vay là state machine
 
@@ -104,6 +184,60 @@ Active:  lender == Some(address) && due_date == Some(timestamp)
 ```
 
 Trạng thái `Closed` không được lưu dưới dạng datum mới: khi trả nợ, hủy hoặc thanh lý, loan UTxO bị tiêu đi và identity token bị burn.
+
+Trong [kiểu dữ liệu Aiken](../onchain/lib/types.ak), state và action được biểu diễn như sau:
+
+```aiken
+pub type Datum {
+  borrower: Address,
+  lender: Option<Address>,
+  principal: Int,
+  interest_rate: Int,
+  collateral_policy_id: PolicyId,
+  collateral_asset_name: AssetName,
+  collateral_amount: Int,
+  loan_duration: Int,
+  due_date: Option<Int>,
+}
+
+pub type MintRedeemer {
+  Create(OutputReference)
+  Burn
+}
+
+pub type Redeemer {
+  Fund
+  Repay
+  Cancel
+  Liquidate
+}
+```
+
+`Datum` là record gắn với một loan output. `Option<Address>` cho phép lender chưa tồn tại ở Pending; `Option<Int>` cho phép due date chưa tồn tại trước khi Fund. `Redeemer` không phải state mới mà là hành động đang được yêu cầu khi tiêu loan UTxO. Mint policy có `MintRedeemer` riêng vì `Create(seed)`/`Burn` điều khiển identity token, còn spending redeemer điều khiển vòng đời loan.
+
+### 3.1. Vì sao không lưu `status` riêng?
+
+Nếu datum cùng lúc lưu `status = "Pending"` và `lender = Some(Bob)`, dữ liệu có thể tự mâu thuẫn. Demo suy ra trạng thái từ các trường cần thiết:
+
+```text
+lender=None, due_date=None         → Pending
+lender=Some(Bob), due_date=Some(t) → Active
+loan UTxO không còn tồn tại         → đã đóng theo state hiện tại
+```
+
+Điều này giảm số trường cần đồng bộ. Đổi lại, parser và validator phải kiểm tra cặp trường nhất quán. `status` trong TypeScript chỉ là thuộc tính tính toán để UI phân nhóm, không phải nguồn sự thật độc lập trên chain.
+
+### 3.2. Từng transition thay đổi state ra sao?
+
+| Hành động | Datum trước | Datum/output sau | Value/identity |
+|---|---|---|---|
+| Create | Chưa có loan | Pending: lender/due date `None` | Mint `+1`; khóa collateral trong loan UTxO |
+| Fund | Pending | Active: ghi lender và due date | Giữ collateral và identity; trả principal cho borrower |
+| Cancel | Pending | Không có loan output tiếp diễn | Trả collateral cho borrower; burn `-1` |
+| Repay | Active | Không có loan output tiếp diễn | Trả repayment cho lender, collateral cho borrower; burn `-1` |
+| Liquidate | Active, sau due date | Không có loan output tiếp diễn | Trả collateral cho lender; burn `-1` |
+
+`Fund` là transition **tiếp tục** loan nên phải tạo state output mới. Ba action đóng loan tiêu state và không tạo continuing loan output. Điều này khác database truyền thống, nơi thường cập nhật một dòng `status` thành `Closed`.
 
 ```mermaid
 stateDiagram-v2
@@ -154,6 +288,13 @@ Output tại lending script address
 
 Transaction `Fund` tiêu loan UTxO Pending, sau đó tạo loan UTxO mới với cùng tài sản khóa nhưng datum Active. Những action đóng loan không tạo output tiếp tục ở script address. Validator là nơi kiểm tra rằng input/output đúng với luật chuyển state.
 
+**Collateral của khoản vay** không đồng nghĩa với **transaction collateral** của Plutus:
+
+- Loan collateral là native asset của borrower, nằm trong loan UTxO. Khi loan đóng, asset này được trả cho borrower hoặc lender tùy action.
+- Transaction collateral là một ADA UTxO riêng do wallet cung cấp để làm bảo đảm phí nếu transaction Plutus thất bại. Builder chọn UTxO này và khai báo làm collateral input cho ledger.
+
+Vì vậy, khi nhìn transaction cần phân biệt loan UTxO bị tiêu để chạy validator với UTxO collateral của transaction. Hai loại này có mục đích và lifecycle khác nhau.
+
 ### Datum và redeemer khác nhau như thế nào?
 
 - **Datum** mô tả state của loan: các điều khoản, hai bên, tài sản bảo đảm và hạn trả.
@@ -178,6 +319,8 @@ Vì một UTxO seed chỉ có thể bị tiêu một lần, output reference t�
 
 Identity token là dấu hiệu nhận dạng, không phải collateral và cũng không đại diện cho số tiền nợ. Quy tắc về tài sản khóa và quyền chuyển tiền vẫn phải được validator kiểm tra riêng.
 
+Trong implementation này, cùng một Aiken validator xử lý cả minting purpose (tạo/burn identity) và spending purpose (các action trên loan UTxO). Vì vậy, policy ID cũng được dùng làm payment script credential của loan address. Đây là cách tổ chức cụ thể của repository; không nên hiểu rằng mọi dApp Cardano bắt buộc phải dùng cùng một script cho hai purpose này.
+
 ## 6. Kiến trúc dApp: ba lớp và mạng Cardano
 
 ```mermaid
@@ -197,17 +340,56 @@ flowchart LR
 
 Frontend thu thập các trường loan, hiển thị danh sách Pending/Active và chỉ hiện các action phù hợp vai trò. UI giúp ngăn lỗi phổ biến và cung cấp phản hồi, nhưng mọi giá trị vẫn phải được kiểm tra lại trong builder/validator.
 
+Ví dụ, form có thể nhận principal theo ADA, rate theo phần trăm và duration theo giờ để người dùng dễ nhập. Trước khi đưa vào datum, các giá trị được đổi sang lovelace, bps và milliseconds. Nếu chỉ đổi đơn vị ở giao diện mà builder/on-chain lại hiểu theo đơn vị khác, transaction có thể hợp lệ về kiểu dữ liệu nhưng sai ý nghĩa kinh tế.
+
 ### Off-chain
 
 Off-chain kết nối wallet/provider, truy vấn UTxO, giải mã datum, chọn input cần dùng và dựng transaction. Builder có thể phát hiện loan đã thay đổi trước khi hiển thị ví ký; tuy nhiên giữa lúc query và lúc transaction được xác nhận, state vẫn có thể thay đổi.
+
+Trong luồng Create, builder cần chọn seed UTxO, tính token name tương ứng và tạo script output chứa collateral cùng identity token. Trong Fund, builder tìm đúng loan UTxO, gắn spending redeemer, tạo continuing output với datum Active, tạo output principal cho borrower và chọn ADA collateral input của transaction. Sau khi hoàn tất, ứng dụng đưa unsigned transaction cho ví ký rồi gửi transaction đã ký qua provider.
 
 ### On-chain
 
 Validator kiểm tra state transition thực tế. Các quy tắc không nên chỉ tồn tại trong UI: người dùng có thể gọi endpoint khác hoặc dựng transaction riêng. Quy tắc quyết định collateral, chữ ký, due date và burn identity cần được ràng buộc on-chain.
 
+Validator không hỏi “nút nào đã được bấm”. Nó nhận datum, redeemer và transaction context, rồi kiểm tra những điều kiện thể hiện trong ledger. Ví dụ `Repay` được kiểm tra bằng chữ ký borrower, hạn trên validity range, số lovelace tới lender, lượng collateral trả borrower, việc burn token và việc không để lại loan output tại script.
+
 ### Wallet và chữ ký
 
 Ví là nơi người dùng kiểm soát khóa. Ứng dụng yêu cầu ví ký transaction, nhưng không cần và không được nhận private key. Chữ ký xác nhận transaction; validator vẫn kiểm tra xem chữ ký có thuộc đúng borrower/lender theo state hay không.
+
+Một yêu cầu ký không đồng nghĩa với việc giao dịch đã thành công. Người dùng có thể từ chối, transaction có thể lỗi khi submit, hoặc UTxO có thể đã bị transaction khác tiêu. Ứng dụng cần phân biệt rõ các trạng thái “đang dựng”, “đang chờ ký”, “đã submit” và “đã xác nhận”.
+
+### 6.1. Một action đi qua các lớp như thế nào?
+
+Luồng tổng quát khi borrower tạo loan:
+
+```text
+Form nhập điều khoản
+  → kiểm tra/chuẩn hóa dữ liệu ở frontend và builder
+  → query UTxO, chọn seed và collateral input
+  → builder tạo output script Pending + mint identity token
+  → ví của borrower ký transaction
+  → provider submit lên mạng
+  → ledger chạy minting policy và ghi transaction nếu hợp lệ
+  → indexer/provider cập nhật loan để giao diện hiển thị
+```
+
+Khi Fund, loan UTxO Pending là input script cần redeemer `Fund`. Bob ký giao dịch; validator kiểm tra signature, state, validity range, datum Active mới, bảo toàn asset và principal trả Alice. Nếu transaction thành công, UTxO Pending đã tiêu và UTxO Active mới trở thành state hiện tại.
+
+Provider/indexer giúp tìm và trình bày dữ liệu, nhưng có thể cập nhật chậm hoặc gặp lỗi. Kết quả query không phải bằng chứng thay thế validator; trước khi submit transaction, ledger vẫn xác thực input còn unspent và chạy các script liên quan.
+
+### 6.2. Kiểm tra theo action trong code hiện tại
+
+| Action | Điều kiện on-chain tiêu biểu | Ý nghĩa |
+|---|---|---|
+| `Create` | Borrower ký; seed là input; tên token khớp seed; datum Pending; principal/duration/collateral dương; output chứa đúng identity và collateral | Không thể chỉ khai collateral trong datum mà bỏ asset khỏi output |
+| `Fund` | Lender ký và khác borrower; loan đang Pending; validity range hữu hạn, không đảo và tối đa 10 phút; datum mới chỉ đổi lender/due date; output loan giữ asset và không giảm ADA; borrower nhận ít nhất principal | Lender không thể tự sửa các terms borrower đã đề nghị |
+| `Cancel` | Borrower ký; loan đang Pending; borrower nhận đủ collateral; burn đúng identity; không có continuing script output | Không cho hủy khoản đã Active |
+| `Repay` | Borrower ký; validity upper bound không vượt due date; lender nhận tối thiểu principal+lãi; borrower nhận đủ collateral; burn đúng identity; không có continuing script output | Repay đúng hạn đóng loan và giải phóng collateral |
+| `Liquidate` | Lender ký; validity lower bound phải lớn hơn due date; lender nhận đủ collateral; burn đúng identity; không có continuing script output | Không thể liquidate trước hoặc đúng thời điểm due date |
+
+Đây là mô tả các điều kiện được kiểm tra trong validator hiện tại, không phải danh sách đầy đủ cho một sản phẩm lending production. Bài 2 phân tích từng nhánh redeemer và các helper liên quan.
 
 ## 7. Ranh giới tin cậy và câu hỏi thiết kế
 
@@ -348,5 +530,3 @@ Khi xem transaction trên explorer, hãy dùng thứ tự sau:
 8. **Phân biệt gửi với xác nhận:** tx hash là dấu hiệu đã submit; trạng thái xác nhận cần được kiểm tra riêng.
 
 Tập phân tích này giúp nối Bài 1 (mô hình) với Bài 2 (validator) và Bài 3 (builder). Mỗi giao dịch thành công là một bằng chứng cụ thể của một transition, không chỉ là một lần bấm nút trên UI.
-
-**Đọc tiếp:** [Bài 2: On-chain code và cơ chế xử lý khoản vay](./bai_giang_2.md).
