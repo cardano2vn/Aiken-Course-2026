@@ -6,6 +6,7 @@ import type { BrowserWallet } from "@meshsdk/wallet";
 import { DECIMAL_PLACE } from "@/constants/common";
 import { reclaim } from "@/actions/crowdfund.action";
 import { getWalletContext } from "@/lib/wallet";
+import { useCurrentTime } from "@/hooks/useCurrentTime";
 
 interface Props {
     wallet: BrowserWallet;
@@ -26,7 +27,8 @@ export default function ReclaimPanel({ wallet, address, campaignUtxo, datum, onS
     const [error, setError] = useState<string | null>(null);
 
     const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
-    const isExpired = Date.now() > datum.deadline;
+    const currentTime = useCurrentTime();
+    const isExpired = currentTime !== null && currentTime > datum.deadline;
     const goalMet = total >= datum.goal;
     const walletPaymentKeyHash = deserializeAddress(address).pubKeyHash;
     const myContrib = datum.contributions.find((contribution) => contribution.paymentKeyHash === walletPaymentKeyHash);

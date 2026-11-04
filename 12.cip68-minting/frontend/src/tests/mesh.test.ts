@@ -4,9 +4,11 @@ import {
     KoiosProvider,
     MeshTxBuilder as MeshSdkTxBuilder,
     MeshWallet,
+    serializeData,
     stringToHex,
     type UTxO,
 } from "@meshsdk/core";
+import { convertCip68Metadata, convertDatum } from "@/lib/utils";
 import {
     APP_EXPLORER_URL,
     APP_NETWORK,
@@ -89,6 +91,47 @@ describe("CIP-68 transactions", () => {
                 { int: 1 },
             ],
         });
+    });
+
+    test("converts map-shaped CIP-68 datum metadata and preserves the author hash", () => {
+        const authorHash = "ab".repeat(28);
+        const datum = {
+            constructor: 0,
+            fields: [
+                {
+                    map: [
+                        { k: { bytes: stringToHex("name") }, v: { bytes: stringToHex("Test asset") } },
+                        { k: { bytes: stringToHex("author") }, v: { bytes: authorHash } },
+                    ],
+                },
+                { int: 1 },
+            ],
+        };
+
+        expect(convertDatum(serializeData(datum, "JSON"))).toEqual({
+            name: "Test asset",
+            author: authorHash,
+        });
+    });
+
+    test("converts list-shaped CIP-68 metadata returned by Koios", () => {
+        const metadata = {
+            fields: [
+                {
+                    list: [
+                        {
+                            fields: [
+                                { bytes: stringToHex("name") },
+                                { bytes: stringToHex("Test asset") },
+                            ],
+                        },
+                    ],
+                },
+                { int: 1 },
+            ],
+        };
+
+        expect(convertCip68Metadata(metadata)).toEqual({ name: "Test asset" });
     });
 });
 

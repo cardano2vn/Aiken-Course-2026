@@ -5,7 +5,7 @@
     "": {
       "name": "cip68",
       "dependencies": {
-        "@blockfrost/blockfrost-js": "^6.1.1",
+        "@blockfrost/blockfrost-js": "^6.2.0",
         "@hookform/resolvers": "^5.2.2",
         "@icons-pack/react-simple-icons": "^13.13.0",
         "@meshsdk/core": "^1.9.1",
@@ -154,9 +154,9 @@
 
     "@biglup/is-cid": ["@biglup/is-cid@1.0.3", "", { "dependencies": { "@multiformats/mafmt": "^12.1.6", "@multiformats/multiaddr": "^12.1.14", "iso-url": "^1.1.3", "multiformats": "^13.0.1", "uint8arrays": "^5.0.1" } }, "sha512-R0XPZ/IQhU2TtetSFI9vI+7kJOJYNiCncn5ixEBW+/LNaZCo2HK37Mq3pRNzrM4FryuAkyeqY7Ujmj3I3e3t9g=="],
 
-    "@blockfrost/blockfrost-js": ["@blockfrost/blockfrost-js@6.1.1", "", { "dependencies": { "@blockfrost/openapi": "0.1.86", "@emurgo/cardano-serialization-lib-nodejs": "^15.0.3", "@emurgo/cip14-js": "3.0.1", "bottleneck": "^2.19.5", "form-data": "^4.0.0", "got": "^11.8.6", "json-bigint": "^1.0.0" } }, "sha512-3Lr2apEE78OXkzcjUXOmWEzwLkzRHeHrwD9ngEdEbnnTDuQoOaTkxnUyD1WDKipP3llfNMLuJLnrMC8DVjHSTA=="],
+    "@blockfrost/blockfrost-js": ["@blockfrost/blockfrost-js@6.2.0", "", { "dependencies": { "@blockfrost/openapi": "0.1.92", "@emurgo/cardano-serialization-lib-nodejs": "^15.0.3", "@emurgo/cip14-js": "3.0.1", "bottleneck": "^2.19.5", "form-data": "^4.0.0", "got": "^11.8.6", "json-bigint": "^1.0.0" } }, "sha512-5vU1jI7MLZA1fNSirtixr4mQ+sSGhXTIXj7YvXM+CZSDrU84YtrVcyOpMRHix/vuX7QtWwyc7VXsUfszQccgug=="],
 
-    "@blockfrost/openapi": ["@blockfrost/openapi@0.1.86", "", { "dependencies": { "ajv": "^8.17.1", "cbor": "^9.0.2", "rimraf": "6.0.1", "yaml": "^2.6.1" } }, "sha512-VWFshFtUVmg27jn/dSc+7FvGbGyuHBUyNCqyE4ah9EkE3+ZcF3mIC095TE+f8uS/4lMIryUEGBq/p2zrfF+dEw=="],
+    "@blockfrost/openapi": ["@blockfrost/openapi@0.1.92", "", { "dependencies": { "ajv": "^8.17.1", "cbor": "^9.0.2", "rimraf": "6.0.1", "yaml": "^2.6.1" } }, "sha512-50lixp/AvUObFPq9IANaTNsJrQNic6DZ71RTxMCdodsQOYpk/3A1akUp7GHM1L4uzqKHUh10XkPTPCp/Dqrwqw=="],
 
     "@bufbuild/protobuf": ["@bufbuild/protobuf@1.10.1", "", {}, "sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ=="],
 

@@ -10,7 +10,6 @@ import {
     resolveScriptHash,
     serializePlutusScript,
     UTxO,
-    deserializeDatum,
     stringToHex,
 } from "@meshsdk/core";
 import plutus from "../../contract/plutus.json";
@@ -18,8 +17,7 @@ import { Plutus } from "../types";
 import { DECIMAL_PLACE, title } from "../constants/common";
 import { APP_NETWORK_ID, APP_WALLET_ADDRESS } from "@/constants/enviroments";
 import { blockfrostProvider } from "@/providers/cardano";
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+import { convertDatum } from "@/lib/utils";
 
 type PlutusDataJson =
     | { constructor: number; fields: PlutusDataJson[] }
@@ -268,43 +266,6 @@ export class MeshAdapter {
     };
 
     public convertDatum = (plutusData: string): Record<string, string> => {
-        const datum = deserializeDatum(plutusData);
-        const metadata: Record<string, string> = {};
-        try {
-            const datumRecord = isRecord(datum) ? datum : undefined;
-            const datumFields = datumRecord?.fields;
-            const firstField = Array.isArray(datumFields) ? datumFields[0] : undefined;
-            const list =
-                isRecord(firstField) && Array.isArray(firstField.list)
-                    ? firstField.list
-                    : firstField;
-
-            if (!Array.isArray(list)) {
-                console.warn("Invalid CIP68 format: list not found");
-                return metadata;
-            }
-
-            list.forEach((item: unknown) => {
-                const itemFields = isRecord(item) ? item.fields : undefined;
-                const fields = Array.isArray(itemFields) ? itemFields : item;
-
-                if (!Array.isArray(fields) || fields.length < 2) return;
-
-                const keyHex = isRecord(fields[0]) ? fields[0].bytes : undefined;
-                const valueHex = isRecord(fields[1]) ? fields[1].bytes : undefined;
-
-                if (typeof keyHex !== "string" || typeof valueHex !== "string") return;
-
-                const key = Buffer.from(keyHex, "hex").toString("utf8");
-                const value = Buffer.from(valueHex, "hex").toString("utf8");
-
-                metadata[key] = value;
-            });
-
-            return metadata;
-        } catch (error) {
-            console.error("Error converting CIP68 to metadata:", error);
-            return {};
-        }
+        return convertDatum(plutusData);
     };
 }

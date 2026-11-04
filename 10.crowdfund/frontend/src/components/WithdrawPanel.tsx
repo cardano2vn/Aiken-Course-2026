@@ -5,6 +5,7 @@ import type { UTxO } from "@meshsdk/common";
 import type { BrowserWallet } from "@meshsdk/wallet";
 import { withdraw } from "@/actions/crowdfund.action";
 import { getWalletContext } from "@/lib/wallet";
+import { useCurrentTime } from "@/hooks/useCurrentTime";
 
 interface Props {
     wallet: BrowserWallet;
@@ -25,7 +26,8 @@ export default function WithdrawPanel({ wallet, address, campaignUtxo, datum, on
     const [error, setError] = useState<string | null>(null);
 
     const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
-    const isExpired = Date.now() > datum.deadline;
+    const currentTime = useCurrentTime();
+    const isExpired = currentTime !== null && currentTime > datum.deadline;
     const goalMet = total >= datum.goal;
     const isBeneficiary = address === datum.beneficiary;
 

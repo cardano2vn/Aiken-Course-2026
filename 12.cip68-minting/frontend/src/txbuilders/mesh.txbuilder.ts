@@ -1,9 +1,10 @@
 import { MeshAdapter } from "../adapters/mesh.adapter";
 import { APP_NETWORK } from "../constants/enviroments";
-import { deserializeAddress, mConStr0, mConStr1, stringToHex, CIP68_222, CIP68_100, hexToString } from "@meshsdk/core";
+import { deserializeAddress, mConStr0, mConStr1, stringToHex, CIP68_222, CIP68_100 } from "@meshsdk/core";
 import { koiosFetcher } from "@/providers/cardano";
 import { AssetDetails, AssetType } from "@/types";
 import { assetNameByteLength } from "@/utils/cip68";
+import { convertCip68Metadata } from "@/lib/utils";
 
 type Cip68AssetDetails = Pick<AssetDetails, "policy_id" | "asset_name" | "quantity" | "onchain_metadata"> & {
     total_supply: string;
@@ -18,26 +19,8 @@ const parseCip68AssetDetails = (value: unknown): Cip68AssetDetails => {
         throw new Error("Koios returned invalid asset information.");
     }
 
-    const metadata: Record<string, string> = {};
     const versionedMetadata = asRecord(asRecord(asset.cip68_metadata)?.["100"]);
-    const fields = versionedMetadata?.fields;
-    const firstField = Array.isArray(fields) ? asRecord(fields[0]) : undefined;
-    const entries = firstField?.list;
-
-    if (Array.isArray(entries)) {
-        entries.forEach((entry) => {
-            const entryFields = asRecord(entry)?.fields;
-            if (!Array.isArray(entryFields) || entryFields.length < 2) return;
-
-            const keyHex = asRecord(entryFields[0])?.bytes;
-            const valueHex = asRecord(entryFields[1])?.bytes;
-            if (typeof keyHex !== "string" || typeof valueHex !== "string") return;
-
-            const key = hexToString(keyHex);
-            const value = hexToString(valueHex);
-            metadata[key] = key === "author" ? valueHex : value;
-        });
-    }
+    const metadata = convertCip68Metadata(versionedMetadata);
 
     return {
         policy_id: asset.policy_id,

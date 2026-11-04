@@ -14,7 +14,7 @@
         "contract:sync": "cd ../onchain && aiken build && cp plutus.json ../frontend/contract/plutus.json"
     },
     "dependencies": {
-        "@blockfrost/blockfrost-js": "^6.1.1",
+        "@blockfrost/blockfrost-js": "^6.2.0",
         "@hookform/resolvers": "^5.2.2",
         "@icons-pack/react-simple-icons": "^13.13.0",
         "@meshsdk/core": "^1.9.1",

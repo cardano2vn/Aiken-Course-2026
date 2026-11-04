@@ -79,34 +79,49 @@ export function convertToKeyValue(data: { k: { bytes: string }; v: { bytes: stri
     );
 }
 
-export function convertDatum(plutusData: string): Record<string, string> {
-    const datum = deserializeDatum(plutusData);
-    const metadata: Record<string, string> = {};
-    try {
-        const list = datum?.fields?.[0]?.list || datum?.fields?.[0];
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
-        if (!Array.isArray(list)) {
-            console.warn("Invalid CIP68 format: list not found");
-            return metadata;
+export function convertCip68Metadata(datum: unknown): Record<string, string> {
+    const metadata: Record<string, string> = {};
+    const fields = isRecord(datum) ? datum.fields : undefined;
+    const firstField = Array.isArray(fields) ? fields[0] : undefined;
+    const entries = isRecord(firstField)
+        ? Array.isArray(firstField.map)
+            ? firstField.map
+            : firstField.list
+        : firstField;
+
+    if (!Array.isArray(entries)) {
+        console.warn("Invalid CIP68 format: metadata map not found");
+        return {};
+    }
+
+    entries.forEach((entry) => {
+        const entryRecord = isRecord(entry) ? entry : undefined;
+        const pair = Array.isArray(entryRecord?.fields) ? entryRecord.fields : entry;
+        let keyHex: unknown;
+        let valueHex: unknown;
+
+        if (isRecord(entry) && isRecord(entry.k) && isRecord(entry.v)) {
+            keyHex = entry.k.bytes;
+            valueHex = entry.v.bytes;
+        } else if (Array.isArray(pair) && pair.length >= 2) {
+            keyHex = isRecord(pair[0]) ? pair[0].bytes : undefined;
+            valueHex = isRecord(pair[1]) ? pair[1].bytes : undefined;
         }
 
-        list.forEach((item: any) => {
-            const fields = item?.fields || item;
+        if (typeof keyHex !== "string" || typeof valueHex !== "string") return;
 
-            if (!Array.isArray(fields) || fields.length < 2) return;
+        const key = Buffer.from(keyHex, "hex").toString("utf8");
+        metadata[key] = key === "author" ? valueHex : Buffer.from(valueHex, "hex").toString("utf8");
+    });
 
-            const keyHex = fields[0]?.bytes;
-            const valueHex = fields[1]?.bytes;
+    return metadata;
+}
 
-            if (!keyHex || !valueHex) return;
-
-            const key = Buffer.from(keyHex, "hex").toString("utf8");
-            const value = key === "author" ? valueHex : Buffer.from(valueHex, "hex").toString("utf8");
-
-            metadata[key] = value;
-        });
-
-        return metadata;
+export function convertDatum(plutusData: string): Record<string, string> {
+    try {
+        return convertCip68Metadata(deserializeDatum(plutusData));
     } catch (error) {
         console.error("Error converting CIP68 to metadata:", error);
         return {};
