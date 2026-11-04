@@ -8,6 +8,8 @@
         "start": "next start",
         "lint": "eslint",
         "test": "bun test",
+        "test:preprod": "RUN_PREPROD_TESTS=true bun test src/tests/mesh.test.ts",
+        "test:preprod:update": "RUN_PREPROD_UPDATE_TEST=true bun test src/tests/mesh.test.ts",
         "contract:check": "cd ../onchain && aiken check",
         "contract:sync": "cd ../onchain && aiken build && cp plutus.json ../frontend/contract/plutus.json"
     },

@@ -109,7 +109,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     quantity: "1",
                 },
             ])
-            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash));
+            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash), "JSON");
         unsignedTx
             .txOut(this.platformAddress, [
                 {
@@ -231,7 +231,7 @@ export class MeshTxBuilder extends MeshAdapter {
                     quantity: "1",
                 },
             ])
-            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash));
+            .txOutInlineDatumValue(this.metadataToCip68(metadata, issuerHash), "JSON");
 
         unsignedTx
             .txOut(this.platformAddress, [

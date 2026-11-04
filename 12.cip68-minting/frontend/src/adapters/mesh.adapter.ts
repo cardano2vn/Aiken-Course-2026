@@ -1,10 +1,8 @@
 import {
     applyParamsToScript,
-    Data,
     deserializeAddress,
     IEvaluator,
     IFetcher,
-    mConStr0,
     MeshTxBuilder,
     MeshWallet,
     mPubKeyAddress,
@@ -22,6 +20,13 @@ import { APP_NETWORK_ID, APP_WALLET_ADDRESS } from "@/constants/enviroments";
 import { blockfrostProvider } from "@/providers/cardano";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+type PlutusDataJson =
+    | { constructor: number; fields: PlutusDataJson[] }
+    | { bytes: string }
+    | { int: number }
+    | { list: PlutusDataJson[] }
+    | { map: { k: PlutusDataJson; v: PlutusDataJson }[] };
 
 /**
  * @description
@@ -244,13 +249,22 @@ export class MeshAdapter {
         })[0];
     };
 
-    protected metadataToCip68 = (metadata: Record<string, string>, author: string): Data => {
-        const results: Data[] = Object.entries(metadata)
+    protected metadataToCip68 = (metadata: Record<string, string>, author: string): PlutusDataJson => {
+        const results = Object.entries(metadata)
             .filter(([key]) => key !== "author")
-            .map(([key, value]) => mConStr0([stringToHex(key), stringToHex(value)]));
-        results.push(mConStr0([stringToHex("author"), author]));
+            .map(([key, value]) => ({
+                k: { bytes: stringToHex(key) },
+                v: { bytes: stringToHex(value) },
+            }));
+        results.push({
+            k: { bytes: stringToHex("author") },
+            v: { bytes: author },
+        });
 
-        return mConStr0([results, 1]);
+        return {
+            constructor: 0,
+            fields: [{ map: results }, { int: 1 }],
+        };
     };
 
     public convertDatum = (plutusData: string): Record<string, string> => {
