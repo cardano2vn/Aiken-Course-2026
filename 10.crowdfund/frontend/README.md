@@ -20,6 +20,16 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Crowdfund preprod integration test
+
+Set `APP_NETWORK=preprod`, `APP_MNEMONIC`, and `BLOCKFROST_API_KEY` in `.env`, then run:
+
+```bash
+RUN_CARDANO_INTEGRATION_TESTS=true bun test src/tests/mesh.integration.test.ts
+```
+
+This test submits real create, donate, and withdraw transactions and incurs preprod fees. It uses wallet account 0 as the beneficiary and account 1 as a separate change address for withdrawals. Transactions confirmed before a later step fails remain on-chain.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

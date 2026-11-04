@@ -243,11 +243,18 @@ export class MeshTxBuilder extends MeshAdapter {
     };
 
     withdraw = async ({ campaignRef }: { campaignRef: CampaignRef }) => {
-        const { utxos, collateral } = await this.getWalletForTx();
+        const { utxos, collateral, withdrawChangeAddress } = await this.getWalletForTx();
         const { utxo, datum, identity } = await this.findCampaign(campaignRef);
         const totalContributions = datum.contributions.reduce((sum, contribution) => sum + contribution.quantity, 0);
         if (totalContributions < datum.goal) {
             throw new Error("Campaign goal has not been reached.");
+        }
+        if (!withdrawChangeAddress || withdrawChangeAddress === datum.beneficiary) {
+            throw new Error("A wallet change address different from the campaign beneficiary is required to withdraw.");
+        }
+        const campaignLovelace = utxo.output.amount.find((asset) => asset.unit === "lovelace")?.quantity;
+        if (campaignLovelace === undefined) {
+            throw new Error("Campaign UTxO does not contain lovelace.");
         }
 
         return await this.meshTxBuilder
@@ -260,8 +267,9 @@ export class MeshTxBuilder extends MeshAdapter {
             .mint("-1", this.policyId, identity.assetName)
             .mintingScript(this.mintScriptCbor)
             .mintRedeemerValue(mConStr1([]), undefined, { mem: 1_000_000, steps: 500_000_000 })
+            .txOut(datum.beneficiary, [{ unit: "lovelace", quantity: campaignLovelace }])
             .selectUtxosFrom(utxos)
-            .changeAddress(datum.beneficiary)
+            .changeAddress(withdrawChangeAddress)
             .requiredSignerHash(deserializeAddress(datum.beneficiary).pubKeyHash)
             .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
             .setNetwork(APP_NETWORK)
