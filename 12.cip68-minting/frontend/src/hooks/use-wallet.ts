@@ -106,7 +106,7 @@ export const useWallet = create<WalletStoreType>((set, get) => ({
                         data,
                         signature,
                     }),
-                    redirect: false,
+                    redirect: true,
                 });
                 if (!authResult?.ok || authResult.error) {
                     throw new Error(authResult?.error || "Wallet signature verification failed.");
