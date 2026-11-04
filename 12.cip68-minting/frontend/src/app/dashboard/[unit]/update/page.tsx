@@ -10,6 +10,7 @@ import { useWallet } from "@/hooks/use-wallet";
 import { update } from "@/actions/cip68.action";
 import { getAsset } from "@/actions/assets.action";
 import { hexToString } from "@meshsdk/core";
+import { APP_EXPLORER_URL } from "@/constants/enviroments";
 import { isAssetAuthor } from "@/utils/cip68";
 
 type MetadataField = {
@@ -350,7 +351,7 @@ export default function UpdateMetadataPage() {
                                             Transaction hash
                                         </p>
                                         <a
-                                            href={`https://preview.cardanoscan.io/transaction/${txHash}`}
+                                            href={`${APP_EXPLORER_URL}/transaction/${txHash}`}
                                             target="_blank"
                                             className="break-all font-mono text-sm text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
                                         >

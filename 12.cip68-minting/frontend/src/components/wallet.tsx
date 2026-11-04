@@ -21,8 +21,9 @@ import { Session } from "next-auth";
 type Props = {
     wallet: WalletType;
     session: Session | null;
+    onSignedIn: () => Promise<void>;
 };
-export default function Wallet({ wallet, session }: Props) {
+export default function Wallet({ wallet, session, onSignedIn }: Props) {
     const { signIn } = useWallet();
     const [isEnable, setIsEnable] = useState<boolean>(false);
     const [isDownload, setIsDownload] = useState<boolean>(false);
@@ -37,6 +38,7 @@ export default function Wallet({ wallet, session }: Props) {
                 name: wallet.name,
                 version: wallet.version || "",
             });
+            await onSignedIn();
         } catch (error) {
             setSignInError(error instanceof Error ? error.message : "Wallet sign-in failed.");
         }

@@ -42,7 +42,7 @@ export default function Account() {
 
     return (
         <Popover>
-            <PopoverTrigger className="hidden items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-2 py-1.5 pr-4 text-sm font-semibold text-slate-700 shadow-[0_10px_30px_-15px_rgba(15,23,42,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800 xl:inline-flex">
+            <PopoverTrigger className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-2 py-1.5 pr-4 text-sm font-semibold text-slate-700 shadow-[0_10px_30px_-15px_rgba(15,23,42,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 p-1 dark:bg-slate-800">
                     <Image
                         className="h-full w-full rounded-full object-cover"

@@ -8,6 +8,7 @@ import { MdArrowLeft, MdCheckCircle, MdAdd, MdDeleteOutline } from "react-icons/
 import { CircleLoader } from "react-spinners";
 import { mint } from "@/actions/cip68.action";
 import { useWallet } from "@/hooks/use-wallet";
+import { APP_EXPLORER_URL } from "@/constants/enviroments";
 import { assetNameByteLength, paymentKeyHashOf } from "@/utils/cip68";
 
 type MetadataField = {
@@ -428,7 +429,7 @@ export default function Page() {
                                             Transaction hash
                                         </p>
                                         <a
-                                            href={`https://preview.cardanoscan.io/transaction/${txHash}`}
+                                            href={`${APP_EXPLORER_URL}/transaction/${txHash}`}
                                             target="_blank"
                                             className="break-all font-mono text-sm text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
                                         >

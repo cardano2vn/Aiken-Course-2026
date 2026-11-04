@@ -6,7 +6,7 @@ import { images } from "@/public/images";
 import { routers } from "@/constants/routers";
 import { useSession } from "next-auth/react";
 import { wallets } from "@/constants/wallets";
-import { redirect, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { SocialIcon } from "react-social-icons";
 import Network from "@/components/network";
@@ -34,11 +34,20 @@ export default function SignIn() {
 
     const router = useRouter();
 
-    const { data: session, status } = useSession();
+    const { data: session, status, update } = useSession();
+
+    const handleAuthenticated = async () => {
+        const updatedSession = await update();
+        if (!updatedSession?.user?.address) {
+            throw new Error("Wallet sign-in succeeded, but the authenticated session could not be loaded.");
+        }
+        router.replace("/dashboard");
+        router.refresh();
+    };
 
     useEffect(() => {
         if (status === "authenticated") {
-            redirect("/");
+            router.replace("/dashboard");
         }
     }, [status, router]);
 
@@ -100,7 +109,7 @@ export default function SignIn() {
                             <section className="flex-1 rounded-[1.4rem] border border-slate-200/70 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/50">
                                 <div className="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1">
                                     {wallets.map((wallet: WalletType, index: number) => (
-                                        <Wallet key={index} wallet={wallet} session={session} />
+                                        <Wallet key={index} wallet={wallet} session={session} onSignedIn={handleAuthenticated} />
                                     ))}
                                 </div>
                             </section>

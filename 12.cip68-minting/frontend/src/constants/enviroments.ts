@@ -2,8 +2,10 @@ import { Network } from "@meshsdk/core";
 
 const BLOCKFROST_API_KEY = process.env.BLOCKFROST_API_KEY || "";
 const KOIOS_TOKEN = process.env.KOIOS_TOKEN || "";
-const APP_NETWORK: Network = (process.env.APP_NETWORK?.toLowerCase() as Network) || "preview";
+const APP_NETWORK: Network = (process.env.APP_NETWORK?.toLowerCase() as Network) || "preprod";
 const APP_NETWORK_ID = APP_NETWORK === "mainnet" ? 1 : 0;
+const APP_EXPLORER_URL =
+    APP_NETWORK === "mainnet" ? "https://cardanoscan.io" : `https://${APP_NETWORK}.cardanoscan.io`;
 const APP_WALLET_ADDRESS = process.env.APP_WALLET_ADDRESS || "";
 
-export { APP_NETWORK, APP_NETWORK_ID, BLOCKFROST_API_KEY, KOIOS_TOKEN, APP_WALLET_ADDRESS };
+export { APP_NETWORK, APP_NETWORK_ID, APP_EXPLORER_URL, BLOCKFROST_API_KEY, KOIOS_TOKEN, APP_WALLET_ADDRESS };

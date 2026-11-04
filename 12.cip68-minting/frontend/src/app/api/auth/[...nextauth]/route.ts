@@ -6,8 +6,8 @@ const handler = NextAuth(config);
 
 export const GET = handler;
 
-export async function POST(request: Request) {
-    const response = await handler(request);
+export async function POST(request: Request, context: { params: Promise<{ nextauth: string[] }> }) {
+    const response = await handler(request, context);
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     response.headers.append(
         "Set-Cookie",
