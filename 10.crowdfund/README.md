@@ -6,11 +6,10 @@ Dự án này minh họa cách xây dựng một nền tảng gây quỹ phi t�
 
 ## 🏗 Kiến trúc Dự án
 
-Dự án này là một monorepo bao gồm 3 thành phần chính:
+Dự án này gồm 2 thành phần chính:
 
 - `onchain/`: Chứa smart contract Aiken định nghĩa logic của chiến dịch crowdfunding: đóng góp, rút tiền khi đạt mục tiêu, và hoàn trả nếu không đạt mục tiêu trước thời hạn.
-- `offchain/`: Thư viện TypeScript dùng MeshJS để xây dựng giao dịch, query dữ liệu và tương tác với blockchain.
-- `frontend/`: Giao diện web dùng Next.js cho người dùng tạo chiến dịch, đóng góp, rút tiền và xem trạng thái quỹ.
+- `frontend/`: Giao diện web Next.js, đồng thời chứa logic MeshJS để đọc dữ liệu và xây dựng giao dịch.
 
 ## 💡 Mục tiêu của dự án
 
@@ -20,13 +19,14 @@ Dự án này nhằm minh họa các khái niệm cốt lõi sau:
 - Tạo và quản lý campaign theo mục tiêu, deadline và beneficiary
 - Cơ chế đóng góp ADA với ràng buộc trên-chain
 - Quyền hoàn trả cho backer nếu chiến dịch không thành công
-- Kết hợp on-chain logic, offchain builder và UI web3
+- Kết hợp on-chain logic, MeshJS transaction builder và UI web3
 
 ## 🚀 Hướng dẫn Cài đặt & Chạy dApp
 
 ### 1. Yêu cầu hệ thống
 
 - Node.js: khuyến nghị phiên bản LTS mới nhất
+- Bun: dùng để chạy frontend test suite
 - Aiken: cài đặt theo hướng dẫn chính thức
 - Một ví Cardano Preprod có sẵn tADA
 - Kết nối internet để truy vấn dữ liệu từ Blockfrost hoặc Koios
@@ -37,13 +37,6 @@ Trong thư mục `frontend/`:
 
 ```bash
 cd frontend
-npm install
-```
-
-Trong thư mục `offchain/`:
-
-```bash
-cd offchain
 npm install
 ```
 
@@ -71,19 +64,8 @@ Tạo file `.env` từ `.env.example` nếu cần truy cập Preprod hoặc data
 Ví dụ trong `frontend/.env`:
 
 ```env
-NEXT_PUBLIC_BLOCKFROST_API_KEY="your_blockfrost_preprod_key"
-NEXT_PUBLIC_NETWORK="preprod"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your_secret_key"
-```
-
-Ví dụ trong `offchain/.env`:
-
-```env
 APP_NETWORK="preprod"
 BLOCKFROST_API_KEY="your_blockfrost_preprod_key"
-APP_MNEMONIC="word1 word2 ... word24"
-KOIOS_TOKEN="your_koios_token"
 ```
 
 > [!NOTE]
@@ -102,11 +84,13 @@ Mở trình duyệt tại:
 http://localhost:3000
 ```
 
-### 6. Chạy offchain / test
+### 6. Chạy test
+
+Trong thư mục `frontend/`:
 
 ```bash
-cd offchain
-npm test
+cd frontend
+bun test
 ```
 
 ## 🧩 Luồng hoạt động của Crowdfund
@@ -133,6 +117,7 @@ Một chiến dịch gây quỹ thường diễn ra như sau:
 
 - `Aiken` cho smart contract logic
 - `MeshJS` cho offchain transaction builder và wallet integration
+- Frontend lấy toàn bộ UTxO và collateral từ browser wallet để hỗ trợ account đa địa chỉ; seed phrase không được dùng trên server
 - `Next.js` + `React` + `Tailwind CSS` cho frontend
 - `Blockfrost` / `Koios` cho truy vấn dữ liệu blockchain
 - `TypeScript` cho logic giao dịch và UI
@@ -146,10 +131,6 @@ Một chiến dịch gây quỹ thường diễn ra như sau:
 │   ├── lib/
 │   ├── aiken.toml
 │   └── plutus.json
-├── offchain/
-│   ├── src/
-│   ├── package.json
-│   └── .env.example
 ├── frontend/
 │   ├── src/
 │   ├── package.json
@@ -188,7 +169,7 @@ Dự án này rất phù hợp để thực hành giao thức tài chính cộng
 Một số file bạn nên bắt đầu đọc:
 
 - `onchain/validators/crowdfund.ak`
-- `offchain/src/txbuilders/mesh.txbuilder.ts`
+- `frontend/src/txbuilders/mesh.txbuilder.ts`
 - `frontend/src/components/CreateCampaign.tsx`
 - `frontend/src/actions/crowdfund.action.ts`
 
@@ -199,7 +180,7 @@ Crowdfund là một ví dụ mạnh về cách xây dựng ứng dụng gây qu�
 - smart contract quản lý quỹ công cộng
 - người dùng đóng góp cùng lúc qua giao dịch trên chuỗi
 - campaign có thể đạt mục tiêu hoặc thất bại theo luật đã định sẵn
-- UI và offchain logic có thể xây dựng trên cùng một hệ thống trustless
+- UI và transaction builder có thể xây dựng trên cùng một hệ thống trustless
 
 ---
 

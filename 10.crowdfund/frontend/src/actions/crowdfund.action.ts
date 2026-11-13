@@ -1,36 +1,23 @@
 "use server";
 
-import { APP_MNEMONIC, APP_NETWORK_ID } from "@/constants/enviroments";
-import { blockfrostProvider } from "@/providers/cardano/blockfrost";
 import { MeshTxBuilder } from "@/txbuilders/mesh.txbuilder";
-import { MeshWallet } from "@meshsdk/core";
+import type { WalletContext } from "@/types/wallet";
 
 export const create = async ({
     beneficiary,
     goal,
     deadline,
     campaignDeposit,
-    address,
+    walletContext,
 }: {
     beneficiary: string;
     goal: number;
     deadline: number;
     campaignDeposit: number;
-    address: string;
+    walletContext: WalletContext;
 }) => {
-    const meshWallet = new MeshWallet({
-        accountIndex: 0,
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "address",
-            address: address,
-        },
-    });
-
     const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
+        walletContext,
     });
 
     await meshTxBuilder.initalize();
@@ -44,27 +31,16 @@ export const create = async ({
 };
 
 export const donate = async ({
-    address,
+    walletContext,
     quantity,
     campaignRef,
 }: {
-    address: string;
+    walletContext: WalletContext;
     quantity: number;
     campaignRef: { txHash: string; outputIndex: number };
 }) => {
-    const meshWallet = new MeshWallet({
-        accountIndex: 0,
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "address",
-            address: address,
-        },
-    });
-
     const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
+        walletContext,
     });
 
     await meshTxBuilder.initalize();
@@ -76,25 +52,14 @@ export const donate = async ({
 };
 
 export const reclaim = async ({
-    address,
+    walletContext,
     campaignRef,
 }: {
-    address: string;
+    walletContext: WalletContext;
     campaignRef: { txHash: string; outputIndex: number };
 }) => {
-    const meshWallet = new MeshWallet({
-        accountIndex: 0,
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "address",
-            address: address,
-        },
-    });
-
     const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
+        walletContext,
     });
 
     await meshTxBuilder.initalize();
@@ -105,52 +70,25 @@ export const reclaim = async ({
 };
 
 export const withdraw = async ({
-    address,
-    changeAddress,
+    walletContext,
     campaignRef,
 }: {
-    address: string;
-    changeAddress: string;
+    walletContext: WalletContext;
     campaignRef: { txHash: string; outputIndex: number };
 }) => {
-    const meshWallet = new MeshWallet({
-        accountIndex: 0,
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "address",
-            address: address,
-        },
-    });
-
     const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
+        walletContext,
     });
 
     await meshTxBuilder.initalize();
 
     return await meshTxBuilder.withdraw({
         campaignRef,
-        changeAddress,
     });
 };
 
 export const getCampaign = async () => {
-    const meshWallet = new MeshWallet({
-        accountIndex: 0,
-        networkId: APP_NETWORK_ID,
-        fetcher: blockfrostProvider,
-        submitter: blockfrostProvider,
-        key: {
-            type: "mnemonic",
-            words: APP_MNEMONIC?.split(" ") || [],
-        },
-    });
-
-    const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({
-        meshWallet: meshWallet,
-    });
+    const meshTxBuilder: MeshTxBuilder = new MeshTxBuilder({});
 
     await meshTxBuilder.initalize();
 

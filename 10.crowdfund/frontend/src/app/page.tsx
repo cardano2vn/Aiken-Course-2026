@@ -31,7 +31,7 @@ export default function Home() {
     const [selected, setSelected] = useState<SelectedCampaign | null>(null);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-    function handleTxSuccess(_txHash: string) {
+    function handleTxSuccess() {
         setRefreshTrigger((n) => n + 1);
         setTimeout(() => setActiveTab("campaigns"), 2000);
     }

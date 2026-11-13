@@ -7,13 +7,13 @@ Crowdfund là dApp quản lý một campaign duy nhất trên script UTxO. Datum
 ```mermaid
 graph TD
   User["Contributor / Beneficiary wallet"] --> FE["Next.js frontend"]
-  FE --> OC["MeshJS off-chain"]
-  OC --> Provider["Blockfrost / Koios"]
-  OC --> Campaign["Crowdfund script UTxO"]
+  FE --> Builder["MeshJS transaction builder"]
+  Builder --> Provider["Blockfrost / Koios"]
+  Builder --> Campaign["Crowdfund script UTxO"]
   Campaign --> Validator["Aiken crowdfund validator"]
 ```
 
-Frontend chọn campaign và hiển thị tiến độ. Off-chain query datum, cập nhật cặp contributor/amount, dựng output và validity interval. Validator kiểm tra mọi thay đổi trên-chain.
+Frontend chọn campaign và hiển thị tiến độ. Logic MeshJS trong frontend query datum, cập nhật cặp contributor/amount, dựng output và validity interval. Validator kiểm tra mọi thay đổi on-chain.
 
 ## 2. Trạng thái campaign
 

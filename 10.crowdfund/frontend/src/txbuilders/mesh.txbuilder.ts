@@ -242,32 +242,34 @@ export class MeshTxBuilder extends MeshAdapter {
             .complete();
     };
 
-    withdraw = async ({ campaignRef, changeAddress }: { campaignRef: CampaignRef; changeAddress: string }) => {
-        const { utxos, collateral } = await this.getWalletForTx();
+    withdraw = async ({ campaignRef }: { campaignRef: CampaignRef }) => {
+        const { utxos, collateral, withdrawChangeAddress } = await this.getWalletForTx();
         const { utxo, datum, identity } = await this.findCampaign(campaignRef);
         const totalContributions = datum.contributions.reduce((sum, contribution) => sum + contribution.quantity, 0);
         if (totalContributions < datum.goal) {
             throw new Error("Campaign goal has not been reached.");
         }
-        if (!changeAddress || changeAddress === datum.beneficiary) {
-            throw new Error("Withdraw change address must differ from the beneficiary address.");
+        if (!withdrawChangeAddress || withdrawChangeAddress === datum.beneficiary) {
+            throw new Error("A wallet change address different from the campaign beneficiary is required to withdraw.");
         }
-
-        const payout = utxo.output.amount.filter((asset) => asset.unit !== identity.unit);
+        const campaignLovelace = utxo.output.amount.find((asset) => asset.unit === "lovelace")?.quantity;
+        if (campaignLovelace === undefined) {
+            throw new Error("Campaign UTxO does not contain lovelace.");
+        }
 
         return await this.meshTxBuilder
             .spendingPlutusScriptV3()
             .txIn(utxo.input.txHash, utxo.input.outputIndex)
             .txInInlineDatumPresent()
-            .txInRedeemerValue(mConStr2([]))
+            .txInRedeemerValue(mConStr2([]), undefined, { mem: 5_000_000, steps: 1_000_000_000 })
             .txInScript(this.spendScriptCbor)
-            .txOut(datum.beneficiary, payout)
             .mintPlutusScriptV3()
             .mint("-1", this.policyId, identity.assetName)
             .mintingScript(this.mintScriptCbor)
-            .mintRedeemerValue(mConStr1([]))
+            .mintRedeemerValue(mConStr1([]), undefined, { mem: 1_000_000, steps: 500_000_000 })
+            .txOut(datum.beneficiary, [{ unit: "lovelace", quantity: campaignLovelace }])
             .selectUtxosFrom(utxos)
-            .changeAddress(changeAddress)
+            .changeAddress(withdrawChangeAddress)
             .requiredSignerHash(deserializeAddress(datum.beneficiary).pubKeyHash)
             .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
             .setNetwork(APP_NETWORK)

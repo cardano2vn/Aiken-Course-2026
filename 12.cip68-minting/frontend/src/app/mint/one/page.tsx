@@ -8,6 +8,8 @@ import { MdArrowLeft, MdCheckCircle, MdAdd, MdDeleteOutline } from "react-icons/
 import { CircleLoader } from "react-spinners";
 import { mint } from "@/actions/cip68.action";
 import { useWallet } from "@/hooks/use-wallet";
+import { APP_EXPLORER_URL } from "@/constants/enviroments";
+import { assetNameByteLength, paymentKeyHashOf } from "@/utils/cip68";
 
 type MetadataField = {
     key: string;
@@ -16,7 +18,6 @@ type MetadataField = {
 
 type FormData = {
     assetName: string;
-    quantity: number;
     metadata: MetadataField[];
 };
 
@@ -24,7 +25,7 @@ const defaultMetadata: MetadataField[] = [
     { key: "name", value: "Solvel Dragon #001" },
     { key: "description", value: "A powerful dragon from the Solvel universe." },
     { key: "image", value: "https://via.placeholder.com/600x600.png?text=Solvel+Dragon" },
-    { key: "mediaType", value: "image/png" },
+    { key: "media_type", value: "image/png" },
 ];
 
 export default function Page() {
@@ -39,16 +40,12 @@ export default function Page() {
     const [step, setStep] = useState<number>(1);
     const [isMinting, setIsMinting] = useState(false);
     const [txHash, setTxHash] = useState<string>("");
+    const [txError, setTxError] = useState("");
 
     const [formData, setFormData] = useState<FormData>({
         assetName: "",
-        quantity: 1,
         metadata: defaultMetadata,
     });
-
-    const updateForm = (field: keyof Omit<FormData, "metadata">, value: any) => {
-        setFormData((prev) => ({ ...prev, [field]: value }));
-    };
 
     const updateMetadata = (index: number, field: "key" | "value", value: string) => {
         setFormData((prev) => {
@@ -81,26 +78,31 @@ export default function Page() {
 
     const handleMint = async () => {
         setIsMinting(true);
-        const unsignedTx = await mint({
-            address: address as string,
-            assetName: formData.assetName,
-            metadata: formData.metadata.reduce(
-                (acc, item) => {
-                    const key = item.key.trim();
-                    if (!key) return acc;
-                    acc[key] = item.value.trim();
-                    return acc;
-                },
-                {} as Record<string, string>,
-            ),
-            quantity: String(formData.quantity),
-        });
-        const signedTx = await signTx(unsignedTx);
-        const hash = await submitTx(signedTx);
+        setTxError("");
+        try {
+            const unsignedTx = await mint({
+                address: address as string,
+                assetName: formData.assetName,
+                metadata: formData.metadata.reduce(
+                    (acc, item) => {
+                        const key = item.key.trim();
+                        if (!key) return acc;
+                        acc[key] = item.value.trim();
+                        return acc;
+                    },
+                    {} as Record<string, string>,
+                ),
+            });
+            const signedTx = await signTx(unsignedTx);
+            const hash = await submitTx(signedTx);
 
-        setTxHash(hash);
-        setIsMinting(false);
-        next();
+            setTxHash(hash);
+            next();
+        } catch (error) {
+            setTxError(error instanceof Error ? error.message : "Mint transaction failed.");
+        } finally {
+            setIsMinting(false);
+        }
     };
 
     const previewImage = formData.metadata.find((m) => m.key === "image")?.value || "";
@@ -126,6 +128,17 @@ export default function Page() {
                             <p className="mt-3 text-base leading-7 text-slate-600 dark:text-slate-400">
                                 Fill in the asset details, shape the metadata, review the payload, and sign the transaction to mint your NFT.
                             </p>
+                            <p className="mt-3 text-sm leading-6 text-blue-700 dark:text-blue-300">
+                                Each connected wallet is the issuer for its own policy. The same asset name under another issuer&apos;s policy is a
+                                different asset; names are not globally reserved.
+                            </p>
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950/60">
+                                <p className="font-medium">Issuer payment key hash</p>
+                                <p className="mt-1 break-all font-mono">{paymentKeyHashOf(address) || "Connect a wallet to identify the issuer."}</p>
+                                <p className="mt-1 text-slate-500 dark:text-slate-400">
+                                    This key determines the policy ID and store address. Only the recorded author can update or burn the pair.
+                                </p>
+                            </div>
                         </div>
                         <div className="rounded-[1.2rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
                             <p className="font-medium">Asset name</p>
@@ -161,6 +174,11 @@ export default function Page() {
                     </div>
 
                     <div className="rounded-[1.8rem] border border-slate-200/80 bg-white/80 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 md:p-8">
+                        {txError && (
+                            <p role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                {txError}
+                            </p>
+                        )}
                         {step === 1 && (
                             <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
                                 <div className="space-y-6">
@@ -168,7 +186,7 @@ export default function Page() {
                                         <p className="text-sm font-semibold uppercase tracking-[0.25em] text-blue-600 dark:text-blue-400">
                                             Step 1 · Asset Info
                                         </p>
-                                        <h2 className="mt-2 text-3xl font-semibold">Name and quantity of the NFT you want to mint</h2>
+                                        <h2 className="mt-2 text-3xl font-semibold">Name your NFT</h2>
                                     </div>
 
                                     <div>
@@ -178,26 +196,23 @@ export default function Page() {
                                         <input
                                             type="text"
                                             value={formData.assetName}
-                                            onChange={(e) => updateForm("assetName", e.target.value)}
+                                            onChange={(e) => setFormData((prev) => ({ ...prev, assetName: e.target.value }))}
                                             placeholder="Hydra Course 2026"
                                             className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-slate-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                                         />
-                                    </div>
-
-                                    <div>
-                                        <label className="mb-2 block text-sm font-medium text-slate-600 dark:text-slate-300">Quantity to mint</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            value={formData.quantity}
-                                            onChange={(e) => updateForm("quantity", Math.max(1, Number(e.target.value)))}
-                                            className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-slate-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                        />
+                                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                            {assetNameByteLength(formData.assetName)} / 28 UTF-8 bytes
+                                        </p>
+                                        {assetNameByteLength(formData.assetName) > 28 && (
+                                            <p role="alert" className="mt-1 text-sm text-red-600 dark:text-red-400">
+                                                Asset name must be 28 UTF-8 bytes or fewer.
+                                            </p>
+                                        )}
                                     </div>
 
                                     <button
                                         onClick={next}
-                                        disabled={!formData.assetName.trim()}
+                                        disabled={!formData.assetName.trim() || assetNameByteLength(formData.assetName) > 28}
                                         className="rounded-2xl bg-blue-600 px-8 py-4 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                                     >
                                         Continue →
@@ -209,7 +224,7 @@ export default function Page() {
                                     <ul className="mt-3 space-y-2">
                                         <li>• The asset name will be encoded to hex when stored on-chain</li>
                                         <li>• CIP-68 keeps metadata flexible and easy to update later</li>
-                                        <li>• Quantity controls how many units of this asset are minted</li>
+                                        <li>• Mint always creates exactly one user token and one reference token</li>
                                     </ul>
                                 </div>
                             </div>
@@ -225,7 +240,7 @@ export default function Page() {
                                         <h2 className="mt-2 text-2xl font-semibold">Shape the metadata payload</h2>
                                     </div>
                                     <div className="rounded-[1.1rem] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                        Follow CIP-25 / CIP-68 conventions — keys like name, description, image, and mediaType are recognized by most
+                                        Follow CIP-68 conventions — keys like name, description, image, and media_type are recognized by most
                                         wallets and explorers.
                                     </div>
                                     <div className="rounded-[1.1rem] border border-slate-200 bg-white p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
@@ -313,8 +328,8 @@ export default function Page() {
                                             <span className="font-mono text-blue-600 dark:text-blue-400">{formData.assetName || "—"}</span>
                                         </div>
                                         <div className="mb-4 flex items-center justify-between text-sm">
-                                            <span className="text-slate-500 dark:text-slate-400">Quantity</span>
-                                            <span className="font-semibold text-slate-900 dark:text-white">{formData.quantity}</span>
+                                            <span className="text-slate-500 dark:text-slate-400">CIP-68 pair</span>
+                                            <span className="font-semibold text-slate-900 dark:text-white">1 user token + 1 reference token</span>
                                         </div>
                                         <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">Metadata</p>
                                         <pre className="max-h-80 overflow-auto whitespace-pre-wrap wrap-break-word rounded-[1rem] bg-slate-900 p-4 font-mono text-sm text-slate-100 dark:bg-slate-950">
@@ -414,7 +429,7 @@ export default function Page() {
                                             Transaction hash
                                         </p>
                                         <a
-                                            href={`https://preview.cardanoscan.io/transaction/${txHash}`}
+                                            href={`${APP_EXPLORER_URL}/transaction/${txHash}`}
                                             target="_blank"
                                             className="break-all font-mono text-sm text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
                                         >
@@ -436,7 +451,6 @@ export default function Page() {
                                             setTxHash("");
                                             setFormData({
                                                 assetName: "",
-                                                quantity: 1,
                                                 metadata: defaultMetadata,
                                             });
                                         }}

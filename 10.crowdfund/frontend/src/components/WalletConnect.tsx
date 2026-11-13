@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 import type { WalletState } from "../hooks/useWallet";
 
 interface Props {
@@ -17,7 +18,7 @@ export default function WalletConnect({ walletState }: Props) {
     async function openPicker() {
         const { BrowserWallet } = await import("@meshsdk/wallet");
         const installed = BrowserWallet.getInstalledWallets();
-        setWallets(installed.map((w: any) => ({ id: w.id, name: w.name, icon: w.icon })));
+        setWallets(installed.map((wallet) => ({ id: wallet.id, name: wallet.name, icon: wallet.icon })));
         setOpen(true);
     }
 
@@ -81,7 +82,16 @@ export default function WalletConnect({ walletState }: Props) {
                                 onClick={() => handleSelect(w.id)}
                                 className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-800 transition-colors text-left"
                             >
-                                {w.icon && <img src={w.icon} alt={w.name} className="w-5 h-5 rounded" />}
+                                {w.icon && (
+                                    <Image
+                                        src={w.icon}
+                                        alt={w.name}
+                                        width={20}
+                                        height={20}
+                                        unoptimized
+                                        className="w-5 h-5 rounded"
+                                    />
+                                )}
                                 {w.name}
                             </button>
                         ))

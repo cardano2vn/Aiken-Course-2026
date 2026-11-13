@@ -3,6 +3,7 @@
 import { deserializeAddress, UTxO } from "@meshsdk/core";
 import { useEffect, useState } from "react";
 import { getCampaign } from "@/actions/crowdfund.action";
+import { useCurrentTime } from "@/hooks/useCurrentTime";
 
 interface Campaign {
     utxo: UTxO;
@@ -38,21 +39,30 @@ function formatADA(lovelace: number): string {
 
 export default function CampaignList({ address, onSelectCampaign, selectedUtxoId, refreshTrigger }: Props) {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loadedRefreshTrigger, setLoadedRefreshTrigger] = useState<number | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const loading = loadedRefreshTrigger !== refreshTrigger;
+    const currentTime = useCurrentTime();
 
     useEffect(() => {
-        (async () => {
-            setLoading(true);
-            try {
-                setCampaigns(await getCampaign());
-            } catch (error) {
-                setError(String(error));
-            }
-            setLoading(false);
-        })();
+        let isCurrent = true;
 
-        setLoading(true);
+        getCampaign()
+            .then((campaigns) => {
+                if (!isCurrent) return;
+                setCampaigns(campaigns);
+                setError(null);
+            })
+            .catch((error: unknown) => {
+                if (isCurrent) setError(String(error));
+            })
+            .finally(() => {
+                if (isCurrent) setLoadedRefreshTrigger(refreshTrigger);
+            });
+
+        return () => {
+            isCurrent = false;
+        };
     }, [refreshTrigger]);
 
     if (loading) {
@@ -82,7 +92,7 @@ export default function CampaignList({ address, onSelectCampaign, selectedUtxoId
                 const utxoId = `${utxo.input.txHash}#${utxo.input.outputIndex}`;
                 const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
                 const progress = progressPercent(datum);
-                const isExpired = Date.now() > datum.deadline;
+                const isExpired = currentTime !== null && currentTime > datum.deadline;
                 const goalMet = total >= datum.goal;
                 const paymentKeyHash = address ? deserializeAddress(address).pubKeyHash : null;
                 const myContrib = paymentKeyHash

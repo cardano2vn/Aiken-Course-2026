@@ -6,11 +6,12 @@ Dự án này minh họa cách xây dựng một hệ thống mint NFT theo tiê
 
 ## 🏗 Kiến trúc Dự án
 
-Dự án này là một monorepo gồm 3 thành phần chính:
+Dự án này là một monorepo gồm 2 thành phần chính:
 
 - `onchain/`: Chứa các smart contract Aiken định nghĩa logic minting, store metadata, validate reference token và danh tính của tác giả.
-- `offchain/`: Thư viện TypeScript dùng MeshJS để build mint transaction, metadata mapping và tương tác với Cardano.
-- `frontend/`: Giao diện web dùng Next.js cho người dùng tạo NFT, hiển thị metadata, và tương tác với smart contract.
+- `frontend/`: Giao diện Next.js và MeshJS transaction builder cho người dùng tạo NFT, hiển thị metadata, và tương tác với smart contract.
+
+Mỗi ví kết nối là issuer cho policy riêng của mình: payment key hash được parameterize vào validator, nên issuer khác nhau tạo policy ID và store address khác nhau. Đây là mô hình nhiều issuer độc lập, không phải một bộ sưu tập dùng chung. Tên giống nhau ở hai policy khác nhau là hai asset unit khác nhau; app không cung cấp namespace tên toàn mạng. Chỉ author được ghi trong datum lúc mint mới có thể update hoặc burn asset đó.
 
 ## 💡 Mục tiêu của dự án
 
@@ -20,7 +21,7 @@ Dự án này nhằm minh họa các khái niệm cốt lõi sau:
 - Tách metadata khỏi token để quản lý linh hoạt hơn
 - Cơ chế mint / update / burn NFT hợp lệ
 - Kiểm tra chữ ký tác giả và quyền sở hữu token
-- Kết hợp smart contract, offchain builder và frontend cho NFT trên Cardano
+- Kết hợp smart contract, transaction builder và frontend cho NFT trên Cardano
 
 ## 🚀 Hướng dẫn Cài đặt & Chạy dApp
 
@@ -37,14 +38,7 @@ Trong thư mục `frontend/`:
 
 ```bash
 cd frontend
-npm install
-```
-
-Trong thư mục `offchain/`:
-
-```bash
-cd offchain
-npm install
+bun install
 ```
 
 ### 3. Biên dịch Smart Contract (On-chain)
@@ -66,34 +60,26 @@ aiken check
 
 ### 4. Cấu hình Biến Môi Trường
 
-Tạo file `.env` từ `.env.example` nếu cần truy cập mạng Preprod hoặc database.
+Tạo `frontend/.env.local` từ `frontend/.env.example`.
 
-Ví dụ trong `frontend/.env`:
-
-```env
-NEXT_PUBLIC_BLOCKFROST_API_KEY="your_blockfrost_preprod_key"
-NEXT_PUBLIC_NETWORK="preprod"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your_secret_key"
-```
-
-Ví dụ trong `offchain/.env`:
+Điền các biến cần thiết trong `frontend/.env.local`:
 
 ```env
 APP_NETWORK="preprod"
 BLOCKFROST_API_KEY="your_blockfrost_preprod_key"
-APP_MNEMONIC="word1 word2 ... word24"
 KOIOS_TOKEN="your_koios_token"
+APP_WALLET_ADDRESS="addr_test1..."
+NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_SECRET="your_secret_key"
 ```
 
-> [!NOTE]
-> Với Next.js, các biến dùng trong browser cần có tiền tố `NEXT_PUBLIC_`.
+Không dùng mnemonic server-side; ví người dùng ký giao dịch và challenge đăng nhập.
 
 ### 5. Chạy Front-end
 
 ```bash
 cd frontend
-npm run dev
+bun run dev
 ```
 
 Mở trình duyệt tại:
@@ -102,11 +88,12 @@ Mở trình duyệt tại:
 http://localhost:3000
 ```
 
-### 6. Chạy offchain / test
+### 6. Đồng bộ contract và chạy test
 
 ```bash
-cd offchain
-npm test
+cd frontend
+bun run contract:sync
+bun run test
 ```
 
 ## 🧩 Luồng hoạt động của CIP-68 Minting
@@ -114,7 +101,7 @@ npm test
 Một phiên bản CIP-68 thường hoạt động theo các bước sau:
 
 1. Mint NFT theo chuẩn CIP-68
-   - Người dùng mint reference token và user token
+   - Issuer mint đúng một reference token và một user token
    - Metadata được lưu trong datum hoặc reference UTxO
    - Contract kiểm tra định dạng asset và chữ ký của tác giả
 
@@ -126,13 +113,14 @@ Một phiên bản CIP-68 thường hoạt động theo các bước sau:
    - Tác giả có thể sửa metadata của NFT nếu logic contract cho phép
    - Contract đảm bảo không đổi author và giữ cấu trúc metadata hợp lệ
 
-4. Burn token
-   - Nếu người sở hữu hoặc tác giả muốn burn asset, contract phải xác minh điều kiện và chuyển quỹ/metadata đúng chỗ
+4. Burn cặp token
+   - Author phải ký và giữ user token duy nhất; giao dịch burn đồng thời user token và reference token, sau đó remove store UTxO
+   - Không hỗ trợ burn một phần hay giữ reference token để tham chiếu phần còn lại
 
 ## 🛠 Công nghệ sử dụng
 
 - `Aiken` cho smart contract logic
-- `MeshJS` cho offchain transaction builder và wallet integration
+- `MeshJS` cho transaction builder và wallet integration trong frontend
 - `Next.js` + `React` + `Tailwind CSS` cho frontend
 - `Blockfrost` / `Koios` cho query blockchain
 - `TypeScript` cho xử lý metadata và UI
@@ -146,10 +134,6 @@ Một phiên bản CIP-68 thường hoạt động theo các bước sau:
 │   ├── lib/
 │   ├── aiken.toml
 │   └── plutus.json
-├── offchain/
-│   ├── src/
-│   ├── package.json
-│   └── .env.example
 ├── frontend/
 │   ├── src/
 │   ├── package.json
@@ -162,8 +146,7 @@ Một phiên bản CIP-68 thường hoạt động theo các bước sau:
 
 Trong Aiken, contract này tập trung vào hai phần chính:
 
-- `mint.ak`: xác thực việc mint và burn token theo CIP-68
-- `store.ak`: xác thực việc lưu, cập nhật và xoá metadata dưới dạng datum
+- `contract.ak`: xác thực mint, update, remove và burn cặp token theo CIP-68
 
 Các ràng buộc chính bao gồm:
 
@@ -188,7 +171,7 @@ Một số file bạn nên bắt đầu đọc:
 
 - `onchain/validators/mint.ak`
 - `onchain/validators/store.ak`
-- `offchain/src/txbuilders/mesh.txbuilder.ts`
+- `frontend/src/txbuilders/mesh.txbuilder.ts`
 - `frontend/src/components/...`
 
 ## ✅ Kết luận

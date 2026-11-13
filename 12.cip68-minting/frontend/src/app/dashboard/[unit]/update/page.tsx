@@ -10,6 +10,8 @@ import { useWallet } from "@/hooks/use-wallet";
 import { update } from "@/actions/cip68.action";
 import { getAsset } from "@/actions/assets.action";
 import { hexToString } from "@meshsdk/core";
+import { APP_EXPLORER_URL } from "@/constants/enviroments";
+import { isAssetAuthor } from "@/utils/cip68";
 
 type MetadataField = {
     key: string;
@@ -27,10 +29,12 @@ export default function UpdateMetadataPage() {
             await getAsset({ policyId: String(unit).slice(0, 56), assetName: String(unit).slice(56), walletAddress: address as string }),
         enabled: !!address,
     });
+    const isAuthor = isAssetAuthor(data?.onchain_metadata?.author, address);
 
     const [step, setStep] = useState(1);
     const [isUpdating, setIsUpdating] = useState(false);
     const [txHash, setTxHash] = useState("");
+    const [txError, setTxError] = useState("");
     const [metadata, setMetadata] = useState<MetadataField[]>([]);
 
     useEffect(() => {
@@ -39,10 +43,9 @@ export default function UpdateMetadataPage() {
             return;
         }
 
-        const entries = Object.entries(data.onchain_metadata as Record<string, string>).map(([key, value]) => ({
-            key,
-            value: String(value),
-        }));
+        const entries = Object.entries(data.onchain_metadata as Record<string, string>)
+            .filter(([key]) => key !== "author")
+            .map(([key, value]) => ({ key, value: String(value) }));
 
         setMetadata(entries.length > 0 ? entries : [{ key: "", value: "" }]);
     }, [data?.onchain_metadata]);
@@ -66,27 +69,37 @@ export default function UpdateMetadataPage() {
     const prev = () => step > 1 && setStep(step - 1);
 
     const handleUpdate = async () => {
+        if (!isAuthor) {
+            setTxError("Only the asset author can update its metadata.");
+            return;
+        }
         setIsUpdating(true);
-        const payload = metadata.reduce(
-            (acc, item) => {
-                const key = item.key.trim();
-                if (!key) return acc;
-                acc[key] = item.value.trim();
-                return acc;
-            },
-            {} as Record<string, string>,
-        );
+        setTxError("");
+        try {
+            const payload = metadata.reduce(
+                (acc, item) => {
+                    const key = item.key.trim();
+                    if (!key || key === "author") return acc;
+                    acc[key] = item.value.trim();
+                    return acc;
+                },
+                {} as Record<string, string>,
+            );
 
-        const unsignedTx = await update({
-            address: address as string,
-            metadata: payload,
-            assetName: hexToString(String(data?.asset_name).slice(8)),
-        });
-        const signedTx = await signTx(unsignedTx);
-        const txHash = await submitTx(signedTx);
-        setTxHash(txHash);
-        setIsUpdating(false);
-        next();
+            const unsignedTx = await update({
+                address: address as string,
+                metadata: payload,
+                assetName: hexToString(String(data?.asset_name).slice(8)),
+            });
+            const signedTx = await signTx(unsignedTx);
+            const submittedTxHash = await submitTx(signedTx);
+            setTxHash(submittedTxHash);
+            next();
+        } catch (error) {
+            setTxError(error instanceof Error ? error.message : "Metadata update failed.");
+        } finally {
+            setIsUpdating(false);
+        }
     };
 
     const progress = (step / 4) * 100;
@@ -148,6 +161,16 @@ export default function UpdateMetadataPage() {
                     </div>
 
                     <div className="rounded-[1.8rem] border border-slate-200/80 bg-white/80 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 md:p-8">
+                        {txError && (
+                            <p role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                {txError}
+                            </p>
+                        )}
+                        {data && !isAuthor && (
+                            <p role="alert" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+                                Only the author recorded in this asset&apos;s on-chain datum can update it.
+                            </p>
+                        )}
                         {step === 1 && (
                             <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
                                 <div className="overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-slate-100 shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -295,7 +318,7 @@ export default function UpdateMetadataPage() {
                                     </button>
                                     <button
                                         onClick={handleUpdate}
-                                        disabled={isUpdating}
+                                        disabled={isUpdating || !isAuthor}
                                         className="flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                                     >
                                         {isUpdating ? (
@@ -328,7 +351,7 @@ export default function UpdateMetadataPage() {
                                             Transaction hash
                                         </p>
                                         <a
-                                            href={`https://preview.cardanoscan.io/transaction/${txHash}`}
+                                            href={`${APP_EXPLORER_URL}/transaction/${txHash}`}
                                             target="_blank"
                                             className="break-all font-mono text-sm text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
                                         >

@@ -21,11 +21,28 @@ import { Session } from "next-auth";
 type Props = {
     wallet: WalletType;
     session: Session | null;
+    onSignedIn: () => Promise<void>;
 };
-export default function Wallet({ wallet, session }: Props) {
+export default function Wallet({ wallet, session, onSignedIn }: Props) {
     const { signIn } = useWallet();
     const [isEnable, setIsEnable] = useState<boolean>(false);
     const [isDownload, setIsDownload] = useState<boolean>(false);
+    const [signInError, setSignInError] = useState("");
+
+    const handleSignIn = async () => {
+        setSignInError("");
+        try {
+            await signIn(session, {
+                icon: wallet.image,
+                id: wallet.id,
+                name: wallet.name,
+                version: wallet.version || "",
+            });
+            await onSignedIn();
+        } catch (error) {
+            setSignInError(error instanceof Error ? error.message : "Wallet sign-in failed.");
+        }
+    };
 
     useEffect(() => {
         (async function () {
@@ -119,6 +136,11 @@ export default function Wallet({ wallet, session }: Props) {
                                 : "Authorize the wallet so it can interact with the application securely."
                             : "Clicking Continue will open the wallet download page."}
                     </AlertDialogDescription>
+                    {signInError && (
+                        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                            {signInError}
+                        </p>
+                    )}
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -126,14 +148,7 @@ export default function Wallet({ wallet, session }: Props) {
                         onClick={
                             isDownload
                                 ? isEnable
-                                    ? async () => {
-                                          await signIn(session, {
-                                              icon: wallet.image,
-                                              id: wallet.id,
-                                              name: wallet.name,
-                                              version: wallet.version || "",
-                                          });
-                                      }
+                                    ? handleSignIn
                                     : handleEnable
                                 : handleDownload
                         }

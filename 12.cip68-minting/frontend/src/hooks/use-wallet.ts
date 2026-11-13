@@ -94,18 +94,23 @@ export const useWallet = create<WalletStoreType>((set, get) => ({
                 if (!result || isNil(data)) {
                     throw new Error(message);
                 }
-                const signature = await browserWallet.signData(data);
+                const signature = await browserWallet.signData(data, address);
                 if (isNil(signature)) {
                     throw new Error("Cant get signature");
                 }
 
-                console.log(signature);
-                await signIn("credentials", {
+                const authResult = await signIn("credentials", {
                     data: JSON.stringify({
                         wallet: name,
                         address: address,
+                        data,
+                        signature,
                     }),
+                    redirect: true,
                 });
+                if (!authResult?.ok || authResult.error) {
+                    throw new Error(authResult?.error || "Wallet signature verification failed.");
+                }
                 set({
                     browserWallet: browserWallet,
                     wallet: wallet,
@@ -124,7 +129,8 @@ export const useWallet = create<WalletStoreType>((set, get) => ({
                 });
             }
         } catch (error) {
-            await signOut();
+            await signOut({ redirect: false });
+            throw error;
         }
     },
 

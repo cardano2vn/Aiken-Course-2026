@@ -4,6 +4,8 @@ import { useState } from "react";
 import type { UTxO, BrowserWallet } from "@meshsdk/core";
 import { DECIMAL_PLACE } from "@/constants/common";
 import { donate } from "@/actions/crowdfund.action";
+import { getWalletContext } from "@/lib/wallet";
+import { useCurrentTime } from "@/hooks/useCurrentTime";
 
 interface Props {
     wallet: BrowserWallet;
@@ -24,7 +26,8 @@ export default function DonateForm({ wallet, campaignUtxo, datum, onSuccess }: P
     const [error, setError] = useState<string | null>(null);
 
     const total = datum.contributions.reduce((s, c) => s + c.quantity, 0);
-    const isExpired = Date.now() > datum.deadline;
+    const currentTime = useCurrentTime();
+    const isExpired = currentTime !== null && currentTime > datum.deadline;
     const goalMet = total >= datum.goal;
 
     async function handleDonate(e: React.FormEvent) {
@@ -33,17 +36,17 @@ export default function DonateForm({ wallet, campaignUtxo, datum, onSuccess }: P
         setError(null);
         setTxHash(null);
         try {
-            if (isExpired) throw new Error("Campaign đã kết thúc.");
+            if (Date.now() > datum.deadline) throw new Error("Campaign đã kết thúc.");
             if (goalMet) throw new Error("Goal đã đạt rồi.");
 
             const donationLovelace = Number(Math.floor(parseFloat(amountAda) * DECIMAL_PLACE));
             if (donationLovelace < DECIMAL_PLACE) throw new Error("Minimum donation: 1 ADA");
             const unsignedTx = await donate({
-                address: await wallet.getChangeAddress(),
+                walletContext: await getWalletContext(wallet),
                 quantity: Number(amountAda) * DECIMAL_PLACE,
                 campaignRef: campaignUtxo.input,
             });
-             const signedTx = await wallet.signTx(unsignedTx);
+            const signedTx = await wallet.signTx(unsignedTx);
             const txHash = await wallet.submitTx(signedTx);
             setTxHash(txHash);
             onSuccess(txHash);

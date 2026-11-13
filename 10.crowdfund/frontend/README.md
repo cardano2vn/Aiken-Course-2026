@@ -20,6 +20,19 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Crowdfund preprod integration test
+
+Set `APP_NETWORK=preprod`, `APP_MNEMONIC`, and `BLOCKFROST_API_KEY` in `.env`. Run each redeemer separately from the frontend directory:
+
+```bash
+RUN_CARDANO_INTEGRATION_TESTS=true bun test src/tests/mesh.integration.test.ts -t "Create:"
+RUN_CARDANO_INTEGRATION_TESTS=true bun test src/tests/mesh.integration.test.ts -t "Donate:"
+RUN_CARDANO_INTEGRATION_TESTS=true CROWDFUND_CAMPAIGN_TX_HASH=<tx-hash> CROWDFUND_CAMPAIGN_OUTPUT_INDEX=<index> bun test src/tests/mesh.integration.test.ts -t "Reclaim:"
+RUN_CARDANO_INTEGRATION_TESTS=true CROWDFUND_CAMPAIGN_TX_HASH=<tx-hash> CROWDFUND_CAMPAIGN_OUTPUT_INDEX=<index> bun test src/tests/mesh.integration.test.ts -t "Withdraw:"
+```
+
+Create prints the campaign UTxO reference to use for Donate. Donate prints the updated reference; pass that to a later Withdraw or Reclaim run. Donate and Reclaim use `CROWDFUND_DONOR_ACCOUNT_INDEX` (default `0`), which must be the wallet that contributed. Reclaim requires an expired campaign with the goal unmet. Withdraw requires a funded campaign, uses account 0 as beneficiary and account 1 as its separate change address. Close is exercised when the final donor reclaims or the beneficiary withdraws. These tests submit real transactions and incur preprod fees; confirmed transactions remain on-chain if a later step fails.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -7,10 +7,14 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
-        "contract:check": "cd ./contract && aiken check"
+        "test": "bun test",
+        "test:preprod": "RUN_PREPROD_TESTS=true bun test src/tests/mesh.test.ts",
+        "test:preprod:update": "RUN_PREPROD_UPDATE_TEST=true bun test src/tests/mesh.test.ts",
+        "contract:check": "cd ../onchain && aiken check",
+        "contract:sync": "cd ../onchain && aiken build && cp plutus.json ../frontend/contract/plutus.json"
     },
     "dependencies": {
-        "@blockfrost/blockfrost-js": "^6.1.1",
+        "@blockfrost/blockfrost-js": "^6.2.0",
         "@hookform/resolvers": "^5.2.2",
         "@icons-pack/react-simple-icons": "^13.13.0",
         "@meshsdk/core": "^1.9.1",

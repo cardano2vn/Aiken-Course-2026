@@ -5,12 +5,9 @@ cd onchain
 aiken check
 aiken build
 
-cd ../offchain
-npm install
-npm test
-
 cd ../frontend
 npm install
+bun test
 npm run dev
 ```
 

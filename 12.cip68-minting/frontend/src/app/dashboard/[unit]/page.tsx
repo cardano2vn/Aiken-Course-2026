@@ -11,14 +11,15 @@ import { MdCopyAll, MdClose } from "react-icons/md";
 import { useQuery } from "@tanstack/react-query";
 import { getAsset, getTransactions } from "@/actions/assets.action";
 import { hexToString } from "@meshsdk/core";
+import { isAssetAuthor } from "@/utils/cip68";
 
 export default function Page() {
     const { unit } = useParams();
     const { address, submitTx, signTx } = useWallet();
 
     const [showBurnModal, setShowBurnModal] = useState(false);
-    const [burnQuantity, setBurnQuantity] = useState<string>("1");
     const [isBurning, setIsBurning] = useState(false);
+    const [burnError, setBurnError] = useState("");
     const [expandedTxHash, setExpandedTxHash] = useState<string | null>(null);
 
     const { data, isLoading, error } = useQuery({
@@ -26,7 +27,9 @@ export default function Page() {
         queryFn: async () =>
             await getAsset({ policyId: String(unit).slice(0, 56), assetName: String(unit).slice(56), walletAddress: address as string }),
         enabled: !!address,
-        
+    });
+    const isAuthor = isAssetAuthor(data?.onchain_metadata?.author, address);
+
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
     const {
@@ -91,16 +94,20 @@ export default function Page() {
 
     const handleBurn = async function () {
         try {
+            if (!isAuthor) {
+                throw new Error("Only the asset author can burn this CIP-68 pair.");
+            }
             setIsBurning(true);
+            setBurnError("");
             const unsignedTx = await burn({
                 address: address as string,
                 assetName: hexToString(String(data?.asset_name).slice(8)),
-                quantity: "-1",
             });
             const signedTx = await signTx(unsignedTx);
-            const txHash = await submitTx(signedTx);
+            await submitTx(signedTx);
+            setShowBurnModal(false);
         } catch (error) {
-            console.log(error);
+            setBurnError(error instanceof Error ? error.message : "Burn transaction failed.");
         } finally {
             setIsBurning(false);
         }
@@ -182,20 +189,35 @@ export default function Page() {
                         </div>
 
                         <div className="flex flex-col gap-4 pt-4 sm:flex-row">
-                            <Link
-                                href={window.location + "/update"}
-                                className="flex-1 rounded-[1.1rem] border border-slate-200/80 bg-white px-5 py-5 text-center text-lg font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                            >
-                                Update Metadata
-                            </Link>
+                            {isAuthor ? (
+                                <Link
+                                    href={`/dashboard/${String(unit)}/update`}
+                                    className="flex-1 rounded-[1.1rem] border border-slate-200/80 bg-white px-5 py-5 text-center text-lg font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                                >
+                                    Update Metadata
+                                </Link>
+                            ) : (
+                                <button
+                                    disabled
+                                    className="flex-1 cursor-not-allowed rounded-[1.1rem] border border-slate-200/80 bg-slate-100 px-5 py-5 text-center text-lg font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500"
+                                >
+                                    Update Metadata (author only)
+                                </button>
+                            )}
 
                             <button
                                 onClick={() => setShowBurnModal(true)}
+                                disabled={!isAuthor}
                                 className="flex-1 rounded-[1.1rem] bg-red-600 px-5 py-5 text-lg font-semibold text-white transition hover:bg-red-700"
                             >
-                                Burn NFT
+                                {isAuthor ? "Burn NFT" : "Burn NFT (author only)"}
                             </button>
                         </div>
+                        {!isAuthor && (
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                Only the asset author can update metadata or burn the complete CIP-68 pair.
+                            </p>
+                        )}
 
                         {/* ==================== BURN MODAL ==================== */}
                         <AnimatePresence>
@@ -220,26 +242,23 @@ export default function Page() {
                                         <div className="space-y-6">
                                             <div>
                                                 <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">
-                                                    NFT: <span className="font-medium text-slate-900 dark:text-white">{data?.metadata?.name}</span>
+                                                    NFT: <span className="font-medium text-slate-900 dark:text-white">{data?.onchain_metadata?.name}</span>
                                                 </p>
                                                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                                                    Available quantity:{" "}
+                                                    User token quantity:{" "}
                                                     <span className="text-emerald-600 dark:text-emerald-400">{data?.quantity}</span>
                                                 </p>
                                             </div>
 
-                                            <div>
-                                                <label className="mb-2 block text-sm text-slate-500 dark:text-slate-400">Quantity to burn</label>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max={data?.quantity}
-                                                    value={burnQuantity}
-                                                    onChange={(e) => setBurnQuantity(e.target.value)}
-                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-xl text-slate-900 transition focus:border-red-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                                />
-                                                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Max: {data?.quantity}</p>
-                                            </div>
+                                            <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+                                                This burns exactly one user token and its one reference token. Partial burns are not supported.
+                                            </p>
+
+                                            {burnError && (
+                                                <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+                                                    {burnError}
+                                                </p>
+                                            )}
 
                                             <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
                                                 This action cannot be undone. The NFT will be permanently removed from the chain after burn.
@@ -255,6 +274,7 @@ export default function Page() {
                                                 </button>
                                                 <button
                                                     onClick={handleBurn}
+                                                    disabled={isBurning || !isAuthor || Number(data?.quantity) !== 1}
                                                     className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-red-600 px-4 py-4 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-800"
                                                 >
                                                     {isBurning ? <>Burning...</> : <>Confirm Burn</>}
