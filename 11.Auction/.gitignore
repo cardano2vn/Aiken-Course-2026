@@ -61,3 +61,7 @@ specs/
 # Tài liệu nội bộ đặc thù dự án
 HADA_CORE_SOP.md
 AUCTION_ONCHAIN_ANALYSIS.md
+
+# Kịch bản slide & lời thoại giảng viên (không public lên github)
+docs/kich_ban_*
+

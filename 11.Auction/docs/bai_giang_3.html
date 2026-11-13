@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 11.3: Phân Tích Chuyên Sâu Tầng Off-Chain MeshJS, Kỹ Thuật Dựng Transaction &amp; Tích Hợp Frontend Next.js</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+  <style>
+    :root {
+      --primary-color: #f59e0b;
+      --primary-hover: #d97706;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #fbbf24;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.75; padding: 2.5rem 1.5rem; }
+    .container { max-width: 1040px; margin: 0 auto; background: var(--bg-card); padding: 3rem; border-radius: 14px; box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.25rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); line-height: 1.3; }
+    h2 { font-size: 1.65rem; color: #fbbf24; margin-top: 2.2rem; margin-bottom: 1.1rem; border-left: 4px solid #f59e0b; padding-left: 0.8rem; }
+    h3 { font-size: 1.3rem; color: #fde68a; margin-top: 1.6rem; margin-bottom: 0.8rem; }
+    p { margin-bottom: 1.25rem; color: #e2e8f0; font-size: 1.02rem; }
+    blockquote { background: #b4530915; border-left: 4px solid var(--accent-color); padding: 1.2rem 1.4rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; color: #fef3c7; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2.2rem 0; }
+    ul, ol { margin-left: 2rem; margin-bottom: 1.6rem; color: #e2e8f0; }
+    li { margin-bottom: 0.5rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.9); color: #f472b6; padding: 0.2rem 0.45rem; border-radius: 5px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.6rem; border-radius: 10px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.3rem; border: none; display: block; color: #f8fafc; font-size: 0.94em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.8rem; border-radius: 8px; border: 1px solid var(--border-color); }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; }
+    th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.95rem; }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: #1e293b90; }
+    .mermaid { background: #111827; padding: 1.8rem; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 1.8rem; display: flex; justify-content: center; }
+    .info-box { background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 1.3rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; }
+    .danger-box { background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 1.3rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 11.3: Phân Tích Chuyên Sâu Tầng Off-Chain MeshJS, Kỹ Thuật Dựng Transaction &amp; Tích Hợp Frontend Next.js</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken 2026<br>
+      <strong>Module 11:</strong> English Auction Smart Contract (Sàn Đấu Giá Kiểu Anh Phi Tập Trung)<br>
+      <strong>Mục tiêu bài giảng:</strong> Đi sâu mổ xẻ từng dòng code của lớp <code>AuctionContract</code> trong <code>frontend_app/lib/offchain.ts</code>, vượt qua các lỗi khét tiếng như 3116 MalformedScripts, BigInt undefined, 3136 Budget, nắm vững bộ 6 kịch bản kiểm thử off-chain và hoàn thiện giao diện Web3 Next.js 16.
+    </blockquote>
+    <hr>
+    
+    <h2>1. Bức Tranh Tầng Off-Chain Web3 Trên Cardano EUTxO</h2>
+    <p>Trong kiến trúc Cardano EUTxO, Smart Contract on-chain không chủ động chạy như một tiến trình máy chủ. Nó chỉ đóng vai trò người thẩm định (Validator) khi có một giao dịch gửi đến.</p>
+    <p>Nhiệm vụ của tầng Off-Chain là cầu nối biến các thao tác của người dùng trên giao diện web thành các giao dịch EUTxO hợp lệ, bao gồm: truy vấn UTxO sàn qua Blockfrost, đóng gói Double-CBOR, chuẩn hóa Plutus JSON CIP-57, cấp ngân sách tính toán tất định, cân bằng phí và ký gửi lên blockchain an toàn.</p>
+
+    <div class="mermaid">
+    graph LR
+        A["Browser (Next.js 16 UI)"] -->|CIP-30 Connect| B["Cardano Wallet"]
+        A -->|Gọi Hàm Nghiệp Vụ| C["AuctionContract (offchain.ts)"]
+        C -->|Đọc Blueprint & Double-CBOR| D["plutus.json"]
+        C -->|Truy Vấn Script UTxO| E["Blockfrost Provider"]
+        C -->|Lắp Ráp Tx| F["MeshTxBuilder"]
+        F -->|Trả Về TxHex Chưa Ký| B
+        B -->|Ký & Submit| E
+        E -->|Xác Nhận Khối| G["Cardano Conway Node"]
+    </div>
+
+    <h2>2. Kỹ Thuật Chuẩn Hóa Double-CBOR &amp; Triệt Tiêu Lỗi Code 3116</h2>
+    <pre><code class="language-typescript">this.scriptCbor = applyParamsToScript(
+  blueprint.validators[0].compiledCode,
+  [],
+  "JSON"
+);
+this.scriptAddress = this.getScriptAddress(this.scriptCbor);</code></pre>
+
+    <div class="danger-box">
+      <strong>Cardano Node Error 3116:</strong><br>
+      <code>{"code":3116,"message":"Some Plutus scripts in the witness set or in an output are invalid. Scripts must be well-formed flat-encoded Plutus scripts, CBOR-encoded. Yes, there's a double binary encoding..."}</code>
+    </div>
+
+    <p>Khi biên dịch bằng <code>aiken build</code>, chuỗi <code>compiledCode</code> trong <code>plutus.json</code> chỉ được bọc 1 lớp CBOR đơn. Khi nạp vào MeshJS, SDK bóc mất lớp CBOR này, để lộ chuỗi Flat bytecode trần trụi. Khi gửi lên mạng Conway Ledger, Node kiểm tra witness set thấy thiếu lớp bọc CBOR ByteString hợp lệ, lập tức trả về lỗi 3116. Bằng cách gọi <code>applyParamsToScript(..., [], 'JSON')</code> với mảng tham số rỗng, SDK tự động bọc thêm một lớp CBOR thứ hai (Double-CBOR) chuẩn xác.</p>
+
+    <h2>3. Chuẩn Hóa Plutus JSON (CIP-57) &amp; Hàm <code>safePlutusJson</code></h2>
+    <pre><code class="language-typescript">function safePlutusJson(obj: unknown): any {
+  return JSON.parse(
+    JSON.stringify(obj, (_, v) => {
+      if (typeof v === "bigint") return Number(v);
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const ctor = (v as any).constructor !== undefined ? Number((v as any).constructor) : undefined;
+        const alt = (v as any).alternative !== undefined ? Number((v as any).alternative) : undefined;
+        const tag = ctor !== undefined ? ctor : alt;
+        if (tag !== undefined && "fields" in (v as any)) {
+          return { ...v, alternative: tag, constructor: tag };
+        }
+      }
+      return v;
+    })
+  );
+}</code></pre>
+
+    <p>Trong chuẩn CIP-57, đối tượng dữ liệu được định danh bằng trường <code>constructor</code>. Nhưng MeshTxBuilder nội bộ lại đi tìm <code>data.alternative</code> để gọi <code>BigInt(data.alternative)</code>. Khi dùng các helper như <code>pubKeyAddress()</code>, trường <code>alternative</code> bị <code>undefined</code>, gây ra lỗi Runtime làm sập ứng dụng. Hàm <code>safePlutusJson</code> duyệt đệ quy và đồng bộ song song cả hai trường <code>constructor: tag</code> và <code>alternative: tag</code>, đồng thời chuyển đổi an toàn <code>bigint</code> thành số nguyên tiêu chuẩn.</p>
+
+    <h2>4. Quản Trị Execution Budget: Vô Hiệu Hóa Evaluator Tự Động &amp; Lỗi 3136</h2>
+    <pre><code class="language-typescript">if (this.mesh.evaluator) {
+  console.log("[AuctionContract] Disabling evaluator — manual budgets will be used from txInRedeemerValue calls.");
+  (this.mesh as any).evaluator = undefined;
+}</code></pre>
+
+    <p>Khi Mesh thực hiện Coin Selection, nó tạo ra các bản nháp giao dịch tạm thời (chưa cân bằng phí). Nếu evaluator gửi bản nháp này qua Blockfrost/Ogmios, Ogmios sẽ từ chối ở Phase-1. Nếu SDK bắt lỗi rồi điền budget ước lượng giả định, giao dịch submit thật sẽ bị lỗi 3136 (Unexpected Script Failure). Vô hiệu hóa evaluator giúp chúng ta sử dụng trực tiếp Manual Budget tất định từ benchmark on-chain (ví dụ nhánh <code>Close</code> cấp `{ mem: 700000, steps: 200000000 }`), đảm bảo tốc độ dựng nhanh và xác suất submit thành công 100%.</p>
+
+    <h2>5. Mổ Xẻ 5 Hàm Giao Dịch Trong Lớp `AuctionContract`</h2>
+
+    <h3>5.1. `startAuction`: Niêm Yết NFT &amp; Khóa Cọc min-ADA</h3>
+    <pre><code class="language-typescript">startAuction = async (nftAssets: Asset[], minBidInLovelace: number, deadlineMs: number, minIncrementInLovelace = 1_000_000) => {
+  deadlineMs = Math.floor(deadlineMs / 1000) * 1000;
+  if (!nftAssets || nftAssets.length === 0) throw new Error("Cần ít nhất 1 NFT.");
+  if (minBidInLovelace <= 0) throw new Error("minBid phải lớn hơn 0.");
+  if (deadlineMs <= Date.now()) throw new Error("Deadline phải nằm trong tương lai.");
+
+  this.mesh.reset();
+  const { utxos, walletAddress } = await this.getWalletInfoForTx();
+  const cleanNftAssets = nftAssets.filter((a) => a.unit !== "lovelace" && a.unit !== "");
+
+  const outputDatum = auctionDatum(walletAddress, deadlineMs, minBidInLovelace, minIncrementInLovelace, cleanNftAssets);
+
+  await this.mesh
+    .txOut(this.scriptAddress, cleanNftAssets)
+    .txOutInlineDatumValue(outputDatum, "JSON")
+    .changeAddress(walletAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+
+  return this.mesh.txHex;
+};</code></pre>
+
+    <p>Hàm thực hiện lọc sạch NFT để loại bỏ lovelace rác khỏi mảng tài sản, đảm bảo khớp với kiểu <code>MValue</code> trên Aiken. Người dùng không cần tự cộng 2 ADA cọc vào output: MeshTxBuilder tự động tính toán lượng min-UTxO Lovelace theo quy định của sổ cái và bổ sung vào output của script.</p>
+
+    <h3>5.2. `bid`: Đặt Giá Mới, Hoàn Cọc Seller &amp; Atomic Refund</h3>
+    <pre><code class="language-typescript">  // Logic phân nhánh hoàn tiền trong bid:
+  if (previousHighestBidder && previousHighestBidAmount > 0) {
+    // OUTBID: Atomic Refund 100% cho người đặt trước
+    builder.txOut(previousHighestBidder, [{ unit: "lovelace", quantity: previousHighestBidAmount.toString() }]);
+  } else {
+    // FIRST BID: Hoàn trả lại 2 ADA cọc ban đầu cho Seller
+    const initialLovelace = targetUtxo.output.amount.find((a) => a.unit === "lovelace")?.quantity || "2000000";
+    builder.txOut(sellerAddress, [{ unit: "lovelace", quantity: initialLovelace }]);
+  }</code></pre>
+
+    <div class="info-box">
+      <strong>Quy tắc hoàn tiền trong `bid`:</strong><br>
+      - Lượt đầu: Hoàn trả lại 2 ADA cọc ban đầu cho Seller.<br>
+      - Các lượt sau: Hoàn trả tức thời 100% tiền cho bidder trước đó (Atomic Refund).<br>
+      - Giới hạn thời gian: Cận trên đặt bằng <code>Math.min(deadlineSlot - 2, currentSlot + 600)</code> để đảm bảo giao dịch chỉ có hiệu lực trước khi hết hạn.
+    </div>
+
+    <h3>5.3. `update`, `cancel` &amp; `close`</h3>
+    <ul>
+      <li><strong><code>update</code>:</strong> Bắt buộc chữ ký <code>sellerPkh</code>, chỉ sửa khi chưa có ai bid, và bảo toàn nguyên vẹn NFT vào script mới.</li>
+      <li><strong><code>cancel</code>:</strong> Hoàn trả 100% tài sản trong UTxO về ví Seller, hoàn toàn không ràng buộc deadline.</li>
+      <li><strong><code>close</code>:</strong> Bắt buộc <code>lowerBoundSlot = deadlineSlot + 1</code> để thỏa mãn <code>is_entirely_after</code>, tự động phân phối tiền cho Seller và trao NFT cho Winner.</li>
+    </ul>
+
+    <h2>6. Làm Chủ Thời Gian &amp; Bảng Ma Trận Validity Range</h2>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Hành động</th>
+            <th>Điều kiện On-chain</th>
+            <th>Cận Dưới (invalidBefore)</th>
+            <th>Cận Trên (invalidHereafter)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>startAuction</code></td><td>Không kiểm tra</td><td>Không cần</td><td><code>currentSlot + 600</code></td></tr>
+          <tr><td><code>bid</code></td><td>is_entirely_before</td><td>Không cần</td><td><code>Math.min(deadlineSlot - 2, currentSlot + 600)</code></td></tr>
+          <tr><td><code>update</code></td><td>is_entirely_before</td><td>Không cần</td><td><code>Math.min(deadlineSlot - 2, currentSlot + 600)</code></td></tr>
+          <tr><td><code>cancel</code></td><td>Không ràng buộc deadline</td><td>Không cần</td><td><code>currentSlot + 600</code></td></tr>
+          <tr><td><code>close</code></td><td>is_entirely_after</td><td><code>deadlineSlot + 1</code> (BẮT BUỘC)</td><td><code>currentSlot + 600</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>7. Bộ 6 Kịch Bản Kiểm Thử Off-Chain (`lib/test_auction.ts`)</h2>
+    <pre><code class="language-bash">npx tsx lib/test_auction.ts</code></pre>
+    <p>File <code>test_auction.ts</code> kiểm thử toàn bộ 6 kịch bản giao dịch độc lập mà không cần kết nối ví thật. Cả 6 kịch bản đều sinh mã hex (txHex) thành công 100%, bảo đảm tính xác định tuyệt đối trước khi đưa lên giao diện người dùng.</p>
+
+    <h2>8. Tích Hợp UI Next.js 16 App Router (`app/page.tsx`)</h2>
+    <pre><code class="language-typescript">const { connected, wallet } = useWallet();
+const contract = useMemo(() => new AuctionContract({ fetcher: provider, submitter: provider, wallet }), [wallet]);
+
+// Reactive Polling mỗi 10 giây làm mới UTxO từ Blockfrost
+useEffect(() => {
+  loadAuctions();
+  const timer = setInterval(loadAuctions, 10000);
+  return () => clearInterval(timer);
+}, []);</code></pre>
+
+    <p>Trên giao diện Next.js 16, ứng dụng tích hợp nút kết nối ví đa nền tảng <code>&lt;CardanoWallet /&gt;</code>, đồng hồ đếm ngược thời gian thực, và Reactive Polling 10 giây. Hệ thống tự động phân quyền theo vai trò: Seller có nút sửa/hủy khi chưa có bid, Bidder có ô nhập giá gợi ý mức hợp lệ tiếp theo, và nút Chốt Phiên tự động mở khóa khi hết giờ.</p>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

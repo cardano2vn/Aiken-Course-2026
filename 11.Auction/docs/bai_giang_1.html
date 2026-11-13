@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 11.1: Kiến Trúc English Auction dApp &amp; Các Quyết Định Thiết Kế Quan Trọng</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+  <style>
+    :root {
+      --primary-color: #f59e0b;
+      --primary-hover: #d97706;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #fbbf24;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.75; padding: 2.5rem 1.5rem; }
+    .container { max-width: 1040px; margin: 0 auto; background: var(--bg-card); padding: 3rem; border-radius: 14px; box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.25rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); line-height: 1.3; }
+    h2 { font-size: 1.65rem; color: #fbbf24; margin-top: 2.2rem; margin-bottom: 1.1rem; border-left: 4px solid #f59e0b; padding-left: 0.8rem; }
+    h3 { font-size: 1.3rem; color: #fde68a; margin-top: 1.6rem; margin-bottom: 0.8rem; }
+    p { margin-bottom: 1.25rem; color: #e2e8f0; font-size: 1.02rem; }
+    blockquote { background: #b4530915; border-left: 4px solid var(--accent-color); padding: 1.2rem 1.4rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; color: #fef3c7; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2.2rem 0; }
+    ul, ol { margin-left: 2rem; margin-bottom: 1.6rem; color: #e2e8f0; }
+    li { margin-bottom: 0.5rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.9); color: #f472b6; padding: 0.2rem 0.45rem; border-radius: 5px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.6rem; border-radius: 10px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.3rem; border: none; display: block; color: #f8fafc; font-size: 0.94em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.8rem; border-radius: 8px; border: 1px solid var(--border-color); }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; }
+    th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.95rem; }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: #1e293b90; }
+    .mermaid { background: #111827; padding: 1.8rem; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 1.8rem; display: flex; justify-content: center; }
+    .info-box { background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 1.3rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 11.1: Kiến Trúc English Auction dApp &amp; Các Quyết Định Thiết Kế Quan Trọng</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken 2026<br>
+      <strong>Module 11:</strong> English Auction Smart Contract (Sàn Đấu Giá Kiểu Anh Phi Tập Trung)<br>
+      <strong>Mục tiêu bài giảng:</strong> Nắm vững mô hình Đấu giá kiểu Anh, cỗ máy trạng thái EUTxO State Machine, cơ chế Atomic Refund, bước giá tối thiểu và 4 tầng phòng thủ an ninh EUTxO.
+    </blockquote>
+    <hr>
+    
+    <h2>1. Bối Cảnh Bài Toán &amp; Tại Sao Cần dApp Đấu Giá?</h2>
+    <p>Trong các mô hình sàn giao dịch Web3 (như Module 6 Marketplace), cơ chế bán giá cố định (Fixed Price) phát huy hiệu quả với các tài sản đại trà. Nhưng với các tài sản độc bản như NFT 1-of-1, tên miền hiếm hay tài sản thanh lý thế chấp, người bán rất khó tự định giá: nếu đặt quá cao sẽ bị ế, nếu đặt quá thấp sẽ bị mua hớ.</p>
+    <p>Mô hình <strong>Đấu giá kiểu Anh (English Auction)</strong> giải quyết bài toán này bằng cách mở cuộc cạnh tranh công khai: giá bắt đầu từ mức sàn tối thiểu và tăng dần theo từng lượt trả giá cho đến khi thời hạn kết thúc. Người trả giá cao nhất khi hết hạn sẽ giành quyền sở hữu tài sản.</p>
+
+    <div class="mermaid">
+    flowchart LR
+        Seller["Người Bán (Seller)<br/>Khóa NFT + Cọc 2 ADA"] -->|startAuction| Script["Smart Contract UTxO<br/>NFT + Tiền Đấu Giá"]
+        Bidder1["Bidder 1 (Lượt đầu)<br/>Trả >= min_bid"] -->|MkBid| Script
+        Script -.->|Hoàn cọc 2 ADA ban đầu| Seller
+        Bidder2["Bidder 2 (Outbid)<br/>Trả >= Giá 1 + min_increment"] -->|MkBid| Script
+        Script -.->|Atomic Refund 100%| Bidder1
+        Script -->|Close sau Deadline| Winner["Winner (Bidder 2)<br/>Nhận NFT"]
+        Script -->|Close sau Deadline| SellerPayout["Seller<br/>Nhận 100% Tiền Thắng"]
+    </div>
+
+    <h2>2. So Sánh Kiến Trúc: Ethereum (Account) vs Cardano (EUTxO)</h2>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Tiêu chí</th>
+            <th>Mô hình Tài khoản (Ethereum / EVM)</th>
+            <th>Mô hình EUTxO (Cardano / Aiken)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Lưu trữ số dư</strong></td>
+            <td>Lưu trong mapping biến trạng thái <code>balances[user]</code>.</td>
+            <td>Lưu trực tiếp trong giá trị Value của Script UTxO.</td>
+          </tr>
+          <tr>
+            <td><strong>Cơ chế hoàn tiền</strong></td>
+            <td><strong>Pull Pattern:</strong> Bắt người dùng tự gửi tx <code>withdraw()</code> để rút tiền về nhằm chống Reentrancy.</td>
+            <td><strong>Push Pattern (Atomic Refund):</strong> Hoàn trả tiền tức thì về ví người cũ ngay trong transaction của người mới.</td>
+          </tr>
+          <tr>
+            <td><strong>Trải nghiệm người dùng</strong></td>
+            <td>Bị giam vốn, tốn thêm phí gas và thao tác rút tiền.</td>
+            <td>Tối ưu: Nhận lại tiền ngay lập tức, 0 tốn gas rút.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Trên Ethereum EVM, vì sợ lỗ hổng Reentrancy nên hợp đồng bắt buộc phải dùng Pull Pattern – bắt người bị outbid tự rút tiền về và chịu phí gas. Trong khi đó, trên Cardano EUTxO, chúng ta áp dụng <strong>Atomic Push Refund</strong>: Tiền của người cũ được hoàn trả về tận ví ngay trong cùng một block mà người mới đặt giá. Người tham gia không bị giam vốn và không mất một đồng phí gas nào.</p>
+
+    <h2>3. Vòng Đời Phiên Đấu Giá (EUTxO State Machine)</h2>
+    <div class="mermaid">
+    stateDiagram-v2
+        [*] --> INITIAL_LISTED: startAuction (Seller nộp NFT + 2 ADA cọc)
+        INITIAL_LISTED --> INITIAL_LISTED: Update min_bid (Trước Deadline & Chưa có Bid)
+        INITIAL_LISTED --> CANCELLED: Cancel (Seller thu hồi NFT + 2 ADA cọc)
+        INITIAL_LISTED --> ACTIVE_BIDDING: MkBid (Bidder 1 trả >= min_bid)
+        ACTIVE_BIDDING --> ACTIVE_BIDDING: MkBid (Bidder 2 trả >= Bid 1 + min_increment)
+        ACTIVE_BIDDING --> CLOSED_HAS_WINNER: Close (Sau Deadline)
+        CLOSED_HAS_WINNER --> [*]: Winner nhận NFT, Seller nhận Tiền Thắng
+        CANCELLED --> [*]
+    </div>
+
+    <h2>4. Các Quyết Định Kinh Tế Token &amp; Game Theory</h2>
+    <div class="info-box">
+      <strong>Bước giá tối thiểu (<code>min_increment</code>):</strong> Chặn đứng kẻ xấu quấy rối tăng giá 1 Lovelace để spam làm nản lòng người tham gia.<br>
+      <strong>Hoàn cọc 2 ADA cho Seller ngay tại lượt Bid đầu:</strong> Giúp Script UTxO từ lượt 1 trở đi chỉ chứa thuần túy NFT và 100% tiền của người đặt giá, sổ sách kế toán trong sáng và không ai có thể chiếm dụng min-ADA của người bán.
+    </div>
+
+    <h2>5. Bốn Lỗ Hổng Bảo Mật EUTxO &amp; Giải Pháp Triệt Tiêu</h2>
+    <ul>
+      <li><strong>Double Satisfaction:</strong> Dùng <code>inputs_at(tx.inputs, own_address)</code> ép buộc đúng 1 UTxO từ script trong mỗi transaction.</li>
+      <li><strong>min-ADA Siphoning khi Close rỗng:</strong> Chuyển toàn bộ trường hợp không có bid sang nhánh <code>Cancel</code> có chữ ký Seller.</li>
+      <li><strong>Bảo toàn NFT khi Update:</strong> Output tiếp nối bắt buộc phải chứa đúng NFT đang đấu giá qua <code>value_geq</code>.</li>
+      <li><strong>Chống Output Spoofing:</strong> Thay thế <code>list.find</code> bằng <code>list.filter</code> kết hợp <code>expect [continuing_output]</code>.</li>
+    </ul>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>

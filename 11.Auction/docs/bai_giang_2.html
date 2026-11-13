@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bài giảng 11.2: Phân Tích Chuyên Sâu Mã Nguồn Aiken `validators/auction.ak` Từng Dòng Code &amp; Ma Trận 19 Test Cases On-Chain</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+  <style>
+    :root {
+      --primary-color: #f59e0b;
+      --primary-hover: #d97706;
+      --bg-main: #0f172a;
+      --bg-card: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: #334155;
+      --code-bg: #111827;
+      --accent-color: #fbbf24;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-main); color: var(--text-main); line-height: 1.75; padding: 2.5rem 1.5rem; }
+    .container { max-width: 1040px; margin: 0 auto; background: var(--bg-card); padding: 3rem; border-radius: 14px; box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6); border: 1px solid var(--border-color); }
+    h1 { font-size: 2.25rem; color: var(--accent-color); margin-bottom: 1.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border-color); line-height: 1.3; }
+    h2 { font-size: 1.65rem; color: #fbbf24; margin-top: 2.2rem; margin-bottom: 1.1rem; border-left: 4px solid #f59e0b; padding-left: 0.8rem; }
+    h3 { font-size: 1.3rem; color: #fde68a; margin-top: 1.6rem; margin-bottom: 0.8rem; }
+    p { margin-bottom: 1.25rem; color: #e2e8f0; font-size: 1.02rem; }
+    blockquote { background: #b4530915; border-left: 4px solid var(--accent-color); padding: 1.2rem 1.4rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; color: #fef3c7; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2.2rem 0; }
+    ul, ol { margin-left: 2rem; margin-bottom: 1.6rem; color: #e2e8f0; }
+    li { margin-bottom: 0.5rem; }
+    code { font-family: "Fira Code", monospace; background: rgba(15, 23, 42, 0.9); color: #f472b6; padding: 0.2rem 0.45rem; border-radius: 5px; font-size: 0.9em; border: 1px solid #334155; }
+    pre { margin-bottom: 1.6rem; border-radius: 10px; overflow-x: auto; border: 1px solid var(--border-color); background: var(--code-bg); }
+    pre code { background: transparent; padding: 1.3rem; border: none; display: block; color: #f8fafc; font-size: 0.94em; }
+    .table-container { overflow-x: auto; margin-bottom: 1.8rem; border-radius: 8px; border: 1px solid var(--border-color); }
+    table { width: 100%; border-collapse: collapse; background: #0f172a; }
+    th, td { padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 0.95rem; }
+    th { background: #1e293b; color: var(--accent-color); font-weight: 600; }
+    tr:hover { background: #1e293b90; }
+    .mermaid { background: #111827; padding: 1.8rem; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 1.8rem; display: flex; justify-content: center; }
+    .info-box { background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 1.3rem; margin-bottom: 1.8rem; border-radius: 0 10px 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Bài giảng 11.2: Phân Tích Chuyên Sâu Mã Nguồn Aiken `validators/auction.ak` Từng Dòng Code &amp; Ma Trận 19 Test Cases On-Chain</h1>
+    <blockquote>
+      <strong>Khóa học:</strong> Lập trình Smart Contract trên Cardano với Aiken 2026<br>
+      <strong>Module 11:</strong> English Auction Smart Contract (Sàn Đấu Giá Kiểu Anh Phi Tập Trung)<br>
+      <strong>Mục tiêu bài giảng:</strong> Đi sâu mổ xẻ từng dòng code Aiken trong <code>validators/auction.ak</code>, làm rõ triết lý thiết kế EUTxO State Machine, đối chiếu các kịch bản tấn công và làm chủ ma trận 19 Unit Tests on-chain.
+    </blockquote>
+    <hr>
+    
+    <h2>1. Giới Thiệu &amp; Phương Pháp Tiếp Cận Mã Nguồn</h2>
+    <p>Sau khi đã nắm vững nền tảng kiến trúc ở Bài 11.1, bài học này đi sâu vào việc phân tích trực tiếp từng dòng code trong <code>validators/auction.ak</code>. Mục tiêu là hiểu rõ lý do của từng điều kiện kiểm tra, các kịch bản tấn công tương ứng và đối chiếu với 19 bài Unit Test on-chain.</p>
+
+    <h2>2. Cấu Trúc Thư Mục &amp; Phân Tích Chi Tiết Các Thư Viện Imports (Dòng 1-9)</h2>
+    <pre><code class="language-rust">1  use aiken/collection/list
+2  use aiken/interval
+3  use cardano/address.{Address}
+4  use cardano/assets.{AssetName, PolicyId, from_asset_list, from_lovelace, lovelace_of}
+5  use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
+6  use vodka_address.{address_pub_key}
+7  use vodka_extra_signatories.{key_signed}
+8  use vodka_inputs.{inputs_at}
+9  use vodka_value.{get_all_value_to, value_geq}</code></pre>
+
+    <p>Các thư viện phụ thuộc phục vụ những nhiệm vụ cụ thể:</p>
+    <ul>
+      <li><strong><code>list</code> (Dòng 1):</strong> Cung cấp hàm <code>list.filter</code> lọc chính xác các output gửi về lại Script Address.</li>
+      <li><strong><code>interval</code> (Dòng 2):</strong> Quản lý thời gian qua <code>tx.validity_range</code> bằng <code>is_entirely_before</code> (trước deadline) và <code>is_entirely_after</code> (sau deadline).</li>
+      <li><strong><code>cardano/*</code> (Dòng 3-5):</strong> Định kiểu địa chỉ ví, token đa tài sản, chuyển đổi tiền ADA Lovelace và tham chiếu giao dịch EUTxO.</li>
+      <li><strong><code>vodka_*</code> (Dòng 6-9):</strong> Gói trợ thủ tối ưu: <code>inputs_at</code> đếm số UTxO tại script, <code>key_signed</code> kiểm tra chữ ký số, và <code>value_geq</code> so sánh đa tài sản.</li>
+    </ul>
+
+    <h2>3. Phân Tích Chi Tiết Từng Dòng Code: Khai Báo Kiểu Dữ Liệu</h2>
+
+    <h3>3.1. Kiểu `POSIXTime`, `MValue` &amp; Cấu trúc `BidState`</h3>
+    <pre><code class="language-rust">11 pub type POSIXTime = Int
+
+14 pub type MValue = Pairs&lt;PolicyId, Pairs&lt;AssetName, Int&gt;&gt;
+
+22 pub type BidState {
+23   BidState {
+24     bidder: Address, // Địa chỉ người đặt giá (hỗ trợ stake key)
+25     amount: Int,     // Số tiền đặt (Lovelace)
+26   }
+27 }</code></pre>
+
+    <p>Kiểu dữ liệu <code>BidState</code> sử dụng <code>Address</code> thay vì <code>ByteArray</code> (PubKeyHash) để đảm bảo hỗ trợ đầy đủ ví có Stake Key và Script Address của các dApp khác trên Cardano.</p>
+
+    <h3>3.2. Cấu trúc `AuctionDatum` &amp; `AuctionRedeemer`</h3>
+    <pre><code class="language-rust">38 pub type AuctionDatum {
+39   AuctionDatum {
+40     seller: Address,
+41     deadline: POSIXTime,
+42     min_bid: Int,
+43     min_increment: Int,
+44     nft: MValue,
+45     highest_bid: Option&lt;BidState&gt;,
+46   }
+47 }
+
+52 pub type AuctionRedeemer {
+53   MkBid { bidder: Address, amount: Int }
+54   Update { new_price: Int }
+55   Cancel
+56   Close
+57 }</code></pre>
+
+    <p>Trong <code>AuctionDatum</code>, trường <code>min_increment</code> đảm bảo bước giá tối thiểu bắt buộc giữa các lượt đặt giá, ngăn chặn hành vi quấy rối tăng 1 Lovelace. Trường <code>highest_bid: Option&lt;BidState&gt;</code> biểu diễn chính xác trạng thái chưa có ai bid (<code>None</code>) hoặc đã có người dẫn đầu (<code>Some</code>).</p>
+
+    <h2>4. Mổ Xẻ Từng Dòng Code: Validator `auction`</h2>
+
+    <h3>4.1. Khởi Tạo &amp; Mở Gói Datum An Toàn</h3>
+    <pre><code class="language-rust">66 validator auction {
+67   spend(
+68     datum_opt: Option&lt;AuctionDatum&gt;,
+69     redeemer: AuctionRedeemer,
+70     input: OutputReference,
+71     tx: Transaction,
+72   ) {
+73     expect Some(datum) = datum_opt</code></pre>
+
+    <p>Dòng 73 <code>expect Some(datum) = datum_opt</code> đóng vai trò người gác cổng, ngăn chặn hoàn toàn việc chi tiêu các UTxO không có Datum hợp lệ gửi vào Script Address.</p>
+
+    <h3>4.2. Nhánh 1: `MkBid` — Đặt Giá Mới, Hoàn Cọc &amp; Atomic Refund (Dòng 79-135)</h3>
+    <pre><code class="language-rust">79       MkBid { bidder, amount } -&gt; {
+80         expect Some(own_input) = find_input(tx.inputs, input)
+81         let own_address = own_input.output.address
+82
+83         // a. Chống Double Satisfaction: Chỉ tiêu thụ duy nhất 1 UTxO từ hợp đồng trong TX
+84         let is_only_one_input_from_script =
+85           when inputs_at(tx.inputs, own_address) is {
+86             [_] -&gt; True
+87             _ -&gt; False
+88           }
+89
+90         // b. Kiểm tra thời gian: Phải diễn ra TRƯỚC deadline
+91         let is_before_deadline =
+92           interval.is_entirely_before(tx.validity_range, datum.deadline)
+93
+94         // c. Kiểm tra giá thầu: Lượt đầu &gt;= min_bid, lượt sau &gt;= prev_bid + min_increment
+95         let is_valid_bid_amount =
+96           when datum.highest_bid is {
+97             None -&gt; amount &gt;= datum.min_bid
+98             Some(prev_bid) -&gt; amount &gt;= prev_bid.amount + datum.min_increment
+99           }
+100
+101        // d. Hoàn cọc min-ADA cho Seller (lượt đầu) HOẶC hoàn tiền cho bidder cũ (lượt sau)
+102        let is_refund_valid =
+103          when datum.highest_bid is {
+104            None -&gt; {
+105              let initial_deposit = lovelace_of(own_input.output.value)
+106              get_all_value_to(tx.outputs, datum.seller)
+107                |&gt; value_geq(from_lovelace(initial_deposit))
+108            }
+109            Some(prev_bid) -&gt;
+110              get_all_value_to(tx.outputs, prev_bid.bidder)
+111                |&gt; value_geq(from_lovelace(prev_bid.amount))
+112          }
+113
+114        // e. Đảm bảo DUY NHẤT 1 UTxO tiếp nối tại Script Address
+115        expect [continuing_output] =
+116          list.filter(tx.outputs, fn(out) { out.address == own_address })
+117
+118        expect InlineDatum(raw_datum) = continuing_output.datum
+119        expect output_datum: AuctionDatum = raw_datum
+120
+121        // f. Datum mới cập nhật highest_bid, giữ nguyên các trường khác
+122        let is_datum_updated_correctly =
+123          output_datum.seller == datum.seller && output_datum.deadline == datum.deadline && output_datum.min_bid == datum.min_bid && output_datum.min_increment == datum.min_increment && output_datum.nft == datum.nft && output_datum.highest_bid == Some(
+124            BidState { bidder, amount },
+125          )
+126
+127        // g. UTxO mới phải chứa đúng NFT và số tiền Lovelace mới đặt
+128        let expected_script_value =
+129          from_asset_list(datum.nft)
+130            |&gt; assets.merge(from_lovelace(amount))
+131        let is_value_locked = value_geq(continuing_output.value, expected_script_value)
+132
+133        is_only_one_input_from_script && is_before_deadline && is_valid_bid_amount && is_refund_valid && is_datum_updated_correctly && is_value_locked
+134      }</code></pre>
+
+    <div class="info-box">
+      <strong>Ba trụ cột bảo mật trong `MkBid`:</strong><br>
+      1. <strong>Chống Double Satisfaction:</strong> Ép buộc đúng 1 UTxO từ script trong mỗi transaction bằng cú pháp <code>[_]</code>.<br>
+      2. <strong>Hoàn cọc Seller &amp; Atomic Refund:</strong> Lượt đầu hoàn trả 2 ADA cọc cho Seller; các lượt sau hoàn trả tức thời 100% tiền cho bidder trước đó.<br>
+      3. <strong>Bảo vệ UTxO tiếp nối:</strong> Sử dụng <code>list.filter</code> kết hợp <code>expect [continuing_output]</code> loại bỏ hoàn toàn khả năng tạo script output giả mạo.
+    </div>
+
+    <h3>4.3. Nhánh 2: `Update` &amp; Nhánh 3: `Cancel` &amp; Nhánh 4: `Close`</h3>
+    <pre><code class="language-rust">      // UPDATE: Chỉ Seller sửa giá khi CHƯA có ai bid, BẢO TOÀN NFT
+      Update { new_price } -&gt; {
+        ...
+        let expected_script_value = from_asset_list(datum.nft)
+        let is_asset_preserved = value_geq(continuing_output.value, expected_script_value)
+        is_signed_by_seller && is_no_bid_yet && is_before_deadline && is_datum_updated_correctly && is_asset_preserved
+      }
+
+      // CANCEL: Seller hủy phiên rút toàn bộ tài sản, KHÔNG RÀNG BUỘC DEADLINE
+      Cancel -&gt; {
+        ...
+        let is_seller_refunded = get_all_value_to(tx.outputs, datum.seller) |&gt; value_geq(own_input.output.value)
+        is_signed_by_seller && is_no_bid_yet && is_seller_refunded
+      }
+
+      // CLOSE: Chốt phiên SAU DEADLINE, chuyển tiền cho Seller và NFT cho Winner
+      Close -&gt; {
+        ...
+        let is_after_deadline = interval.is_entirely_after(tx.validity_range, datum.deadline)
+        // Seller nhận highest_bid.amount, Winner nhận NFT + min-UTxO ADA
+      }</code></pre>
+
+    <h2>5. Ma Trận 19 Bài Unit Test On-Chain (`tests/auction.ak`)</h2>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>STT</th>
+            <th>Tên Bài Test Aiken</th>
+            <th>Hành Động</th>
+            <th>Kịch Bản Thử Nghiệm</th>
+            <th>Trạng Thái</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><code>test_first_bid_success</code></td><td>MkBid</td><td>Lượt đầu hợp lệ, hoàn cọc 2 ADA cho Seller</td><td>✅ PASS</td></tr>
+          <tr><td>2</td><td><code>test_outbid_success</code></td><td>MkBid</td><td>Lượt outbid hợp lệ, hoàn 100% cho bidder cũ</td><td>✅ PASS</td></tr>
+          <tr><td>3</td><td><code>test_first_bid_fail_below_min_bid</code></td><td>MkBid</td><td>Cố tình bid dưới giá sàn min_bid</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>4</td><td><code>test_outbid_fail_insufficient_increment</code></td><td>MkBid</td><td>Tăng giá thiếu bước giá min_increment</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>5</td><td><code>test_bid_fail_after_deadline</code></td><td>MkBid</td><td>Cố tình bid sau khi đã hết giờ</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>6</td><td><code>test_outbid_fail_missing_refund</code></td><td>MkBid</td><td>Quịt tiền hoàn của người dẫn đầu trước</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>7</td><td><code>test_first_bid_fail_missing_deposit_refund</code></td><td>MkBid</td><td>Không hoàn trả cọc ban đầu cho Seller</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>8</td><td><code>test_bid_fail_double_satisfaction</code></td><td>MkBid</td><td>Gom 2 UTxO script vào 1 transaction</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>9</td><td><code>test_bid_fail_multiple_continuing_outputs</code></td><td>MkBid</td><td>Tạo 2 output tiếp nối giả mạo</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>10</td><td><code>test_update_success</code></td><td>Update</td><td>Sửa giá hợp lệ khi chưa có ai bid</td><td>✅ PASS</td></tr>
+          <tr><td>11</td><td><code>test_update_fail_unsigned</code></td><td>Update</td><td>Sửa giá không có chữ ký của Seller</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>12</td><td><code>test_update_fail_has_bid</code></td><td>Update</td><td>Sửa giá khi đã có người đặt giá</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>13</td><td><code>test_update_fail_after_deadline</code></td><td>Update</td><td>Sửa giá sau khi hết thời hạn</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>14</td><td><code>test_update_fail_missing_nft</code></td><td>Update</td><td>Rút trộm NFT khi sửa giá sàn</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>15</td><td><code>test_cancel_success</code></td><td>Cancel</td><td>Seller hủy phiên trước deadline</td><td>✅ PASS</td></tr>
+          <tr><td>16</td><td><code>test_cancel_after_deadline_success</code></td><td>Cancel</td><td>Seller hủy phiên sau deadline</td><td>✅ PASS</td></tr>
+          <tr><td>17</td><td><code>test_cancel_fail_has_bid</code></td><td>Cancel</td><td>Cố tình hủy khi đã có người bid</td><td>❌ REJECT (pass)</td></tr>
+          <tr><td>18</td><td><code>test_close_success</code></td><td>Close</td><td>Chốt phiên sau deadline có người thắng</td><td>✅ PASS</td></tr>
+          <tr><td>19</td><td><code>test_close_fail_no_bid</code></td><td>Close</td><td>Cố tình Close khi không có ai bid</td><td>❌ REJECT (pass)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Toàn bộ 19 bài test đều vượt qua xuất sắc. Các bài test phủ định mang từ khóa <code>fail</code> trong Aiken kiểm chứng rằng Validator đã từ chối thành công mọi giao dịch gian lận.</p>
+  </div>
+  <script>hljs.highlightAll();</script>
+</body>
+</html>
