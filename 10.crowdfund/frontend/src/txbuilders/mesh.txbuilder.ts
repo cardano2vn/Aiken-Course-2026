@@ -13,6 +13,7 @@ import { MeshAdapter } from "../adapters/mesh.adapter";
 import { APP_NETWORK } from "@/constants/enviroments";
 
 type CampaignRef = { txHash: string; outputIndex: number };
+const WITHDRAW_FEE_FUNDING_MIN_LOVELACE = BigInt("2000000");
 
 export class MeshTxBuilder extends MeshAdapter {
     getCampaigns = async () => {
@@ -243,19 +244,34 @@ export class MeshTxBuilder extends MeshAdapter {
     };
 
     withdraw = async ({ campaignRef }: { campaignRef: CampaignRef }) => {
-        const { utxos, collateral, withdrawChangeAddress } = await this.getWalletForTx();
+        const { utxos, collateral, walletAddress } = await this.getWalletForTx();
         const { utxo, datum, identity } = await this.findCampaign(campaignRef);
         const totalContributions = datum.contributions.reduce((sum, contribution) => sum + contribution.quantity, 0);
         if (totalContributions < datum.goal) {
             throw new Error("Campaign goal has not been reached.");
         }
-        if (!withdrawChangeAddress || withdrawChangeAddress === datum.beneficiary) {
-            throw new Error("A wallet change address different from the campaign beneficiary is required to withdraw.");
+        const beneficiaryPaymentKeyHash = deserializeAddress(datum.beneficiary).pubKeyHash;
+        if (!beneficiaryPaymentKeyHash || beneficiaryPaymentKeyHash !== deserializeAddress(walletAddress).pubKeyHash) {
+            throw new Error("The connected wallet must match the campaign beneficiary to withdraw.");
         }
-        const campaignLovelace = utxo.output.amount.find((asset) => asset.unit === "lovelace")?.quantity;
-        if (campaignLovelace === undefined) {
-            throw new Error("Campaign UTxO does not contain lovelace.");
+
+        const collateralRef = collateral.input;
+        const feeFundingUtxo = utxos.find(({ input, output }) => {
+            const isCollateral =
+                input.txHash === collateralRef.txHash && input.outputIndex === collateralRef.outputIndex;
+            const lovelace = output.amount.find((asset) => asset.unit === "lovelace")?.quantity ?? "0";
+            return !isCollateral && BigInt(lovelace) >= WITHDRAW_FEE_FUNDING_MIN_LOVELACE;
+        });
+        if (!feeFundingUtxo) {
+            throw new Error("A separate wallet UTxO with at least 2 ADA is required to cover withdrawal fees.");
         }
+
+        const fundingRef = feeFundingUtxo.input;
+        const remainingUtxos = utxos.filter(
+            ({ input }) =>
+                (input.txHash !== collateralRef.txHash || input.outputIndex !== collateralRef.outputIndex) &&
+                (input.txHash !== fundingRef.txHash || input.outputIndex !== fundingRef.outputIndex),
+        );
 
         return await this.meshTxBuilder
             .spendingPlutusScriptV3()
@@ -267,10 +283,10 @@ export class MeshTxBuilder extends MeshAdapter {
             .mint("-1", this.policyId, identity.assetName)
             .mintingScript(this.mintScriptCbor)
             .mintRedeemerValue(mConStr1([]), undefined, { mem: 1_000_000, steps: 500_000_000 })
-            .txOut(datum.beneficiary, [{ unit: "lovelace", quantity: campaignLovelace }])
-            .selectUtxosFrom(utxos)
-            .changeAddress(withdrawChangeAddress)
-            .requiredSignerHash(deserializeAddress(datum.beneficiary).pubKeyHash)
+            .txIn(fundingRef.txHash, fundingRef.outputIndex)
+            .selectUtxosFrom(remainingUtxos)
+            .changeAddress(datum.beneficiary)
+            .requiredSignerHash(beneficiaryPaymentKeyHash)
             .txInCollateral(collateral.input.txHash, collateral.input.outputIndex)
             .setNetwork(APP_NETWORK)
             .complete();

@@ -13,8 +13,6 @@ jest.mock("../providers/cardano/blockfrost", () => ({
 
 const beneficiaryAddress =
     "addr_test1qz45qtdupp8g30lzzr684m8mc278s284cjvawna5ypwkvq7s8xszw9mgmwpxdyakl7dgpfmzywctzlsaghnqrl494wnqhgsy3g";
-const withdrawalChangeAddress =
-    "addr_test1qr39uar0u87xrmptw0f8ryx5mp3scvc3pkehp57yj5zhugxdgese6p77sy9hk0rqc5wqd6n8vmfyqq9f7sdfz9dm0azqzmmdew";
 const donorPaymentKeyHash = deserializeAddress(beneficiaryAddress).pubKeyHash;
 const campaignRef = { txHash: "d".repeat(64), outputIndex: 0 };
 
@@ -63,7 +61,6 @@ const createWalletContext = (): WalletContext => {
 
     return {
         changeAddress: beneficiaryAddress,
-        withdrawChangeAddress: withdrawalChangeAddress,
         utxos: [seedUtxo, collateral],
         collaterals: [collateral],
     };
@@ -199,10 +196,25 @@ describe("Crowdfund transaction builder", () => {
             undefined,
             { mem: 1_000_000, steps: 500_000_000 },
         );
-        expect(builder.transactionBuilder.txOut).toHaveBeenCalledWith(beneficiaryAddress, [
-            { unit: "lovelace", quantity: "100000000" },
-        ]);
-        expect(builder.transactionBuilder.changeAddress).toHaveBeenCalledWith(withdrawalChangeAddress);
+        expect(builder.transactionBuilder.txIn).toHaveBeenCalledWith("a".repeat(64), 0);
+        expect(builder.transactionBuilder.txOut).not.toHaveBeenCalled();
+        expect(builder.transactionBuilder.changeAddress).toHaveBeenCalledWith(beneficiaryAddress);
+    });
+
+    test("requires a separate wallet UTxO to fund withdrawal fees", async () => {
+        const walletContext = createWalletContext();
+        walletContext.utxos = [walletContext.collaterals[0]];
+        const builder = new TestableMeshTxBuilder({ walletContext });
+        builder.campaign.datum = {
+            ...builder.campaign.datum,
+            contributions: [{ address: beneficiaryAddress, paymentKeyHash: donorPaymentKeyHash, quantity: 100_000_000 }],
+        };
+        await builder.initalize();
+        mockTransactionBuilder(builder);
+
+        await expect(builder.withdraw({ campaignRef })).rejects.toThrow(
+            "A separate wallet UTxO with at least 2 ADA is required to cover withdrawal fees.",
+        );
     });
 
     test("passes the browser wallet's account-wide UTxOs and collateral to transaction building", async () => {
@@ -221,12 +233,10 @@ describe("Crowdfund transaction builder", () => {
             getChangeAddress: async () => "addr_test1change",
             getUtxos: async () => accountUtxos,
             getCollateral: async () => collateral,
-            getUnusedAddresses: async () => [withdrawalChangeAddress],
         };
 
         await expect(getWalletContext(wallet)).resolves.toEqual({
             changeAddress: "addr_test1change",
-            withdrawChangeAddress: withdrawalChangeAddress,
             utxos: accountUtxos,
             collaterals: collateral,
         });

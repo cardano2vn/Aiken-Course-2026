@@ -31,7 +31,7 @@ RUN_CARDANO_INTEGRATION_TESTS=true CROWDFUND_CAMPAIGN_TX_HASH=<tx-hash> CROWDFUN
 RUN_CARDANO_INTEGRATION_TESTS=true CROWDFUND_CAMPAIGN_TX_HASH=<tx-hash> CROWDFUND_CAMPAIGN_OUTPUT_INDEX=<index> bun test src/tests/mesh.integration.test.ts -t "Withdraw:"
 ```
 
-Create prints the campaign UTxO reference to use for Donate. Donate prints the updated reference; pass that to a later Withdraw or Reclaim run. Donate and Reclaim use `CROWDFUND_DONOR_ACCOUNT_INDEX` (default `0`), which must be the wallet that contributed. Reclaim requires an expired campaign with the goal unmet. Withdraw requires a funded campaign, uses account 0 as beneficiary and account 1 as its separate change address. Close is exercised when the final donor reclaims or the beneficiary withdraws. These tests submit real transactions and incur preprod fees; confirmed transactions remain on-chain if a later step fails.
+Create prints the campaign UTxO reference to use for Donate. Donate prints the updated reference; pass that to a later Withdraw or Reclaim run. Donate and Reclaim use `CROWDFUND_DONOR_ACCOUNT_INDEX` (default `0`), which must be the wallet that contributed. Reclaim requires an expired campaign with the goal unmet. Withdraw requires a funded campaign and uses one connected beneficiary account: a separate UTxO with at least 2 ADA is spent to cover fees, and all change goes to the beneficiary address so the transaction has one beneficiary output. Close is exercised when the final donor reclaims or the beneficiary withdraws. These tests submit real transactions and incur preprod fees; confirmed transactions remain on-chain if a later step fails.
 
 ## Learn More
 

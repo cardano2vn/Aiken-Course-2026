@@ -7,7 +7,6 @@ import { getWalletContext } from "../lib/wallet";
 const runPreprodIntegrationTest = process.env.RUN_CARDANO_INTEGRATION_TESTS === "true" ? test : test.skip;
 const appMnemonic = process.env.APP_MNEMONIC || "";
 const defaultAccountIndex = 0;
-const defaultChangeAccountIndex = 1;
 const defaultGoal = 5_000_000;
 
 type CampaignRef = { txHash: string; outputIndex: number };
@@ -160,16 +159,13 @@ describe("Crowdfund preprod redeemers", () => {
     runPreprodIntegrationTest("Withdraw: withdraws a funded campaign with the Withdraw redeemer", async () => {
         requireEnvironment();
 
-        const beneficiaryWallet = createWallet(defaultAccountIndex);
-        const changeWallet = createWallet(defaultChangeAccountIndex);
-        const walletContext = await getWalletContext(beneficiaryWallet);
-        walletContext.withdrawChangeAddress = await changeWallet.getChangeAddress();
-        const builder = new MeshTxBuilder({ walletContext });
+        const wallet = createWallet(defaultAccountIndex);
+        const builder = new MeshTxBuilder({ walletContext: await getWalletContext(wallet) });
         await builder.initalize();
         const campaignRef = getCampaignRefFromEnvironment();
         await getCampaignAtRef(builder, campaignRef);
 
         const unsignedTx = await builder.withdraw({ campaignRef });
-        await submitAndWait(beneficiaryWallet, unsignedTx);
+        await submitAndWait(wallet, unsignedTx);
     });
 });

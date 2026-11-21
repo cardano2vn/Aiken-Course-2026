@@ -100,7 +100,6 @@ export class MeshAdapter {
         utxos: UTxO[];
         collateral: UTxO;
         walletAddress: string;
-        withdrawChangeAddress?: string;
     }> => {
         const walletContext = this.walletContext;
         if (!walletContext) throw new Error("A connected wallet is required to build a transaction.");
@@ -112,7 +111,7 @@ export class MeshAdapter {
         const collateral = [...collaterals, ...utxos].find((utxo) => this.isCollateral(utxo));
         if (!collateral) throw new Error("A collateral UTxO with at least 5 ADA is required.");
 
-        return { utxos, collateral, walletAddress, withdrawChangeAddress: walletContext.withdrawChangeAddress };
+        return { utxos, collateral, walletAddress };
     };
 
     /**
