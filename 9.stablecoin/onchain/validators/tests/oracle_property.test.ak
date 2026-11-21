@@ -1,21 +1,28 @@
 use aiken/fuzz
+use cardano/address.{from_script}
 use cardano/assets.{add, from_lovelace}
 use mocktail.{
   complete, mint, mock_policy_id, mock_pub_key_address, mock_pub_key_hash,
   mock_utxo_ref, mocktail_tx, required_signer_hash, tx_in, tx_in_inline_datum,
   tx_out, tx_out_inline_datum,
 }
-use oracle.{OracleDatum, Update}
-use oracle_nft
+use oracle.{Init, OracleDatum, Update}
 
 // Hằng số dùng chung (mirror từ unit tests)
-const oracle_nft_policy_id = mock_policy_id(30)
+const oracle_nft_policy_id =
+  mock_policy_id(30)
 
-const oracle_nft_token_name = "OracleNFT"
+const oracle_nft_token_name =
+  "OracleNFT"
 
-const operator_pkh = mock_pub_key_hash(4)
+const operator_pkh =
+  mock_pub_key_hash(4)
 
-const oracle_script_address = mock_pub_key_address(6, None)
+const oracle_script_address =
+  from_script(oracle_nft_policy_id)
+
+const bound_utxo_ref =
+  mock_utxo_ref(9, 0)
 
 fn oracle_value() {
   from_lovelace(2_000_000)
@@ -28,7 +35,8 @@ fn oracle_value() {
 test prop_oracle_update_succeeds_for_any_positive_rate(
   new_rate via fuzz.int_at_least(1),
 ) {
-  let own_ref = mock_utxo_ref(1, 0)
+  let own_ref =
+    mock_utxo_ref(1, 0)
   let tx =
     mocktail_tx()
       |> tx_in(
@@ -44,7 +52,7 @@ test prop_oracle_update_succeeds_for_any_positive_rate(
       |> required_signer_hash(True, operator_pkh)
       |> complete()
   oracle.oracle.spend(
-    oracle_nft_policy_id,
+    bound_utxo_ref,
     oracle_nft_token_name,
     operator_pkh,
     Some(OracleDatum { rate: 25_000 }),
@@ -57,8 +65,9 @@ test prop_oracle_update_succeeds_for_any_positive_rate(
 // [PROPERTY] Mọi tỷ giá <= 0 đều bị từ chối dù có đủ chữ ký
 test prop_oracle_update_fails_for_non_positive_rate(
   new_rate via fuzz.int_at_most(0),
-) {
-  let own_ref = mock_utxo_ref(1, 0)
+) fail {
+  let own_ref =
+    mock_utxo_ref(1, 0)
   let tx =
     mocktail_tx()
       |> tx_in(
@@ -73,8 +82,8 @@ test prop_oracle_update_fails_for_non_positive_rate(
       |> tx_out_inline_datum(True, OracleDatum { rate: new_rate })
       |> required_signer_hash(True, operator_pkh)
       |> complete()
-  !oracle.oracle.spend(
-    oracle_nft_policy_id,
+  oracle.oracle.spend(
+    bound_utxo_ref,
     oracle_nft_token_name,
     operator_pkh,
     Some(OracleDatum { rate: 25_000 }),
@@ -87,8 +96,9 @@ test prop_oracle_update_fails_for_non_positive_rate(
 // [PROPERTY] Thiếu chữ ký operator luôn thất bại với mọi tỷ giá hợp lệ
 test prop_oracle_update_always_fails_without_signature(
   new_rate via fuzz.int_at_least(1),
-) {
-  let own_ref = mock_utxo_ref(1, 0)
+) fail {
+  let own_ref =
+    mock_utxo_ref(1, 0)
   let tx =
     mocktail_tx()
       |> tx_in(
@@ -102,8 +112,8 @@ test prop_oracle_update_always_fails_without_signature(
       |> tx_out(True, oracle_script_address, oracle_value())
       |> tx_out_inline_datum(True, OracleDatum { rate: new_rate })
       |> complete()
-  !oracle.oracle.spend(
-    oracle_nft_policy_id,
+  oracle.oracle.spend(
+    bound_utxo_ref,
     oracle_nft_token_name,
     operator_pkh,
     Some(OracleDatum { rate: 25_000 }),
@@ -113,11 +123,13 @@ test prop_oracle_update_always_fails_without_signature(
   )
 }
 
-// [PROPERTY] NFT mint với đúng UTxO ràng buộc luôn thành công (amount = 1)
+// [PROPERTY] NFT mint với đúng UTxO ràng buộc luôn thành công (amount = 1, rate > 0)
 test prop_oracle_nft_mint_succeeds_with_bound_utxo(
-  tx_index via fuzz.int_between(0, 200),
+  param via fuzz.both(fuzz.int_between(0, 200), fuzz.int_at_least(1)),
 ) {
-  let bound_ref = mock_utxo_ref(3, tx_index)
+  let (tx_index, initial_rate) = param
+  let bound_ref =
+    mock_utxo_ref(3, tx_index)
   let tx =
     mocktail_tx()
       |> tx_in(
@@ -128,10 +140,15 @@ test prop_oracle_nft_mint_succeeds_with_bound_utxo(
           mock_pub_key_address(7, None),
         )
       |> mint(True, 1, oracle_nft_policy_id, oracle_nft_token_name)
+      |> tx_out(True, oracle_script_address, oracle_value())
+      |> tx_out_inline_datum(True, OracleDatum { rate: initial_rate })
+      |> required_signer_hash(True, operator_pkh)
       |> complete()
-  oracle_nft.oracle_nft.mint(
+  oracle.oracle.mint(
     bound_ref,
-    oracle_nft.MintNFT,
+    oracle_nft_token_name,
+    operator_pkh,
+    Init,
     oracle_nft_policy_id,
     tx,
   )

@@ -1,13 +1,8 @@
-import type { IFetcher, UTxO } from "@meshsdk/core";
-import { MeshTxBuilder, mConStr0, mConStr1, mConStr2, deserializeAddress, stringToHex, mPubKeyAddress } from "@meshsdk/core";
-import type { BrowserWallet } from "@meshsdk/wallet";
-import { MIN_UTXO_LOVELACE, VNDC_TOKEN_NAME, VNDC_NAME_HEX, STABLECOIN_REF_UTXO } from "./config";
-import { calcDevFee, type CollateralPosition, type OracleInfo } from "./utils";
-
-// ─── Helper: build MeshTxBuilder ─────────────────────────────────────────────
-function newTxBuilder(fetcher: IFetcher): MeshTxBuilder {
-  return new MeshTxBuilder({ fetcher, verbose: false });
-}
+import type { BrowserWallet, UTxO } from "@meshsdk/core";
+import { MeshTxBuilder, mConStr0, mConStr1, mConStr2, deserializeAddress, mPubKeyAddress } from "@meshsdk/core";
+import { scriptHashToBech32 } from "@meshsdk/core-cst";
+import { MIN_UTXO_LOVELACE, MIN_COLLATERAL_ADA, MIN_COLLATERAL_LOVELACE, VNDC_TOKEN_NAME, VNDC_NAME_HEX, POSITION_TOKEN_HEX, STABLECOIN_REF_UTXO, NETWORK_ID } from "./config";
+import { calcDevFee, calcLiquidationDistribution, type Position, type OracleInfo } from "./utils";
 
 // ─── Datum / Redeemer Constructors ───────────────────────────────────────────
 
@@ -19,33 +14,59 @@ const REDEEMER_LIQUIDATE = mConStr2([]);  // Liquidate
 // Spend handler không phân nhánh, truyền redeemer rỗng
 const EMPTY_REDEEMER = mConStr0([]);
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Lấy UTxO và Collateral UTxO từ ví trước khi dựng giao dịch Plutus. */
+async function getWalletInputs(wallet: BrowserWallet): Promise<{ utxos: UTxO[]; collateral: UTxO }> {
+  const utxos = await wallet.getUtxos();
+  if (!utxos || utxos.length === 0) {
+    throw new Error("Không tìm thấy UTxO nào trong ví.");
+  }
+
+  const collateral = (await wallet.getCollateral())?.[0];
+  if (!collateral) {
+    throw new Error("Không tìm thấy Collateral trong ví. Vui lòng thiết lập Collateral trong cài đặt ví.");
+  }
+
+  return { utxos, collateral };
+}
+
 // ─── 1. Mint Stablecoin ───────────────────────────────────────────────────────
 
 /**
  * Xây dựng giao dịch Mint VNDC.
  * - Khóa `collateralLovelace` ADA vào Stablecoin script address
- * - Mint `stablecoinAmount` VNDC
+ * - Mint `stablecoinAmount` VNDC và đúng 1 PositionToken
+ * - Gắn 1 PositionToken vào UTxO thế chấp tại script address
  * - Đọc Oracle UTxO làm Reference Input
- * - Trả phí dev 0.1% collateral
  */
 export async function mintStablecoinTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
-  stablecoinAddress: string,
   vndcPolicyId: string,
   oracleUtxo: UTxO,
   collateralLovelace: bigint,
   stablecoinAmount: bigint
 ): Promise<string> {
+  if (collateralLovelace < MIN_COLLATERAL_LOVELACE) {
+    throw new Error(
+      `Tài sản thế chấp tối thiểu phải từ ${MIN_COLLATERAL_ADA} ADA`
+    );
+  }
+
   const changeAddress = await wallet.getChangeAddress();
-  const utxos = await wallet.getUtxos();
-  const collateral = (await wallet.getCollateral())[0];
-  if (!collateral) throw new Error("Không tìm thấy Collateral UTxO trong ví");
+  const { utxos, collateral } = await getWalletInputs(wallet);
 
   // Chuyển đổi địa chỉ owner sang Plutus Address (mPubKeyAddress)
-  // Validator yêu cầu owner là kiểu Address, không phải bech32 string
   const { pubKeyHash, stakeCredentialHash } = deserializeAddress(changeAddress);
   const ownerAddressObj = mPubKeyAddress(pubKeyHash, stakeCredentialHash);
+
+  // Tạo địa chỉ Script kết hợp với Stake Credential của owner để giữ quyền Staking cho người dùng
+  const targetScriptAddress = scriptHashToBech32(
+    vndcPolicyId,
+    stakeCredentialHash,
+    NETWORK_ID
+  );
 
   const [refTxHash, refIndexStr] = STABLECOIN_REF_UTXO.trim().split("#");
   const refIndex = Number(refIndexStr);
@@ -62,11 +83,15 @@ export async function mintStablecoinTx(
     },
   };
 
-  const txBuilder = newTxBuilder(fetcher);
   const unsignedTx = await txBuilder
-    // Mint VNDC — mintPlutusScriptV3 → mint → mintingScript → mintRedeemerValue phải liền tiếp
+    // Mint VNDC
     .mintPlutusScriptV3()
     .mint(`${stablecoinAmount}`, vndcPolicyId, VNDC_NAME_HEX)
+    .mintTxInReference(refTxHash, refIndex)
+    .mintRedeemerValue(REDEEMER_MINT)
+    // Mint đúng 1 PositionToken
+    .mintPlutusScriptV3()
+    .mint("1", vndcPolicyId, POSITION_TOKEN_HEX)
     .mintTxInReference(refTxHash, refIndex)
     .mintRedeemerValue(REDEEMER_MINT)
     // Reference Input: Oracle (chỉ đọc, không tiêu)
@@ -74,9 +99,10 @@ export async function mintStablecoinTx(
       oracleUtxo.input.txHash,
       oracleUtxo.input.outputIndex
     )
-    // Output: Collateral UTxO tại script address
-    .txOut(stablecoinAddress, [
+    // Output: Position UTxO tại script address (chứa ADA thế chấp + 1 PositionToken)
+    .txOut(targetScriptAddress, [
       { unit: "lovelace", quantity: collateralLovelace.toString() },
+      { unit: `${vndcPolicyId}${POSITION_TOKEN_HEX}`, quantity: "1" },
     ])
     // Datum: owner là Plutus Address, stablecoin_amount là bigint
     .txOutInlineDatumValue(mConStr0([ownerAddressObj, stablecoinAmount]))
@@ -95,27 +121,25 @@ export async function mintStablecoinTx(
     )
     .complete();
 
-  return wallet.signTx(unsignedTx);
+  return unsignedTx;
 }
 
 // ─── 2. Burn Stablecoin (Redeem Collateral) ───────────────────────────────────
 
 /**
  * Xây dựng giao dịch Burn VNDC để lấy lại ADA collateral.
- * - Tiêu thụ Collateral UTxO từ script
- * - Burn đúng lượng VNDC
- * - Trả phí dev 0.1%, phần còn lại về owner
+ * - Tiêu thụ Position UTxO từ script
+ * - Burn đúng lượng VNDC và đốt 1 PositionToken
+ * - Trả phí dev 0.5%, phần còn lại về owner
  */
 export async function burnStablecoinTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
   vndcPolicyId: string,
   devAddress: string,
-  position: CollateralPosition
+  position: Position
 ): Promise<string> {
-  const utxos = await wallet.getUtxos();
-  const collateral = (await wallet.getCollateral())[0];
-  if (!collateral) throw new Error("Không tìm thấy Collateral UTxO trong ví");
+  const { utxos, collateral } = await getWalletInputs(wallet);
 
   const { utxo, collateralLovelace, stablecoinAmount, ownerAddress } = position;
   const devFee = calcDevFee(collateralLovelace);
@@ -126,9 +150,8 @@ export async function burnStablecoinTx(
   const [refTxHash, refIndexStr] = STABLECOIN_REF_UTXO.trim().split("#");
   const refIndex = Number(refIndexStr);
 
-  const txBuilder = newTxBuilder(fetcher);
   const unsignedTx = await txBuilder
-    // Spend Collateral UTxO từ script
+    // Spend Position UTxO từ script
     .spendingPlutusScriptV3()
     .txIn(
       utxo.input.txHash,
@@ -146,11 +169,17 @@ export async function burnStablecoinTx(
     .mintRedeemerValue(REDEEMER_BURN)
     .mintTxInReference(refTxHash, refIndex)
 
+    // Đốt 1 PositionToken
+    .mintPlutusScriptV3()
+    .mint("-1", vndcPolicyId, POSITION_TOKEN_HEX)
+    .mintRedeemerValue(REDEEMER_BURN)
+    .mintTxInReference(refTxHash, refIndex)
+
     // Output: Phí dev
     .txOut(devAddress, [{ unit: "lovelace", quantity: devFee.toString() }])
     // Validator yêu cầu owner ký giao dịch (Redeem action)
     .requiredSignerHash(ownerPkh)
-    // Phần còn lại (collateral - devFee) về ownerAddress tự động
+    // Phần ADA còn lại (collateral - devFee) về ownerAddress
     .changeAddress(ownerAddress)
     .selectUtxosFrom(utxos)
     .txInCollateral(
@@ -161,52 +190,53 @@ export async function burnStablecoinTx(
     )
     .complete();
 
-  return wallet.signTx(unsignedTx);
+  return unsignedTx;
 }
 
 // ─── 3. Liquidate ─────────────────────────────────────────────────────────────
 
 /**
  * Xây dựng giao dịch thanh lý vị thế CR < 150%.
- * - Burn VNDC bằng stablecoin_amount của position
+ * - Burn VNDC bằng stablecoin_amount của position và đốt 1 PositionToken
  * - Nhận lại ADA: stablecoin_value + reward (tối đa 2% collateral)
  * - Refund về owner nếu owner_refund >= 1 ADA
- * - Trả phí dev 0.1%
+ * - Trả phí dev 0.5%
  */
 export async function liquidateTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
   vndcPolicyId: string,
   oracleInfo: OracleInfo,
   devAddress: string,
-  position: CollateralPosition
+  position: Position
 ): Promise<string> {
   const changeAddress = await wallet.getChangeAddress();
-  const utxos = await wallet.getUtxos();
-  const collateral = (await wallet.getCollateral())[0];
-  if (!collateral) throw new Error("Không tìm thấy Collateral UTxO trong ví");
+  const { utxos, collateral } = await getWalletInputs(wallet);
 
   const {
     utxo,
     ownerAddress,
     collateralLovelace,
     stablecoinAmount,
-    ownerRefundLovelace,
   } = position;
 
-  const devFee = calcDevFee(collateralLovelace);
+  // Tính lại phân phối thanh lý theo tỷ giá Oracle mới nhất [R1]
+  const { devFee, ownerRefund } = calcLiquidationDistribution(
+    collateralLovelace,
+    stablecoinAmount,
+    oracleInfo.rate
+  );
 
   const [refTxHash, refIndexStr] = STABLECOIN_REF_UTXO.trim().split("#");
   const refIndex = Number(refIndexStr);
 
-  const txBuilder = newTxBuilder(fetcher);
   let builder = txBuilder
     // Reference Input: Oracle
     .readOnlyTxInReference(
       oracleInfo.utxo.input.txHash,
       oracleInfo.utxo.input.outputIndex
     )
-    // Spend Collateral UTxO của người bị thanh lý
+    // Spend Position UTxO của người bị thanh lý
     .spendingPlutusScriptV3()
     .txIn(
       utxo.input.txHash,
@@ -222,13 +252,21 @@ export async function liquidateTx(
     .mint(`-${stablecoinAmount}`, vndcPolicyId, VNDC_NAME_HEX)
     .mintRedeemerValue(REDEEMER_LIQUIDATE)
     .mintTxInReference(refTxHash, refIndex)
-    // Output: Phí dev
-    .txOut(devAddress, [{ unit: "lovelace", quantity: devFee.toString() }]);
+    // Đốt 1 PositionToken
+    .mintPlutusScriptV3()
+    .mint("-1", vndcPolicyId, POSITION_TOKEN_HEX)
+    .mintRedeemerValue(REDEEMER_LIQUIDATE)
+    .mintTxInReference(refTxHash, refIndex);
 
-  // Refund về owner (chỉ nếu >= 1 ADA)
-  if (ownerRefundLovelace >= MIN_UTXO_LOVELACE) {
+  // Output: Phí dev
+  if (devFee > 0n) {
+    builder = builder.txOut(devAddress, [{ unit: "lovelace", quantity: devFee.toString() }]);
+  }
+
+  // Refund về owner (nếu ownerRefund >= 1 ADA)
+  if (ownerRefund >= MIN_UTXO_LOVELACE) {
     builder = builder.txOut(ownerAddress, [
-      { unit: "lovelace", quantity: ownerRefundLovelace.toString() },
+      { unit: "lovelace", quantity: ownerRefund.toString() },
     ]);
   }
 
@@ -243,5 +281,5 @@ export async function liquidateTx(
     )
     .complete();
 
-  return wallet.signTx(unsignedTx);
+  return unsignedTx;
 }

@@ -1,10 +1,11 @@
+use aiken/collection/dict
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
-use cardano/assets.{PolicyId}
+use cardano/address.{Script, from_script}
+use cardano/assets.{PolicyId, has_nft_strict}
 use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction}
 use cocktail/vodka_extra_signatories.{key_signed}
-
-// use types.{OracleDatum}
+use cocktail/vodka_outputs.{outputs_at}
 
 pub type OracleDatum {
   /// Giá ADA tính bằng VNDC.
@@ -14,80 +15,115 @@ pub type OracleDatum {
 }
 
 pub type OracleAction {
-  /// Cập nhật tỷ giá — chỉ operator
+  /// Mint Oracle NFT lần đầu -> khởi tạo Oracle UTxO
+  Init
+  /// Cập nhật tỷ giá Oracle
   Update
-  /// Xóa Oracle, thu hồi NFT về ví operator — chỉ operator
+  /// Tiêu thụ Oracle UTxO để đóng Oracle
   Delete
 }
 
-/// Oracle Validator — Quản lý tỷ giá ADA/USD on-chain.
-/// Oracle NFT (policy_id + token_name) được bake vào validator làm tham số,
-/// đóng vai trò "chứng minh thư" xác nhận đây là Oracle chính thức của hệ thống.
+/// Oracle Multi-Purpose Validator — Quản lý Oracle NFT và tỷ giá ADA/VNDC on-chain.
+/// - mint: Quản lý đúc (one-shot gắn với utxo_ref) và đốt Oracle NFT.
+/// - spend: Quản lý cập nhật tỷ giá và tiêu thụ Oracle UTxO.
 validator oracle(
-  oracle_nft_policy_id: PolicyId,
-  oracle_nft_token_name: ByteArray,
+  utxo_ref: OutputReference,
+  oracle_token_name: ByteArray,
+  //quy ước tên là "OracleNFT"
   operator_pkh: VerificationKeyHash,
 ) {
+  mint(redeemer: OracleAction, policy_id: PolicyId, transaction: Transaction) {
+    let Transaction { inputs, outputs, mint, extra_signatories, .. } = transaction
+
+    // Operator phải ký mọi hành động mint/burn
+    expect key_signed(extra_signatories, operator_pkh)
+
+    // Kiểm tra chỉ mint/burn đúng 1 asset duy nhất của policy này
+    expect [Pair(asset_name, quantity)] = mint
+      |> assets.tokens(policy_id)
+      |> dict.to_pairs()
+    expect asset_name == oracle_token_name
+
+    when redeemer is {
+      Init -> {
+        // Kiểm tra param UTxO được tiêu thụ để đảm bảo tính duy nhất (one-shot)
+        let is_utxo_consumed = list.any(
+          inputs,
+          fn(input) { input.output_reference == utxo_ref },
+        )
+
+        // NFT vừa mint phải chuyển đến đúng 1 script output sạch tại chính địa chỉ của validator này
+        let oracle_output_valid = {
+          expect [oracle_output] = outputs_at(outputs, from_script(policy_id))
+
+          expect InlineDatum(raw_datum) = oracle_output.datum
+          expect OracleDatum { rate: initial_rate } = raw_datum
+
+          has_nft_strict(oracle_output.value, policy_id, oracle_token_name)? && (initial_rate > 0)?
+        }
+        and {
+          is_utxo_consumed?,
+          (quantity == 1)?,
+          oracle_output_valid?,
+        }
+      }
+
+      Delete -> (quantity == -1)?
+
+      _ -> fail
+    }
+  }
+
   spend(
     input_datum: Option<OracleDatum>,
     redeemer: OracleAction,
     own_ref: OutputReference,
     transaction: Transaction,
   ) {
-    let Transaction { inputs, outputs, extra_signatories, mint, .. } =
-      transaction
+    let Transaction { inputs, outputs, extra_signatories, mint, .. } = transaction
 
     // Operator phải ký mọi hành động
-    let signed_by_operator = key_signed(extra_signatories, operator_pkh)
+    expect key_signed(extra_signatories, operator_pkh)
+
+    // Xác định địa chỉ và policy_id của chính Oracle Validator
+    expect Some(own_input) = transaction.find_input(inputs, own_ref)
+    let own_address = own_input.output.address
+    expect Script(oracle_policy_id) = own_address.payment_credential
+
+    expect
+      has_nft_strict(
+        own_input.output.value,
+        oracle_policy_id,
+        oracle_token_name,
+      )
 
     when redeemer is {
       Update -> {
-        expect Some(_current_datum) = input_datum
-        // Xác định địa chỉ của chính Oracle Validator
-        expect Some(own_input) = transaction.find_input(inputs, own_ref)
-        let own_address = own_input.output.address
-
+        expect Some(OracleDatum { rate: current_rate }) = input_datum
         // Tìm continuing output
-        expect Some(oracle_output) =
-          list.find(
-            outputs,
-            fn(o) {
-              o.address == own_address && assets.quantity_of(
-                o.value,
-                oracle_nft_policy_id,
-                oracle_nft_token_name,
-              ) == 1
-            },
-          )
-        let output_contains_oracle_nft =
-          assets.quantity_of(
+        expect [oracle_output] = outputs_at(outputs, own_address)
+
+        expect
+          has_nft_strict(
             oracle_output.value,
-            oracle_nft_policy_id,
-            oracle_nft_token_name,
-          ) == 1
+            oracle_policy_id,
+            oracle_token_name,
+          )
 
         let Output { datum, .. } = oracle_output
-
         expect InlineDatum(raw_datum) = datum
         expect OracleDatum { rate: new_rate } = raw_datum
 
         and {
-          output_contains_oracle_nft?,
           (new_rate > 0)?,
-          signed_by_operator?,
+          (new_rate != current_rate)?,
         }
       }
 
-      Delete -> {
-        // Cho phép operator đóng Oracle và burn NFT
-        let is_nft_burned =
-          assets.quantity_of(mint, oracle_nft_policy_id, oracle_nft_token_name) == -1
+      Delete ->
+        assets.quantity_of(mint, oracle_policy_id, oracle_token_name) == -1
 
-        and {
-          signed_by_operator?,
-          is_nft_burned?,
-        }
-      }
+      _ -> fail
     }
   }
 

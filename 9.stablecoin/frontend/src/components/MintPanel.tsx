@@ -1,51 +1,62 @@
 "use client";
 import { memo, useState } from "react";
 import { motion } from "framer-motion";
+import { useWallet } from "@/context/WalletContext";
 import type { OracleInfo } from "@cardano-stablecoin/offchain";
-import { calcMaxMint, calcDevFee, COLLATERAL_MIN_PERCENT } from "@cardano-stablecoin/offchain";
+import {
+  calcCollateralRatio,
+  calcMaxMintable,
+  MCR_PERCENT,
+  COLLATERAL_SAFE_PERCENT,
+  MIN_COLLATERAL_ADA,
+  MIN_COLLATERAL_LOVELACE,
+  parseAdaToLovelace,
+  parseVndcAmount,
+} from "@cardano-stablecoin/offchain";
 
 interface MintPanelProps {
   oracle: OracleInfo | null;
-  onMint: (collateralAda: number, stablecoinAmount: number) => Promise<void>;
+  onMint: (collateralLovelace: bigint, stablecoinAmount: bigint) => Promise<void>;
   loading: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Định dạng CR để hiển thị — cắt bớt khi quá lớn */
-function formatCR(crPct: number): string {
-  if (crPct <= 0) return "—";
-  if (crPct >= 100_000) return ">100,000%";
-  if (crPct >= 10_000) return `${Math.floor(crPct / 1000)}k%`;
-  return `${crPct.toFixed(0)}%`;
+function formatCR(cr: number): string {
+  if (cr <= 0) return "—";
+  if (cr >= 100_000) return ">100,000%";
+  if (cr >= 10_000) return `${Math.floor(cr / 1000)}k%`;
+  return `${cr.toFixed(0)}%`;
 }
 
-/** Kiểm tra ADA hợp lệ: số dương, tối đa 6 chữ số thập phân */
-function validateAda(value: string): string | null {
-  if (value === "" || value === ".") return null; // chưa nhập → không báo lỗi
-  const num = Number(value);
-  if (isNaN(num)) return "Giá trị không hợp lệ";
-  if (num <= 0) return "ADA phải là số dương";
-  // Kiểm tra tối đa 6 chữ số thập phân
-  const decimalPart = value.split(".")[1];
-  if (decimalPart && decimalPart.length > 6)
-    return "Tối đa 6 chữ số thập phân (1 lovelace)";
-  return null;
+/** Validate & parse ADA hợp lệ: số dương, tối đa 6 chữ số thập phân, >= MIN_COLLATERAL_ADA */
+function validateAda(value: string): { value: bigint; error: string | null } {
+  if (value === "" || value === ".") return { value: 0n, error: null }; // chưa nhập → không báo lỗi
+  const lovelace = parseAdaToLovelace(value);
+  if (lovelace === null || lovelace <= 0n) {
+    return { value: 0n, error: "ADA phải là số dương (tối đa 6 chữ số thập phân)" };
+  }
+  if (lovelace < MIN_COLLATERAL_LOVELACE) {
+    return { value: 0n, error: `Tối thiểu ${MIN_COLLATERAL_ADA} ADA` };
+  }
+  return { value: lovelace, error: null };
 }
 
-/** Kiểm tra VNDC hợp lệ: số nguyên dương */
-function validateVndc(value: string): string | null {
-  if (value === "") return null; // chưa nhập → không báo lỗi
-  const num = Number(value);
-  if (isNaN(num) || !Number.isFinite(num)) return "Giá trị không hợp lệ";
-  if (!Number.isInteger(num)) return "VNDC phải là số nguyên";
-  if (num <= 0) return "VNDC phải là số dương";
-  return null;
+/** Validate & parse VNDC hợp lệ: số nguyên dương */
+function validateVndc(value: string): { value: bigint; error: string | null } {
+  if (value === "") return { value: 0n, error: null }; // chưa nhập → không báo lỗi
+  const vndcAmount = parseVndcAmount(value);
+  if (vndcAmount === null || vndcAmount <= 0n) {
+    return { value: 0n, error: "VNDC phải là số nguyên dương" };
+  }
+  return { value: vndcAmount, error: null };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, loading }: MintPanelProps) {
+  const { networkError } = useWallet();
   const [collateralAda, setCollateralAda] = useState("");
   const [stablecoinAmount, setStablecoinAmount] = useState("");
   const [adaTouched, setAdaTouched] = useState(false);
@@ -54,43 +65,36 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
 
   const rate = oracle?.rate ?? 0n;
 
-  // ─── Tính toán ──────────────────────────────────────────────────────────────
-  const collateralLovelace = BigInt(
-    Math.floor(Number(collateralAda || 0) * 1_000_000)
-  );
-  const maxMint = rate > 0n ? calcMaxMint(collateralLovelace, rate) : 0n;
-  const amount = BigInt(Math.floor(Number(stablecoinAmount || 0)));
-  const devFee = calcDevFee(collateralLovelace);
+  // ─── 1. Validate & Parse đầu vào (chỉ parse 1 lần) ─────────────────────────
+  const { value: collateralLovelace, error: adaError } = validateAda(collateralAda);
+  const { value: vndcAmount, error: vndcError } = validateVndc(stablecoinAmount);
 
-  const crPct =
-    amount > 0n && rate > 0n
-      ? Number((collateralLovelace * rate) / (10_000n * amount))
-      : 0;
+  // ─── 2. Tính toán thông số tài chính qua BigInt ─────────────────────────────
+  const maxMintable = calcMaxMintable(collateralLovelace, rate);
+  const isSafe = vndcAmount > 0n && vndcAmount <= maxMintable;
+  const cr = calcCollateralRatio(collateralLovelace, vndcAmount, rate);
 
+  const minCr = Number(MCR_PERCENT);
+  const safeCr = Number(COLLATERAL_SAFE_PERCENT);
   const crColor =
-    crPct === 0
+    cr === 0
       ? "var(--color-muted)"
-      : crPct >= 2n * COLLATERAL_MIN_PERCENT
+      : cr >= safeCr
         ? "var(--color-accent)"
-        : crPct >= COLLATERAL_MIN_PERCENT
+        : cr >= minCr
           ? "var(--color-warning)"
           : "var(--color-danger)";
 
-  // ─── Validation ─────────────────────────────────────────────────────────────
-  const adaError = validateAda(collateralAda);
-  const vndcError = validateVndc(stablecoinAmount);
-
-  const adaNum = Number(collateralAda);
-  const adaBelowMin = collateralAda !== "" && adaNum > 0 && adaNum < 5;
-  const vndcOverMax = amount > maxMint && maxMint > 0n;
+  // ─── 3. Kiểm tra ngưỡng an toàn & quyền bấm nút ─────────────────────────────
+  const vndcOverMax = collateralLovelace > 0n && vndcAmount > 0n && !isSafe;
 
   const canMint =
+    !networkError &&
     !adaError &&
     !vndcError &&
-    !adaBelowMin &&
     !vndcOverMax &&
-    adaNum >= 5 &&
-    amount > 0n &&
+    collateralLovelace >= MIN_COLLATERAL_LOVELACE &&
+    vndcAmount > 0n &&
     oracle !== null &&
     !loading;
 
@@ -109,8 +113,8 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
     setStablecoinAmount(val);
   }
 
-  function handleMaxMint() {
-    setStablecoinAmount(maxMint.toString());
+  function handleMaxMintable() {
+    setStablecoinAmount(maxMintable.toString());
     setVndcTouched(true);
   }
 
@@ -139,7 +143,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
             <div style={{ flex: 1, background: "var(--color-surface-2)", padding: "12px 16px", borderRadius: 10 }}>
               <div style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 4 }}>Tỷ giá hiện tại</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-accent)" }}>
-                {oracle.rateVnd.toLocaleString()} ₫
+                {oracle.rate.toLocaleString()} ₫
               </div>
               <div style={{ fontSize: 11, color: "var(--color-muted)" }}>ADA/VND</div>
             </div>
@@ -151,13 +155,13 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
                   fontWeight: 700,
                   color: crColor,
                   // Thu nhỏ chữ khi CR quá lớn để tránh tràn
-                  fontSize: crPct >= 10_000 ? 14 : crPct >= 1_000 ? 17 : 20,
+                  fontSize: cr >= 10_000 ? 14 : cr >= 1_000 ? 17 : 20,
                   lineHeight: 1.2,
                 }}
               >
-                {formatCR(crPct)}
+                {formatCR(cr)}
               </div>
-              <div style={{ fontSize: 11, color: "var(--color-muted)" }}>CR (tối thiểu 150%)</div>
+              <div style={{ fontSize: 11, color: "var(--color-muted)" }}>CR (tối thiểu {minCr}%)</div>
             </div>
           </div>
         )}
@@ -165,7 +169,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
         {/* Input: ADA thế chấp */}
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "var(--color-text)", marginBottom: 6 }}>
-            ADA thế chấp <span style={{ color: "var(--color-muted)", fontWeight: 400 }}>(tối thiểu 5 ADA)</span>
+            ADA thế chấp <span style={{ color: "var(--color-muted)", fontWeight: 400 }}>(tối thiểu {Number(MIN_COLLATERAL_ADA)} ADA)</span>
           </label>
           <input
             type="text"
@@ -176,29 +180,23 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
             onChange={handleAdaChange}
             onBlur={() => setAdaTouched(true)}
             style={{
-              border: adaTouched && (adaError || adaBelowMin)
+              border: adaTouched && adaError
                 ? "1px solid var(--color-danger)"
                 : undefined,
             }}
           />
-          {/* Lỗi format */}
+          {/* Lỗi format hoặc dưới ngưỡng tối thiểu */}
           {adaTouched && adaError && (
             <div style={{ fontSize: 12, color: "var(--color-danger)", marginTop: 4 }}>
               ⚠ {adaError}
             </div>
           )}
-          {/* Cảnh báo dưới ngưỡng tối thiểu */}
-          {adaTouched && !adaError && adaBelowMin && (
-            <div style={{ fontSize: 12, color: "var(--color-danger)", marginTop: 4 }}>
-              ⚠ Tối thiểu 5 ADA để tránh min-UTxO
-            </div>
-          )}
           {/* Thông tin hữu ích khi hợp lệ */}
-          {!adaError && !adaBelowMin && collateralLovelace > 0n && (
+          {!adaError && collateralLovelace >= MIN_COLLATERAL_LOVELACE && (
             <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 4 }}>
               Max VNDC có thể đúc:{" "}
               <span style={{ color: "var(--color-accent)" }}>
-                {maxMint.toLocaleString()} VNDC
+                {maxMintable.toLocaleString()} VNDC
               </span>
               &nbsp;|&nbsp;Phí dev:{" "}
               <span style={{ color: "var(--color-accent)" }}>0 ADA</span>
@@ -213,14 +211,14 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
               Số lượng VNDC muốn đúc
             </label>
             <button
-              onClick={handleMaxMint}
-              disabled={maxMint <= 0n}
+              onClick={handleMaxMintable}
+              disabled={maxMintable <= 0n}
               style={{
                 fontSize: 12,
-                color: maxMint > 0n ? "var(--color-accent)" : "var(--color-muted)",
+                color: maxMintable > 0n ? "var(--color-accent)" : "var(--color-muted)",
                 background: "none",
                 border: "none",
-                cursor: maxMint > 0n ? "pointer" : "default",
+                cursor: maxMintable > 0n ? "pointer" : "default",
               }}
             >
               Tối đa
@@ -249,7 +247,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
           {/* Vượt hạn mức */}
           {vndcTouched && !vndcError && vndcOverMax && (
             <div style={{ fontSize: 12, color: "var(--color-danger)", marginTop: 4 }}>
-              ⚠ Vượt giới hạn tối đa ({maxMint.toLocaleString()} VNDC với collateral hiện tại)
+              ⚠ Vượt giới hạn tối đa ({maxMintable.toLocaleString()} VNDC với collateral hiện tại)
             </div>
           )}
         </div>
@@ -260,7 +258,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
           disabled={!canMint}
           onClick={() => setShowConfirm(true)}
         >
-          {loading ? "⏳ Đang xử lý..." : "Đúc VNDC"}
+          {loading ? "⏳ Đang xử lý..." : networkError ? "⚠ Sai mạng Cardano" : "Đúc VNDC"}
         </button>
       </motion.div>
 
@@ -303,7 +301,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--color-muted)" }}>VNDC sẽ nhận:</span>
-                <span style={{ fontWeight: 600, color: "var(--color-accent)" }}>{amount.toLocaleString()} VNDC</span>
+                <span style={{ fontWeight: 600, color: "var(--color-accent)" }}>{vndcAmount.toLocaleString()} VNDC</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--color-muted)" }}>Tỷ giá áp dụng:</span>
@@ -311,7 +309,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--color-muted)" }}>Tỷ lệ thế chấp (CR):</span>
-                <span style={{ fontWeight: 600, color: crColor }}>{formatCR(crPct)}</span>
+                <span style={{ fontWeight: 600, color: crColor }}>{formatCR(cr)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--color-muted)" }}>Phí Dev:</span>
@@ -343,7 +341,7 @@ export const MintPanel = memo(function MintPanelComponent({ oracle, onMint, load
                 disabled={loading}
                 onClick={() => {
                   setShowConfirm(false);
-                  onMint(Number(collateralAda), Number(stablecoinAmount));
+                  onMint(collateralLovelace, vndcAmount);
                 }}
               >
                 {loading ? "Đang xử lý..." : "Xác nhận Đúc"}

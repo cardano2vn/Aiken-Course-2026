@@ -25,3 +25,7 @@ onchain/build/
 # Temporary files
 /tmp/
 *.log
+
+*_solution.*
+
+docs/video_resources/

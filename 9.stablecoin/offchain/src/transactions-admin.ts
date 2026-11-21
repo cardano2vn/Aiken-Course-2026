@@ -1,4 +1,4 @@
-import type { IFetcher, Output } from "@meshsdk/core";
+import type { BrowserWallet, Output, PlutusScript } from "@meshsdk/core";
 import {
   MeshTxBuilder,
   applyParamsToScript,
@@ -8,16 +8,13 @@ import {
   stringToHex,
   mConStr0,
   mConStr1,
+  mConStr2,
   mOutputReference,
   deserializeAddress,
   mPubKeyAddress,
 } from "@meshsdk/core";
-import type { PlutusScript } from "@meshsdk/common";
-import type { BrowserWallet } from "@meshsdk/wallet";
 import {
   NETWORK_ID,
-  ORACLE_NFT_RAW_CBOR,
-  ORACLE_NFT_TOKEN_NAME,
   ORACLE_RAW_CBOR,
   STABLECOIN_RAW_CBOR,
   ORACLE_REF_UTXO,
@@ -25,14 +22,10 @@ import {
 import type { OracleInfo } from "./utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// OracleAction redeemers
-const REDEEMER_ORACLE_UPDATE = mConStr0([]);      // Update
-const REDEEMER_ORACLE_DELETE = mConStr1([]);      // Delete
-
-//OracleNFT redeemers
-const REDEEMER_MINT_ORACLE_NFT = mConStr0([]);      // Mint
-const REDEEMER_BURN_ORACLE_NFT = mConStr1([]);      // Burn
-
+// OracleAction constructors trong Aiken (0 = Init, 1 = Update, 2 = Delete)
+const REDEEMER_ORACLE_INIT = mConStr0([]);
+const REDEEMER_ORACLE_UPDATE = mConStr1([]);
+const REDEEMER_ORACLE_DELETE = mConStr2([]);
 
 /**
  * Địa chỉ "always fail" — dùng Native Script "before slot 0".
@@ -48,34 +41,32 @@ function getAlwaysFailAddress(networkId: number): string {
 
 // ───  Deploy Transaction ────────────────────────────────────────
 
-interface DeployResult {
-  signedTx: string;
-  /** Policy ID của Oracle NFT → ORACLE_NFT_POLICY_ID trong config.ts */
+export interface DeployResult {
+  unsignedTx: string;
+  /** Policy ID của Oracle NFT (đồng thời là Script Hash của Oracle) */
   oracleNftPolicyId: string;
   /** Output index của Oracle Ref UTxO trong TX → ORACLE_REF_UTXO = txHash#index */
   oracleRefOutputIndex: number;
   /** Output index của Stablecoin Ref UTxO trong TX → STABLECOIN_REF_UTXO = txHash#index */
   stablecoinRefOutputIndex: number;
-  oracleAddress: string;
-  stablecoinAddress: string;
 }
 
 /**
  * Gộp toàn bộ quá trình setup vào 1 giao dịch duy nhất:
  *
- *  • Mint Oracle NFT (one-shot policy)
- *  • Output 0: Oracle Contract UTxO — chứa NFT + OracleDatum (giá ban đầu)
+ *  • Mint Oracle NFT (one-shot)
+ *  • Output 0: Oracle UTxO — chứa NFT + OracleDatum (tỷ giá ban đầu > 0)
  *  • Output 1: Oracle Reference Script UTxO → always-fail address
  *  • Output 2: Stablecoin Reference Script UTxO → always-fail address
  *
  * Sau khi TX confirmed, copy 3 giá trị vào config.ts:
- *   ORACLE_NFT_POLICY_ID  = oracleNftPolicyId
- *   ORACLE_REF_UTXO       = txHash + "#1"
- *   STABLECOIN_REF_UTXO   = txHash + "#2"
+ *   ORACLE_NFT_POLICY_ID  = ...
+ *   ORACLE_REF_UTXO       = ...
+ *   STABLECOIN_REF_UTXO   = ...
  */
 export async function deployTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
   /** Token name dùng cho Oracle NFT (ví dụ: "OracleNFT") */
   oracleNftTokenName: string,
   /** Tỷ giá ADA/VND ban đầu (ví dụ: 25000 nếu 1 ADA = 25,000 VND) */
@@ -92,49 +83,40 @@ export async function deployTx(
     throw new Error("No collateral found. Please add collateral in wallet settings.");
   const collateral = collaterals[0];
 
-  // Chọn UTxO làm tham số one-shot (>= 5 ADA, hoặc UTxO đầu tiên)
-  const paramUtxo =
-    utxos.find(
-      (u) =>
-        BigInt(u.output.amount.find((a) => a.unit === "lovelace")?.quantity ?? 0) >= 5_000_000n
-    ) ?? utxos[0];
-  if (!paramUtxo) throw new Error("Không tìm thấy UTxO phù hợp trong ví");
+  // Chọn UTxO đầu tiên làm tham số one-shot
+  const paramUtxo = utxos[0];
 
   const { txHash: paramTxHash, outputIndex: paramTxIndex } = paramUtxo.input;
-
-  // ── Oracle NFT (one-shot) ───────────────────────────────────────────────────
-  const oracleNftCbor = applyParamsToScript(ORACLE_NFT_RAW_CBOR, [
-    mOutputReference(paramTxHash, paramTxIndex),
-  ]);
-  const oracleNftPolicyId = resolveScriptHash(oracleNftCbor, "V3");
-  const oracleNftTokenNameHex = stringToHex(oracleNftTokenName);
-  const oracleNftUnit = oracleNftPolicyId + oracleNftTokenNameHex;
-
-  // ── Oracle Validator ────────────────────────────────────────────────────────
   const { pubKeyHash, stakeCredentialHash } = deserializeAddress(operatorAddress);
+
+  // ── Apply tham số cho Oracle Validator ──────────────────────────────────────
+  // Tham số: utxo_ref, oracle_nft_token_name, operator_pkh
+  const oracleNftTokenNameHex = stringToHex(oracleNftTokenName);
   const oracleCbor = applyParamsToScript(ORACLE_RAW_CBOR, [
-    oracleNftPolicyId,
+    mOutputReference(paramTxHash, paramTxIndex),
     oracleNftTokenNameHex,
     pubKeyHash,
   ]);
   const oracleScript: PlutusScript = { code: oracleCbor, version: "V3" };
   const oracleAddress = resolvePlutusScriptAddress(oracleScript, NETWORK_ID);
+  const oracleScriptHash = resolveScriptHash(oracleCbor, "V3");
+  // PolicyId của Oracle NFT chính là Script Hash của Oracle Multi-Purpose Validator
+  const oracleNftPolicyId = oracleScriptHash;
+  const oracleNftUnit = oracleNftPolicyId + oracleNftTokenNameHex;
 
-  // ── Stablecoin Validator ────────────────────────────────────────────────────
+  // ── Apply tham số cho Stablecoin Validator ──────────────────────────────────
+  // Tham số: oracle_script_hash, oracle_nft_token_name, dev_address
   const stablecoinCbor = applyParamsToScript(STABLECOIN_RAW_CBOR, [
-    oracleNftPolicyId,
+    oracleScriptHash,
     oracleNftTokenNameHex,
     mPubKeyAddress(pubKeyHash, stakeCredentialHash),
   ]);
   const stablecoinScript: PlutusScript = { code: stablecoinCbor, version: "V3" };
-  const stablecoinAddress = resolvePlutusScriptAddress(stablecoinScript, NETWORK_ID);
 
   // ── Always-fail address ─────────────────────────────────────────────────────
   const burnAddr = getAlwaysFailAddress(NETWORK_ID);
 
   // ── Tính min ADA cho từng Ref Script UTxO ──────────────────────────────────
-  const txBuilder = new MeshTxBuilder({ fetcher });
-
   const oracleRefMinAda = txBuilder.calculateMinLovelaceForOutput({
     address: burnAddr,
     amount: [{ unit: "lovelace", quantity: "0" }],
@@ -148,34 +130,36 @@ export async function deployTx(
   } as Output);
 
   // ── Build TX ────────────────────────────────────────────────────────────────
-  // Output layout:
-  //  0 = Oracle UTxO  (NFT + OracleDatum)
-  //  1 = Oracle Reference Script UTxO (always-fail address)
-  //  2 = Stablecoin Reference Script UTxO (always-fail address)
-  const ORACLE_REF_IDX = 1;
-  const STABLECOIN_REF_IDX = 2;
 
   const unsignedTx = await txBuilder
-    // Consume param UTxO → kích hoạt one-shot mint
+    // Tiêu thụ param UTxO → thỏa mãn one-shot minting
     .txIn(paramTxHash, paramTxIndex, paramUtxo.output.amount, paramUtxo.output.address)
-    // Mint Oracle NFT
+
+    // Mint Oracle NFT từ Oracle Multi-Purpose Script
     .mintPlutusScriptV3()
     .mint("1", oracleNftPolicyId, oracleNftTokenNameHex)
-    .mintingScript(oracleNftCbor)
-    .mintRedeemerValue(REDEEMER_MINT_ORACLE_NFT)
+    .mintingScript(oracleCbor)
+    .mintRedeemerValue(REDEEMER_ORACLE_INIT)
+
+    // Chữ ký của operator
+    .requiredSignerHash(pubKeyHash)
+
     // Output 0: Oracle UTxO
     .txOut(oracleAddress, [
       { unit: "lovelace", quantity: "2000000" },
       { unit: oracleNftUnit, quantity: "1" },
     ])
     .txOutInlineDatumValue(mConStr0([initialRate]))
+
     // Output 1: Oracle Reference Script
     .txOut(burnAddr, [{ unit: "lovelace", quantity: oracleRefMinAda.toString() }])
     .txOutReferenceScript(oracleCbor, "V3")
+
     // Output 2: Stablecoin Reference Script
     .txOut(burnAddr, [{ unit: "lovelace", quantity: stablecoinRefMinAda.toString() }])
     .txOutReferenceScript(stablecoinCbor, "V3")
-    // Collateral
+
+    // Các khai báo còn lại hoàn thiện giao dịch
     .txInCollateral(
       collateral.input.txHash,
       collateral.input.outputIndex,
@@ -186,15 +170,11 @@ export async function deployTx(
     .selectUtxosFrom(utxos)
     .complete();
 
-  const signedTx = await wallet.signTx(unsignedTx);
-
   return {
-    signedTx,
+    unsignedTx,
     oracleNftPolicyId,
-    oracleRefOutputIndex: ORACLE_REF_IDX,
-    stablecoinRefOutputIndex: STABLECOIN_REF_IDX,
-    oracleAddress,
-    stablecoinAddress,
+    oracleRefOutputIndex: 1,
+    stablecoinRefOutputIndex: 2,
   };
 }
 
@@ -204,8 +184,8 @@ export async function deployTx(
  * Cập nhật tỷ giá Oracle.
  */
 export async function updateOracleTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
   oracleAddress: string,
   oracleInfo: OracleInfo,
   newRate: bigint,
@@ -219,8 +199,6 @@ export async function updateOracleTx(
   if (!collaterals || collaterals.length === 0)
     throw new Error("No collateral found. Please add collateral in wallet settings.");
   const collateral = collaterals[0];
-
-  const txBuilder = new MeshTxBuilder({ fetcher });
 
   const { pubKeyHash: operatorPkh } = deserializeAddress(operatorAddress);
 
@@ -251,24 +229,23 @@ export async function updateOracleTx(
     )
     .complete();
 
-  return wallet.signTx(unsignedTx);
+  return unsignedTx;
 }
 
 // ─── Delete Oracle ─────────────────────────────────────────────────────────
 
 /**
- * Xóa Oracle — operator thu hồi ADA và NFT về ví.
- * Dùng ORACLE_REF_UTXO từ config làm reference script.
- * Yêu cầu operator địa chỉ được cấu hình ký giao dịch.
+ * Xóa Oracle — Burn Oracle NFT.
+ * Dùng ORACLE_REF_UTXO từ config làm reference script cho cả spending và minting (burn).
+ * Yêu cầu operator ký giao dịch.
  */
 export async function deleteOracleTx(
+  txBuilder: MeshTxBuilder,
   wallet: BrowserWallet,
-  fetcher: IFetcher,
   oracleInfo: OracleInfo,
   operatorAddress: string,
   oracleNftPolicyId: string,
-  oracleNftTokenNameHex: string,
-  oracleNftCbor: string
+  oracleNftTokenNameHex: string
 ): Promise<string> {
   const utxos = await wallet.getUtxos();
   if (!utxos || utxos.length === 0)
@@ -284,8 +261,6 @@ export async function deleteOracleTx(
   const [refTxHash, refIndexStr] = ORACLE_REF_UTXO.trim().split("#");
   const refIndex = Number(refIndexStr);
 
-  const txBuilder = new MeshTxBuilder({ fetcher });
-
   const unsignedTx = await txBuilder
     .spendingPlutusScriptV3()
     .txIn(
@@ -300,8 +275,8 @@ export async function deleteOracleTx(
 
     .mintPlutusScriptV3()
     .mint("-1", oracleNftPolicyId, oracleNftTokenNameHex)
-    .mintingScript(oracleNftCbor)
-    .mintRedeemerValue(REDEEMER_BURN_ORACLE_NFT)
+    .mintRedeemerValue(REDEEMER_ORACLE_DELETE)
+    .mintTxInReference(refTxHash, refIndex)
 
     .requiredSignerHash(operatorPkh)
     .changeAddress(operatorAddress)
@@ -314,5 +289,5 @@ export async function deleteOracleTx(
     )
     .complete();
 
-  return wallet.signTx(unsignedTx);
+  return unsignedTx;
 }

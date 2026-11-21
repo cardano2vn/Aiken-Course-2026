@@ -1,21 +1,26 @@
 "use client";
 import { useState, useMemo, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { CollateralPosition } from "@cardano-stablecoin/offchain";
-import { MIN_UTXO_LOVELACE } from "@cardano-stablecoin/offchain";
+import { useWallet } from "@/context/WalletContext";
+import { deserializeAddress } from "@meshsdk/core";
+import type { Position } from "@cardano-stablecoin/offchain";
+import { MIN_UTXO_LOVELACE, MCR_PERCENT, COLLATERAL_SAFE_PERCENT } from "@cardano-stablecoin/offchain";
 
 interface PositionCardProps {
-  position: CollateralPosition;
+  position: Position;
   isOwner: boolean;
-  onBurn?: (position: CollateralPosition) => Promise<void>;
-  onLiquidate?: (position: CollateralPosition) => Promise<void>;
+  onBurn?: (position: Position) => Promise<void>;
+  onLiquidate?: (position: Position) => Promise<void>;
   loading: boolean;
 }
 
 function CRBadge({ cr }: { cr: number }) {
-  if (cr >= 200) return <span className="badge-safe">CR {cr.toFixed(0)}%</span>;
-  if (cr >= 150) return <span className="badge-warning">CR {cr.toFixed(0)}%</span>;
-  return <span className="badge-danger">CR {cr.toFixed(0)}% ⚠</span>;
+  const minCr = Number(MCR_PERCENT);
+  const safeCr = Number(COLLATERAL_SAFE_PERCENT);
+
+  if (cr >= safeCr) return <span className="badge-safe">An toàn · CR {cr.toFixed(0)}%</span>;
+  if (cr >= minCr) return <span className="badge-warning">Rủi ro · CR {cr.toFixed(0)}%</span>;
+  return <span className="badge-danger">Có thể thanh lý · CR {cr.toFixed(0)}% ⚠</span>;
 }
 
 function truncate(addr: string) {
@@ -29,6 +34,7 @@ export const PositionCard = memo(function PositionCardComponent({
   onLiquidate,
   loading,
 }: PositionCardProps) {
+  const { connected, networkError } = useWallet();
   const {
     collateralLovelace,
     stablecoinAmount,
@@ -48,10 +54,10 @@ export const PositionCard = memo(function PositionCardComponent({
       className="glass"
       style={{
         padding: 20,
-        borderColor: isOwner 
-          ? "var(--color-accent)" 
-          : isLiquidatable 
-            ? "rgba(255,107,107,0.3)" 
+        borderColor: isOwner
+          ? "var(--color-accent)"
+          : isLiquidatable
+            ? "rgba(255,107,107,0.3)"
             : "var(--color-border)",
         background: isOwner ? "rgba(0, 255, 157, 0.03)" : "var(--color-surface)",
         boxShadow: isOwner ? "0 0 20px rgba(0, 255, 157, 0.05)" : "none",
@@ -104,13 +110,13 @@ export const PositionCard = memo(function PositionCardComponent({
           }}
         >
           <div style={{ color: "var(--color-danger)", fontWeight: 600, marginBottom: 4 }}>
-            {isOwner ? "Thế chấp dưới ngưỡng" : "Có thể thanh lý"}
+            {isOwner ? "⚠ Vị thế vi phạm mức thế chấp tối thiểu" : "⚡ Cơ hội thanh lý nhận thưởng"}
           </div>
           <div style={{ color: "var(--color-muted)" }}>
             <span style={{ opacity: 0.8 }}>Ước tính:</span>
             <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
               <li>
-                Phần thưởng: <span style={{ color: "var(--color-warning)" }}>{rewardAda.toLocaleString(undefined, { minimumFractionDigits: 4 })} ADA</span>
+                Thưởng thanh lý: <span style={{ color: "var(--color-warning)" }}>{rewardAda.toLocaleString(undefined, { minimumFractionDigits: 4 })} ADA</span>
               </li>
               {ownerRefundLovelace >= MIN_UTXO_LOVELACE && (
                 <li>Hoàn lại owner: {refundAda.toLocaleString(undefined, { minimumFractionDigits: 4 })} ADA</li>
@@ -125,21 +131,37 @@ export const PositionCard = memo(function PositionCardComponent({
         {isOwner && onBurn && (
           <button
             className="btn-ghost"
-            style={{ flex: 1 }}
-            disabled={loading}
+            style={{
+              flex: 1,
+              opacity: loading || !!networkError ? 0.5 : 1,
+              cursor: loading || !!networkError ? "not-allowed" : "pointer",
+            }}
+            disabled={loading || !!networkError}
+            title={networkError ?? undefined}
             onClick={() => onBurn(position)}
           >
-            {loading ? "Đang xử lý..." : "Burn & Rút ADA"}
+            {loading ? "Đang xử lý..." : networkError ? "⚠ Sai mạng" : "Burn & Rút ADA"}
           </button>
         )}
         {isLiquidatable && cr > 0 && !isOwner && onLiquidate && (
           <button
             className="btn-danger"
-            style={{ flex: 1 }}
-            disabled={loading}
+            style={{
+              flex: 1,
+              opacity: !connected || loading || !!networkError ? 0.5 : 1,
+              cursor: !connected || loading || !!networkError ? "not-allowed" : "pointer",
+            }}
+            disabled={!connected || loading || !!networkError}
+            title={!connected ? "Kết nối ví để thanh lý vị thế" : (networkError ?? undefined)}
             onClick={() => onLiquidate(position)}
           >
-            {loading ? "Đang xử lý..." : "Thanh lý →"}
+            {!connected
+              ? "Kết nối ví để thanh lý vị thế"
+              : loading
+                ? "Đang xử lý..."
+                : networkError
+                  ? "⚠ Sai mạng"
+                  : "Thanh lý →"}
           </button>
         )}
       </div>
@@ -151,10 +173,10 @@ export const PositionCard = memo(function PositionCardComponent({
 
 interface PositionListProps {
   title: string;
-  positions: CollateralPosition[];
-  connectedAddresses?: string[];
-  onBurn?: (position: CollateralPosition) => Promise<void>;
-  onLiquidate?: (position: CollateralPosition) => Promise<void>;
+  positions: Position[];
+  stakeKeyHashes?: string[];
+  onBurn?: (position: Position) => Promise<void>;
+  onLiquidate?: (position: Position) => Promise<void>;
   loading: boolean;
   isRefreshing?: boolean;
   onRefresh?: () => void;
@@ -164,7 +186,7 @@ interface PositionListProps {
 export const PositionList = memo(function PositionListComponent({
   title,
   positions,
-  connectedAddresses = [],
+  stakeKeyHashes = [],
   onBurn,
   onLiquidate,
   loading,
@@ -172,22 +194,32 @@ export const PositionList = memo(function PositionListComponent({
   onRefresh,
   emptyText,
 }: PositionListProps) {
+  const { address } = useWallet();
   const [filterBy, setFilterBy] = useState<"all" | "yours" | "liquidatable">("all");
+
+  const checkIsOwner = (ownerAddress: string) => {
+    if (!ownerAddress) return false;
+    if (address && ownerAddress === address) return true;
+    try {
+      const stake = deserializeAddress(ownerAddress).stakeCredentialHash;
+      return !!stake && stakeKeyHashes.includes(stake);
+    } catch {
+      return false;
+    }
+  };
 
   const filteredPositions = useMemo(() => {
     let list = [...positions];
-    
-    const isOwner = (addr: string) => connectedAddresses.some(a => a.toLowerCase() === addr.toLowerCase());
 
     // Áp dụng filter
     if (filterBy === "yours") {
-      list = list.filter((p) => isOwner(p.ownerAddress));
+      list = list.filter((p) => checkIsOwner(p.ownerAddress));
     } else if (filterBy === "liquidatable") {
       list = list.filter((p) => p.isLiquidatable);
     }
 
     return list;
-  }, [positions, filterBy, connectedAddresses]);
+  }, [positions, filterBy, stakeKeyHashes, address]);
 
   return (
     <section>
@@ -223,7 +255,7 @@ export const PositionList = memo(function PositionListComponent({
             </motion.button>
           )}
         </div>
-        
+
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {(["all", "yours", "liquidatable"] as const).map((key) => {
             const labels = {
@@ -255,7 +287,7 @@ export const PositionList = memo(function PositionListComponent({
           })}
         </div>
       </div>
-      
+
       {positions.length === 0 ? (
         <div
           className="glass"
@@ -264,15 +296,15 @@ export const PositionList = memo(function PositionListComponent({
           {emptyText}
         </div>
       ) : (
-        <div style={{ 
-          display: "grid", 
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", 
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
           gap: 16,
           alignItems: "start"
         }}>
           <AnimatePresence>
             {filteredPositions.map((pos) => {
-              const isOwner = connectedAddresses.some(a => a.toLowerCase() === pos.ownerAddress.toLowerCase());
+              const isOwner = checkIsOwner(pos.ownerAddress);
               return (
                 <PositionCard
                   key={`${pos.utxo.input.txHash}#${pos.utxo.input.outputIndex}`}

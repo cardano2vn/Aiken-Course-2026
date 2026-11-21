@@ -87,13 +87,13 @@ Giao dịch này thực hiện các hành động sau:
 ### 4.2 Giao dịch Burn (Giải chấp)
 1.  **Burn VNDC**: Người dùng gửi VNDC vào giao dịch để đốt bỏ.
 2.  **Unlock ADA**: Validator cho phép rút ADA từ Script về ví người dùng.
-3.  **Dev Fee**: Hệ thống thu phí 0.1% trên số ADA được rút ra.
+3.  **Dev Fee**: Hệ thống thu phí 0.5% trên số ADA được rút ra.
 
 ### 4.3 Giao dịch Liquidate (Thanh lý)
 Khi giá ADA giảm mạnh khiến tỉ lệ thế chấp thấp hơn mức an toàn (150%), bất kỳ ai cũng có quyền thanh lý vị thế đó:
 1.  **Burn VNDC**: Người thanh lý (Liquidator) dùng VNDC của mình để trả nợ cho vị thế bị thanh lý.
 2.  **Unlock ADA**: Toàn bộ ADA collateral được giải phóng khỏi script.
-3.  **Dev Fee**: Thu phí 0.1% lovelace tương tự giao dịch Burn.
+3.  **Dev Fee**: Thu phí 0.5% lovelace tương tự giao dịch Burn.
 4.  **Refund Owner**: Nếu giá trị ADA thanh lý vẫn còn dư một phần nhỏ (sau khi đã khấu trừ nợ và phí), phần dư này sẽ được gửi trả lại cho chủ vị thế cũ.
 5.  **Liquidator Reward**: Người thanh lý nhận được phần lớn số ADA còn lại như một phần thưởng cho việc giúp hệ thống duy trì tính ổn định.
 
@@ -122,19 +122,19 @@ stateDiagram-v2
 
 ## 6. Testing
 
-Dự án sử dụng **`OfflineEvaluator`** kết hợp với **`OfflineFetcher`** trong bộ test off-chain.
-- **Xác thực logic Local**: Toàn bộ script Aiken được thực thi trên môi trường máy ảo Plutus tại local trước khi gửi.
-- **Protocol Parameters**: Sử dụng các tham số kỷ nguyên Conway (như `minFeeRefScriptCostPerByte`) để đảm bảo tính toán phí và budget chính xác.
-- **Negative Testing**: Bộ test bao gồm các trường hợp cố tình vi phạm (thiếu collateral, sai tỉ giá) để đảm bảo Validator hoạt động đúng.
+Dự án sử dụng **`OfflineFetcher`**, **`TxTester`**, **`OfflineEvaluatorScalus`** và **`fast-check`** trong bộ test off-chain (`offchain/tests/`):
+- **Xác thực cấu trúc & logic Local**: `OfflineFetcher` cung cấp `DEFAULT_PROTOCOL_PARAMETERS` và Mock UTxO trong RAM; `TxTester` khẳng định chữ ký, token mint/burn, output values; toàn bộ bytecode Aiken Plutus V3 được `OfflineEvaluatorScalus` thực thi cục bộ để đo `mem`/`steps`.
+- **Phân tách Admin / User & Property-Based Testing**: Tách rõ `transactions-admin.test.ts`, `transactions-user.test.ts` cùng `utils.test.ts`, `queries.test.ts` và 10 tính chất bất biến `[P1]–[P10]` trong `properties.test.ts`.
+- **Negative Testing**: Bao gồm các trường hợp cố tình vi phạm (over-mint vượt 150%, update Oracle sai ví Operator hoặc `newRate <= 0`, burn sai dev address, thanh lý khi `CR >= 150%`) để chứng minh Validator từ chối đúng quy tắc.
 
 ## 7. Vai trò của Oracle
 
-Để phục vụ cho mục đích giảng dạy, hệ thống sử dụng Oracle giả lập, vận hành bằng tay. Tỷ giá ADA/VNDC được lưu trữ trong 1 reference UTxO trên blockchain, được quản lý bởi Oracle validator. 
+Để phục vụ cho mục đích giảng dạy, hệ thống sử dụng Oracle giả lập, vận hành bằng tay. Tỷ giá ADA/VND được lưu trữ trong 1 reference UTxO trên blockchain, được quản lý bởi Oracle validator. 
 
 ### 7.1 Cách triển khai (Deploy)
 Oracle được khởi tạo thông qua một tập lệnh (script) triển khai riêng biệt:
 - Script này đúc ra một **Oracle Auth Token** (NFT) để định danh duy nhất cho Oracle.
-- Đồng thời, script tạo ra một UTxO khóa Auth Token đó lại, kèm theo **Datum** chứa thông tin tỉ giá ADA/VNDC hiện tại. Việc cập nhật tỉ giá bản chất là việc tiêu thụ UTxO này và tạo ra UTxO mới với Datum mới.
+- Đồng thời, script tạo ra một UTxO khóa Auth Token đó lại, kèm theo **Datum** chứa thông tin tỉ giá ADA/VND hiện tại. Việc cập nhật tỉ giá bản chất là việc tiêu thụ UTxO này và tạo ra UTxO mới với Datum mới.
 
 ### 7.2 Tích hợp vào Giao dịch
 - Off-chain có nhiệm vụ tìm UTxO mang Oracle Auth Token này và đưa vào giao dịch dưới dạng **Reference Input**. 

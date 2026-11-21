@@ -9,11 +9,11 @@ use mocktail.{
 }
 use oracle.{OracleDatum}
 use stablecoin.{
-  Burn, CollateralDatum, Liquidate, Mint, calculate_dev_fee,
-  max_mintable_amount, stablecoin_token_name,
+  Burn, Liquidate, Mint, PositionDatum, calculate_dev_fee, max_mintable,
+  position_token_name, stablecoin_token_name,
 }
 
-const oracle_nft_policy_id = mock_policy_id(10)
+const oracle_script_hash = mock_policy_id(10)
 
 const oracle_nft_token_name = "OracleNFT"
 
@@ -27,15 +27,22 @@ const dev_address: Address = mock_pub_key_address(1, None)
 
 const stablecoin_address: Address = from_script(stablecoin_policy_id)
 
+const oracle_script_address: Address = from_script(oracle_script_hash)
+
 const oracle_rate: Int = 25_000
 
 fn oracle_reference_value() {
   from_lovelace(2_000_000)
-    |> add(oracle_nft_policy_id, oracle_nft_token_name, 1)
+    |> add(oracle_script_hash, oracle_nft_token_name, 1)
 }
 
-fn collateral_datum(amount: Int) {
-  CollateralDatum { owner, stablecoin_amount: amount }
+fn position_datum(amount: Int) {
+  PositionDatum { owner, stablecoin_amount: amount }
+}
+
+fn position_script_value(lovelace: Int) {
+  from_lovelace(lovelace)
+    |> add(stablecoin_policy_id, position_token_name, 1)
 }
 
 fn build_mint_tx(collateral_lovelace: Int, stablecoin_amount: Int) {
@@ -46,16 +53,21 @@ fn build_mint_tx(collateral_lovelace: Int, stablecoin_amount: Int) {
         stablecoin_policy_id,
         stablecoin_token_name,
       )
+    |> mint(True, 1, stablecoin_policy_id, position_token_name)
     |> ref_tx_in(
         True,
         mock_tx_hash(0),
         0,
         oracle_reference_value(),
-        mock_pub_key_address(3, None),
+        oracle_script_address,
       )
     |> ref_tx_in_inline_datum(True, OracleDatum { rate: oracle_rate })
-    |> tx_out(True, stablecoin_address, from_lovelace(collateral_lovelace))
-    |> tx_out_inline_datum(True, collateral_datum(stablecoin_amount))
+    |> tx_out(
+        True,
+        stablecoin_address,
+        position_script_value(collateral_lovelace),
+      )
+    |> tx_out_inline_datum(True, position_datum(stablecoin_amount))
     |> required_signer_hash(True, owner_pkh)
     |> complete()
 }
@@ -68,28 +80,38 @@ fn build_burn_tx(collateral_lovelace: Int, stablecoin_amount: Int) {
         True,
         own_ref.transaction_id,
         own_ref.output_index,
-        from_lovelace(collateral_lovelace),
+        position_script_value(collateral_lovelace),
         stablecoin_address,
       )
-    |> tx_in_inline_datum(True, collateral_datum(stablecoin_amount))
+    |> tx_in_inline_datum(True, position_datum(stablecoin_amount))
     |> mint(
         True,
         0 - stablecoin_amount,
         stablecoin_policy_id,
         stablecoin_token_name,
       )
+    |> mint(True, -1, stablecoin_policy_id, position_token_name)
     |> tx_out(True, dev_address, from_lovelace(dev_fee))
     |> required_signer_hash(True, owner_pkh)
     |> complete()
 }
 
-fn build_liquidate_tx(collateral_lovelace: Int, stablecoin_amount: Int, rate: Int) {
+fn build_liquidate_tx(
+  collateral_lovelace: Int,
+  stablecoin_amount: Int,
+  rate: Int,
+) {
   let dev_fee = calculate_dev_fee(collateral_lovelace)
-  let stablecoin_val = stablecoin_amount * 1_000_000 / rate
-  let extra_value = collateral_lovelace - stablecoin_val
-  let max_reward = collateral_lovelace * 2 / 100
-  let reward = math.min(extra_value, max_reward)
-  let owner_refund = collateral_lovelace - stablecoin_val - reward - dev_fee
+  let debt_lovelace = stablecoin_amount * 1_000_000 / rate
+  let extra_value = collateral_lovelace - debt_lovelace
+  let (actual_dev_fee, owner_refund) = if extra_value < dev_fee {
+    (0, 0)
+  } else {
+    let remaining = extra_value - dev_fee
+    let max_reward = collateral_lovelace * 2 / 100
+    let reward = math.min(remaining, max_reward)
+    (dev_fee, remaining - reward)
+  }
 
   let own_ref = mock_utxo_ref(5, 0)
 
@@ -98,16 +120,16 @@ fn build_liquidate_tx(collateral_lovelace: Int, stablecoin_amount: Int, rate: In
         True,
         own_ref.transaction_id,
         own_ref.output_index,
-        from_lovelace(collateral_lovelace),
+        position_script_value(collateral_lovelace),
         stablecoin_address,
       )
-    |> tx_in_inline_datum(True, collateral_datum(stablecoin_amount))
+    |> tx_in_inline_datum(True, position_datum(stablecoin_amount))
     |> ref_tx_in(
         True,
         mock_tx_hash(0),
         0,
         oracle_reference_value(),
-        mock_pub_key_address(3, None),
+        oracle_script_address,
       )
     |> ref_tx_in_inline_datum(True, OracleDatum { rate })
     |> mint(
@@ -116,27 +138,24 @@ fn build_liquidate_tx(collateral_lovelace: Int, stablecoin_amount: Int, rate: In
         stablecoin_policy_id,
         stablecoin_token_name,
       )
-    |> tx_out(True, dev_address, from_lovelace(dev_fee))
-    |> tx_out(
-        owner_refund >= 1_000_000,
-        owner,
-        from_lovelace(owner_refund),
-      )
+    |> mint(True, -1, stablecoin_policy_id, position_token_name)
+    |> tx_out(actual_dev_fee > 0, dev_address, from_lovelace(actual_dev_fee))
+    |> tx_out(owner_refund >= 1_000_000, owner, from_lovelace(owner_refund))
     |> complete()
 }
 
-// [PROPERTY] Mint đúng max_amount với collateral ADA ngẫu nhiên luôn thành công
+// [PROPERTY] Mint đúng max_amount với collateral ADA ngẫu nhiên (>= 10 ADA) luôn thành công
 test prop_mint_at_max_amount_always_succeeds(
-  collateral_ada via fuzz.int_between(2, 10_000),
+  collateral_ada via fuzz.int_between(10, 10_000),
 ) {
   let collateral_lovelace = collateral_ada * 1_000_000
-  let max_amount = max_mintable_amount(collateral_lovelace, oracle_rate)
+  let max_amount = max_mintable(collateral_lovelace, oracle_rate)
   if max_amount <= 0 {
     True
   } else {
     let tx = build_mint_tx(collateral_lovelace, max_amount)
     stablecoin.stablecoin.mint(
-      oracle_nft_policy_id,
+      oracle_script_hash,
       oracle_nft_token_name,
       dev_address,
       Mint,
@@ -146,15 +165,18 @@ test prop_mint_at_max_amount_always_succeeds(
   }
 }
 
-// [PROPERTY] Mint vượt 1 đơn vị so với max_amount luôn thất bại
+// [PROPERTY] Mint vượt quá max_amount luôn thất bại (thử với lượng vượt ngẫu nhiên từ 1 đến 100,000 VNDC)
 test prop_mint_one_above_max_always_fails(
-  collateral_ada via fuzz.int_between(10, 1000),
-) {
+  (collateral_ada, extra_over) via fuzz.both(
+    fuzz.int_between(10, 1000),
+    fuzz.int_between(1, 100_000),
+  ),
+) fail {
   let collateral_lovelace = collateral_ada * 1_000_000
-  let over_amount = max_mintable_amount(collateral_lovelace, oracle_rate) + 1
+  let over_amount = max_mintable(collateral_lovelace, oracle_rate) + extra_over
   let tx = build_mint_tx(collateral_lovelace, over_amount)
-  !stablecoin.stablecoin.mint(
-    oracle_nft_policy_id,
+  stablecoin.stablecoin.mint(
+    oracle_script_hash,
     oracle_nft_token_name,
     dev_address,
     Mint,
@@ -163,37 +185,38 @@ test prop_mint_one_above_max_always_fails(
   )
 }
 
-// [PROPERTY] Burn + trả dev fee với collateral ngẫu nhiên luôn thành công
+// [PROPERTY] Burn + trả dev fee với collateral và lượng vay ngẫu nhiên (1% -> 100% hạn mức) luôn thành công
 test prop_burn_with_dev_fee_always_succeeds(
-  collateral_ada via fuzz.int_between(10, 1000),
+  (collateral_ada, borrow_pct) via fuzz.both(
+    fuzz.int_between(10, 1000),
+    fuzz.int_between(1, 100),
+  ),
 ) {
   let collateral_lovelace = collateral_ada * 1_000_000
-  let stablecoin_amount = max_mintable_amount(collateral_lovelace, oracle_rate)
-  if stablecoin_amount <= 0 {
-    True
-  } else {
-    let tx = build_burn_tx(collateral_lovelace, stablecoin_amount)
-    let own_ref = mock_utxo_ref(5, 0)
+  let max_amount = max_mintable(collateral_lovelace, oracle_rate)
+  let stablecoin_amount = math.max(1, max_amount * borrow_pct / 100)
 
-    and {
-      stablecoin.stablecoin.mint(
-        oracle_nft_policy_id,
-        oracle_nft_token_name,
-        dev_address,
-        Burn,
-        stablecoin_policy_id,
-        tx,
-      )?,
-      stablecoin.stablecoin.spend(
-        oracle_nft_policy_id,
-        oracle_nft_token_name,
-        dev_address,
-        Some(collateral_datum(stablecoin_amount)),
-        Void,
-        own_ref,
-        tx,
-      )?,
-    }
+  let tx = build_burn_tx(collateral_lovelace, stablecoin_amount)
+  let own_ref = mock_utxo_ref(5, 0)
+
+  and {
+    stablecoin.stablecoin.mint(
+      oracle_script_hash,
+      oracle_nft_token_name,
+      dev_address,
+      Burn,
+      stablecoin_policy_id,
+      tx,
+    )?,
+    stablecoin.stablecoin.spend(
+      oracle_script_hash,
+      oracle_nft_token_name,
+      dev_address,
+      Some(position_datum(stablecoin_amount)),
+      Void,
+      own_ref,
+      tx,
+    )?,
   }
 }
 
@@ -203,18 +226,22 @@ test prop_liquidate_succeeds_when_liquidatable(
 ) {
   let collateral_lovelace = collateral_ada * 1_000_000
   // Đúc tại mức 150%, sau đó tỷ giá giảm 20% => CR còn 120%
-  let stablecoin_amount = max_mintable_amount(collateral_lovelace, oracle_rate)
+  let stablecoin_amount = max_mintable(collateral_lovelace, oracle_rate)
   let low_rate = oracle_rate * 80 / 100
 
   if stablecoin_amount <= 0 {
     True
   } else {
-    let tx = build_liquidate_tx(collateral_lovelace, stablecoin_amount, low_rate)
+    let tx = build_liquidate_tx(
+      collateral_lovelace,
+      stablecoin_amount,
+      low_rate,
+    )
     let own_ref = mock_utxo_ref(5, 0)
 
     and {
       stablecoin.stablecoin.mint(
-        oracle_nft_policy_id,
+        oracle_script_hash,
         oracle_nft_token_name,
         dev_address,
         Liquidate,
@@ -222,10 +249,10 @@ test prop_liquidate_succeeds_when_liquidatable(
         tx,
       )?,
       stablecoin.stablecoin.spend(
-        oracle_nft_policy_id,
+        oracle_script_hash,
         oracle_nft_token_name,
         dev_address,
-        Some(collateral_datum(stablecoin_amount)),
+        Some(position_datum(stablecoin_amount)),
         Void,
         own_ref,
         tx,
@@ -234,25 +261,28 @@ test prop_liquidate_succeeds_when_liquidatable(
   }
 }
 
-// [PROPERTY] Liquidate thất bại khi CR >= 150%
+// [PROPERTY] Liquidate thất bại khi vị thế an toàn (CR >= 150%, nợ ngẫu nhiên từ 1% đến 100% hạn mức)
 test prop_liquidate_fails_when_safe(
-  collateral_ada via fuzz.int_between(10, 1000),
-) {
+  (collateral_ada, borrow_pct) via fuzz.both(
+    fuzz.int_between(10, 1000),
+    fuzz.int_between(1, 100),
+  ),
+) fail {
   let collateral_lovelace = collateral_ada * 1_000_000
-  // Đúc tại mức 150%, tỷ giá giữ nguyên => CR = 150%
-  let stablecoin_amount = max_mintable_amount(collateral_lovelace, oracle_rate)
+  let max_amount = max_mintable(collateral_lovelace, oracle_rate)
+  let stablecoin_amount = math.max(1, max_amount * borrow_pct / 100)
 
-  if stablecoin_amount <= 0 {
-    True
-  } else {
-    let tx = build_liquidate_tx(collateral_lovelace, stablecoin_amount, oracle_rate)
-    !stablecoin.stablecoin.mint(
-      oracle_nft_policy_id,
-      oracle_nft_token_name,
-      dev_address,
-      Liquidate,
-      stablecoin_policy_id,
-      tx,
-    )
-  }
+  let tx = build_liquidate_tx(
+    collateral_lovelace,
+    stablecoin_amount,
+    oracle_rate,
+  )
+  stablecoin.stablecoin.mint(
+    oracle_script_hash,
+    oracle_nft_token_name,
+    dev_address,
+    Liquidate,
+    stablecoin_policy_id,
+    tx,
+  )
 }

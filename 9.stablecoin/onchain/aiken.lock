@@ -8,7 +8,7 @@ source = "github"
 
 [[requirements]]
 name = "sidan-lab/vodka"
-version = "0.1.15"
+version = "0.1.23"
 source = "github"
 
 [[requirements]]
@@ -24,7 +24,7 @@ source = "github"
 
 [[packages]]
 name = "sidan-lab/vodka"
-version = "0.1.15"
+version = "0.1.23"
 requirements = []
 source = "github"
 

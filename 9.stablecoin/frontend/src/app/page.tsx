@@ -3,56 +3,60 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockfrostProvider, stringToHex } from "@meshsdk/core";
 import {
   buildOracleConfig,
-  buildScriptConfig,
+  buildStablecoinConfig,
   burnStablecoinTx,
+  calcCollateralRatio,
+  calcMaxMintable,
   getAllPositions,
   getOracleInfo,
   liquidateTx,
   mintStablecoinTx,
   ORACLE_NFT_TOKEN_NAME,
   ORACLE_NFT_POLICY_ID,
-  STABLECOIN_REF_UTXO,
   VNDC_TOKEN_NAME,
   LIQUIDATION_REWARD_PERCENT,
-  COLLATERAL_MIN_PERCENT,
+  MCR_PERCENT,
 } from "@cardano-stablecoin/offchain";
-import type { CollateralPosition, OracleInfo } from "@cardano-stablecoin/offchain";
+import type { Position, OracleInfo } from "@cardano-stablecoin/offchain";
 import { useWallet } from "@/context/WalletContext";
-import { WalletBar } from "@/components/WalletBar";
+import { WalletConnect } from "@/components/WalletConnect";
 import { MintPanel } from "@/components/MintPanel";
-import { PositionList } from "@/components/PositionCard";
-import { TxStatusModal } from "@/components/TxStatusModal";
+import { PositionList } from "@/components/PositionList";
+import { TransactionStatus } from "@/components/TransactionStatus";
 import { useTxSubmit } from "@/hooks/useTxSubmit";
 import { motion } from "framer-motion";
 
 const API_KEY = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY ?? "";
-const ORACLE_NFT_TN = process.env.NEXT_PUBLIC_ORACLE_NFT_TOKEN_NAME ?? ORACLE_NFT_TOKEN_NAME;
 const DEV_ADDRESS = process.env.NEXT_PUBLIC_DEV_ADDRESS ?? "";
 const OPERATOR_ADDRESS = process.env.NEXT_PUBLIC_OPERATOR_ADDRESS ?? "";
 
 export default function Home() {
-  const { wallet, connected, address, allAddresses } = useWallet();
+  const { wallet, connected, address, stakeKeyHashes, networkError } = useWallet();
 
   const provider = useMemo(
     () => (API_KEY ? new BlockfrostProvider(API_KEY) : null),
     [API_KEY]
   );
 
-  // Script configs — đọc từ offchain config.ts (course/demo flow)
-  const scriptConfig = useMemo(() => {
-    if (!ORACLE_NFT_POLICY_ID || !DEV_ADDRESS) return null;
-    return buildScriptConfig(ORACLE_NFT_POLICY_ID, ORACLE_NFT_TN, DEV_ADDRESS);
+  // Oracle config
+  const oracleConfig = useMemo(() => {
+    if (!ORACLE_NFT_POLICY_ID) return null;
+    return buildOracleConfig(ORACLE_NFT_POLICY_ID);
   }, []);
 
-  // Oracle config — operator address cố định từ env (là địa chỉ dùng khi deploy)
-  const oracleConfig = useMemo(() => {
-    if (!ORACLE_NFT_POLICY_ID || !OPERATOR_ADDRESS) return null;
-    return buildOracleConfig(ORACLE_NFT_POLICY_ID, ORACLE_NFT_TN, OPERATOR_ADDRESS);
-  }, []);
+  // Script configs — đọc từ offchain config.ts (course/demo flow)
+  const scriptConfig = useMemo(() => {
+    if (!ORACLE_NFT_POLICY_ID || !DEV_ADDRESS || !oracleConfig) return null;
+    return buildStablecoinConfig(
+      oracleConfig.ORACLE_SCRIPT_HASH,
+      ORACLE_NFT_TOKEN_NAME,
+      DEV_ADDRESS
+    );
+  }, [oracleConfig]);
 
   // State
   const [oracle, setOracle] = useState<OracleInfo | null>(null);
-  const [allPositions, setAllPositions] = useState<CollateralPosition[]>([]);
+  const [allPositions, setAllPositions] = useState<Position[]>([]);
   const [vndcBalance, setVndcBalance] = useState(0n);
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -65,163 +69,302 @@ export default function Home() {
     txHash,
     txError,
     setTxError,
-    submitAndConfirm,
+    buildAndSubmit,
+    restorePendingTx,
     closeModal: handleCloseTxModal,
   } = useTxSubmit();
 
-  // ─── Load data ─────────────────────────────────────────────────────────────
+  // Khôi phục pending transaction nếu người dùng F5 reload trang
+  useEffect(() => {
+    if (provider) {
+      restorePendingTx(provider, () => setRefreshKey((k) => k + 1));
+    }
+  }, [provider, restorePendingTx]);
+
+  // ─── Load data (Oracle + Positions) ─────────────────────────────────────────
   useEffect(() => {
     if (!provider || !scriptConfig || !oracleConfig) return;
 
+    let isMounted = true;
+
     async function loadData() {
+      setIsRefreshing(true);
       try {
+        // Tải Oracle Info trước với cơ chế retry tự động
         const oracleInfo = await getOracleInfo(
           provider!,
           oracleConfig!.ORACLE_ADDRESS,
-          ORACLE_NFT_POLICY_ID,
-          ORACLE_NFT_TN
+          ORACLE_NFT_POLICY_ID
         );
+
+        if (!isMounted) return;
         setOracle(oracleInfo);
 
+        // Tải danh sách vị thế (quét theo PositionToken trên toàn mạng qua Blockfrost API)
         const positions = await getAllPositions(
-          provider!,
-          scriptConfig!.STABLECOIN_ADDRESS,
+          API_KEY,
           oracleInfo?.rate ?? 0n,
-          scriptConfig!.VNDC_POLICY_ID,
-          VNDC_TOKEN_NAME
+          scriptConfig!.VNDC_POLICY_ID
         );
 
+        if (!isMounted) return;
         setAllPositions(positions);
-
-        // Fetch số dư VNDC trong ví để check điều kiện thanh lý
-        let currentVndcBalance = 0n;
-        if (connected && wallet) {
-          try {
-            const balances = await wallet.getBalance();
-            const vndcUnit = scriptConfig!.VNDC_POLICY_ID + stringToHex(VNDC_TOKEN_NAME);
-            const vndcAsset = balances.find((a) => a.unit === vndcUnit);
-            if (vndcAsset) {
-              currentVndcBalance = BigInt(vndcAsset.quantity);
-            }
-          } catch (err) {
-            console.warn("Lỗi lấy số dư VNDC:", err);
-          }
-        }
-        setVndcBalance(currentVndcBalance);
-
       } catch (e) {
+        if (!isMounted) return;
         console.error("Load data error:", e);
+      } finally {
+        if (isMounted) {
+          setIsRefreshing(false);
+        }
       }
     }
 
     loadData();
-  }, [provider, scriptConfig, oracleConfig, connected, address, refreshKey, wallet]);
 
-  // ─── Refresh helper ────────────────────────────────────────────────────────
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    setRefreshKey((k) => k + 1);
-    setTimeout(() => setIsRefreshing(false), 800);
-  };
+    return () => {
+      isMounted = false;
+    };
+  }, [provider, scriptConfig, oracleConfig, refreshKey]);
 
+  // ─── Load VNDC balance của ví kết nối (tách riêng để phản hồi tức thì) ─────
+  const prevAddressRef = useRef(address);
 
-
-  // ─── Mint ─────────────────────────────────────────────────────────────────
-  const handleMint = useCallback(async (collateralAda: number, stablecoinAmount: number) => {
-    if (!wallet || !provider || !oracle || !scriptConfig || !oracleConfig) return;
-    setLoading(true);
-    try {
-      setTxStatus("building");
-      const signedTx = await mintStablecoinTx(
-        wallet,
-        provider,
-        scriptConfig.STABLECOIN_ADDRESS,
-        scriptConfig.VNDC_POLICY_ID,
-        oracle.utxo,
-        BigInt(Math.floor(collateralAda * 1_000_000)),
-        BigInt(stablecoinAmount)
-      );
-      setTxStatus("signing");
-      await submitAndConfirm(wallet, provider, signedTx, () => {
-        setRefreshKey((k) => k + 1);
-      });
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      if (!msg.toLowerCase().includes("user declined") && !msg.toLowerCase().includes("user reject")) {
-        console.error("Mint error:", e);
-      }
-      setTxError(msg);
-      setTxStatus("failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [wallet, provider, oracle, scriptConfig, oracleConfig, submitAndConfirm, setTxStatus, setTxError]);
-
-  // ─── Burn ─────────────────────────────────────────────────────────────────
-  const handleBurn = useCallback(async (position: CollateralPosition) => {
-    if (!wallet || !provider || !scriptConfig) return;
-    setLoading(true);
-    try {
-      setTxStatus("building");
-      const signedTx = await burnStablecoinTx(
-        wallet,
-        provider,
-        scriptConfig.VNDC_POLICY_ID,
-        DEV_ADDRESS,
-        position
-      );
-      setTxStatus("signing");
-      await submitAndConfirm(wallet, provider, signedTx, () => {
-        setRefreshKey((k) => k + 1);
-      });
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      if (!msg.toLowerCase().includes("user declined") && !msg.toLowerCase().includes("user reject")) {
-        console.error("Burn error:", e);
-      }
-      setTxError(msg);
-      setTxStatus("failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [wallet, provider, scriptConfig, submitAndConfirm, setTxStatus, setTxError]);
-
-  // ─── Liquidate ────────────────────────────────────────────────────────────
-  const handleLiquidate = useCallback(async (position: CollateralPosition) => {
-    if (!wallet || !provider || !oracle || !scriptConfig) return;
-
-    if (vndcBalance < position.stablecoinAmount) {
-      setTxError(`Không đủ VNDC trong ví. Cần ${position.stablecoinAmount} VNDC để thanh lý vị thế này.`);
-      setTxStatus("failed");
+  useEffect(() => {
+    if (!connected || !wallet || !scriptConfig) {
+      prevAddressRef.current = "";
+      setVndcBalance(0n);
       return;
     }
 
+    // Chỉ reset về 0 khi đổi sang ví khác, tránh nháy UI khi polling làm mới trên cùng ví
+    if (prevAddressRef.current !== address) {
+      prevAddressRef.current = address;
+      setVndcBalance(0n);
+    }
+
+    let isMounted = true;
+
+    async function loadVndcBalance() {
+      try {
+        const balances = await wallet!.getBalance();
+        const vndcUnit = scriptConfig!.VNDC_POLICY_ID + stringToHex(VNDC_TOKEN_NAME);
+        const vndcAsset = balances.find((a) => a.unit === vndcUnit);
+        if (isMounted) {
+          setVndcBalance(vndcAsset ? BigInt(vndcAsset.quantity) : 0n);
+        }
+      } catch (err) {
+        console.warn("Lỗi lấy số dư VNDC:", err);
+      }
+    }
+
+    loadVndcBalance();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [connected, wallet, address, scriptConfig, refreshKey]);
+
+  // ─── Refresh helper ────────────────────────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  // ─── Smart Polling: Tự động cập nhật dữ liệu định kỳ mỗi 30 giây ──────────
+  const isBusyRef = useRef(false);
+  isBusyRef.current = loading || txStatus !== "idle";
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        // Chỉ poll khi tab đang hiển thị và không có giao dịch nào đang xử lý
+        if (typeof document !== "undefined" && document.visibilityState === "visible" && !isBusyRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+      }, 30_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        // Khi người dùng quay lại tab, refresh ngay 1 lần và reset chu kỳ
+        if (!isBusyRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+        startPolling();
+      } else {
+        // Khi người dùng ẩn tab, tạm dừng timer để tiết kiệm quota API Blockfrost
+        if (timer) clearInterval(timer);
+      }
+    };
+
+    startPolling();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
+  }, []);
+
+  // ─── Mint ─────────────────────────────────────────────────────────────────
+  const handleMint = useCallback(async (collateralLovelace: bigint, mintAmountBigInt: bigint) => {
+    if (!wallet || !provider || !scriptConfig || !oracleConfig || networkError) return;
     setLoading(true);
     try {
-      setTxStatus("building");
-      const signedTx = await liquidateTx(
+      // 1. Just-in-Time: Lấy tỷ giá Oracle mới nhất ngay trước khi dựng giao dịch
+      const freshOracle = await getOracleInfo(
+        provider,
+        oracleConfig.ORACLE_ADDRESS,
+        ORACLE_NFT_POLICY_ID
+      );
+      if (!freshOracle) {
+        setTxError("Không thể tìm thấy Oracle UTxO mới nhất trên mạng lưới.");
+        setTxStatus("failed");
+        return;
+      }
+      setOracle(freshOracle);
+
+      // 2. Tiền kiểm tra điều kiện thế chấp với tỷ giá mới nhất
+      const maxMintable = calcMaxMintable(collateralLovelace, freshOracle.rate);
+
+      if (mintAmountBigInt <= 0n || mintAmountBigInt > maxMintable) {
+        setTxError(
+          `Tỷ giá Oracle vừa cập nhật (${freshOracle.rate.toLocaleString()} VND/ADA). Tỉ lệ thế chấp hiện tại không đủ ${MCR_PERCENT}%. Vui lòng điều chỉnh lại.`
+        );
+        setTxStatus("failed");
+        return;
+      }
+
+      await buildAndSubmit(
         wallet,
         provider,
-        scriptConfig.VNDC_POLICY_ID,
-        oracle,
-        DEV_ADDRESS,
-        position
+        (txBuilder) =>
+          mintStablecoinTx(
+            txBuilder,
+            wallet,
+            scriptConfig.VNDC_POLICY_ID,
+            freshOracle.utxo,
+            collateralLovelace,
+            mintAmountBigInt
+          ),
+        () => setRefreshKey((k) => k + 1)
       );
-      setTxStatus("signing");
-      await submitAndConfirm(wallet, provider, signedTx, () => {
-        setRefreshKey((k) => k + 1);
-      });
     } catch (e: any) {
-      const msg = e?.message || String(e);
-      if (!msg.toLowerCase().includes("user declined") && !msg.toLowerCase().includes("user reject")) {
-        console.error("Liquidate error:", e);
-      }
-      setTxError(msg);
+      console.error("Mint error:", e);
+      setTxError(e?.message || "Lỗi khi đúc VNDC");
       setTxStatus("failed");
     } finally {
       setLoading(false);
     }
-  }, [wallet, provider, oracle, scriptConfig, vndcBalance, submitAndConfirm, setTxError, setTxStatus]);
+  }, [wallet, provider, scriptConfig, oracleConfig, networkError, buildAndSubmit, setTxError, setTxStatus]);
+
+  // Kiểm tra số dư VNDC trước khi thực hiện Burn hoặc Thanh lý
+  const ensureEnoughVndc = useCallback(
+    (requiredAmount: bigint, actionLabel: string): boolean => {
+      if (vndcBalance < requiredAmount) {
+        setTxError(
+          `Không đủ VNDC trong ví. Cần ${requiredAmount.toLocaleString()} VNDC để ${actionLabel} vị thế này.`
+        );
+        setTxStatus("failed");
+        return false;
+      }
+      return true;
+    },
+    [vndcBalance, setTxError, setTxStatus]
+  );
+
+  // ─── Burn ─────────────────────────────────────────────────────────────────
+  const handleBurn = useCallback(async (position: Position) => {
+    if (!wallet || !provider || !scriptConfig || networkError) return;
+    if (!ensureEnoughVndc(position.stablecoinAmount, "đóng")) return;
+
+    setLoading(true);
+    try {
+      await buildAndSubmit(
+        wallet,
+        provider,
+        (txBuilder) =>
+          burnStablecoinTx(
+            txBuilder,
+            wallet,
+            scriptConfig.VNDC_POLICY_ID,
+            DEV_ADDRESS,
+            position
+          ),
+        () => setRefreshKey((k) => k + 1)
+      );
+    } catch (e: any) {
+      console.error("Burn error:", e);
+      setTxError(e?.message || "Lỗi khi đóng vị thế");
+      setTxStatus("failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, provider, scriptConfig, networkError, ensureEnoughVndc, buildAndSubmit, setTxError, setTxStatus]);
+
+  // ─── Liquidate ────────────────────────────────────────────────────────────
+  const handleLiquidate = useCallback(async (position: Position) => {
+    if (!wallet || !provider || !scriptConfig || !oracleConfig || networkError) return;
+    if (!ensureEnoughVndc(position.stablecoinAmount, "thanh lý")) return;
+
+    setLoading(true);
+    try {
+      // 1. Just-in-Time: Lấy Oracle UTxO & tỷ giá mới nhất ngay trước khi thanh lý
+      const freshOracle = await getOracleInfo(
+        provider,
+        oracleConfig.ORACLE_ADDRESS,
+        ORACLE_NFT_POLICY_ID
+      );
+      if (!freshOracle) {
+        setTxError("Không thể tìm thấy Oracle UTxO mới nhất trên mạng lưới.");
+        setTxStatus("failed");
+        return;
+      }
+      setOracle(freshOracle);
+
+      // 2. Tính toán lại điều kiện thanh lý theo tỷ giá mới nhất
+      const cr = calcCollateralRatio(
+        position.collateralLovelace,
+        position.stablecoinAmount,
+        freshOracle.rate
+      );
+      const minCr = Number(MCR_PERCENT);
+      if (cr >= minCr) {
+        setTxError(
+          `Tỷ giá Oracle vừa thay đổi (${freshOracle.rate.toLocaleString()} VND/ADA). Vị thế này hiện đã an toàn (CR = ${cr.toFixed(1)}% >= ${minCr}%), không thể thanh lý!`
+        );
+        setTxStatus("failed");
+        return;
+      }
+
+      await buildAndSubmit(
+        wallet,
+        provider,
+        (txBuilder) =>
+          liquidateTx(
+            txBuilder,
+            wallet,
+            scriptConfig.VNDC_POLICY_ID,
+            freshOracle,
+            DEV_ADDRESS,
+            position
+          ),
+        () => setRefreshKey((k) => k + 1)
+      );
+    } catch (e: any) {
+      console.error("Liquidate error:", e);
+      setTxError(e?.message || "Lỗi khi thanh lý vị thế");
+      setTxStatus("failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, provider, scriptConfig, oracleConfig, networkError, ensureEnoughVndc, buildAndSubmit, setTxError, setTxStatus]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
   if (!API_KEY) {
@@ -240,7 +383,7 @@ export default function Home() {
 
   return (
     <>
-      <WalletBar vndcBalance={vndcBalance} />
+      <WalletConnect vndcBalance={vndcBalance} />
 
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 24px" }}>
         {/* Oracle rate display */}
@@ -261,12 +404,12 @@ export default function Home() {
               <div>
                 <span style={{ color: "var(--color-muted)", fontSize: 12 }}>Tỷ giá Oracle</span>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-accent)" }}>
-                  {oracle.rateVnd.toLocaleString()} VNDC/ADA
+                  {oracle.rate.toLocaleString()} VND/ADA
                 </div>
               </div>
               <div>
-                <span style={{ color: "var(--color-muted)", fontSize: 12 }}>Ngưỡng thế chấp</span>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>{Number(COLLATERAL_MIN_PERCENT)}%</div>
+                <span style={{ color: "var(--color-muted)", fontSize: 12 }}>Ngưỡng MCR</span>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{Number(MCR_PERCENT)}%</div>
               </div>
               <div>
                 <span style={{ color: "var(--color-muted)", fontSize: 12 }}>Thưởng thanh lý</span>
@@ -305,8 +448,58 @@ export default function Home() {
         )}
 
         {!oracle && (
-          <div className="glass" style={{ padding: 20, marginBottom: 32, textAlign: "center" }}>
-            <span style={{ color: "var(--color-warning)" }}>⚠ Oracle chưa sẵn sàng. Vui lòng deploy Oracle trước.</span>
+          <div
+            className="glass"
+            style={{
+              padding: "18px 24px",
+              marginBottom: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 16,
+              border: "1px solid rgba(255, 209, 102, 0.3)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 22 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 600, color: "var(--color-warning)", fontSize: 14 }}>
+                  Oracle đang ngoại tuyến.
+                </div>
+                <div style={{ color: "var(--color-muted)", fontSize: 12, marginTop: 2 }}>
+                  Vui lòng nhấn nút bên cạnh để tải lại.
+                </div>
+              </div>
+            </div>
+            <motion.div
+              onClick={handleRefresh}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="badge-warning"
+              style={{
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                borderRadius: 20,
+                fontWeight: 600,
+                fontSize: 13,
+                userSelect: "none",
+                background: "rgba(255, 209, 102, 0.15)",
+                border: "1px solid rgba(255, 209, 102, 0.4)",
+              }}
+            >
+              <motion.span
+                animate={isRefreshing ? { rotate: 360 } : { rotate: 0 }}
+                transition={{ duration: 0.6, ease: "linear", repeat: isRefreshing ? Infinity : 0 }}
+                style={{ display: "inline-block", fontSize: 14 }}
+              >
+                ↻
+              </motion.span>
+              <span>{isRefreshing ? "Đang tải lại..." : "Thử lại ngay"}</span>
+            </motion.div>
           </div>
         )}
 
@@ -324,10 +517,7 @@ export default function Home() {
             <div className="glass" style={{ padding: 48, textAlign: "center", maxWidth: 600 }}>
               <div style={{ fontSize: 48, marginBottom: 16 }}>🔐</div>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
-                Kết nối ví để đúc VNDC và thanh lý vị thế yếu
-              </div>
-              <div style={{ color: "var(--color-muted)", fontSize: 14 }}>
-                Sử dụng ví Cardano (Eternl, Lace, Nami...) để tương tác với Protocol.
+                Kết nối ví để đúc VNDC
               </div>
             </div>
           )}
@@ -337,7 +527,7 @@ export default function Home() {
             <PositionList
               title="Tất cả Vị thế"
               positions={allPositions}
-              connectedAddresses={allAddresses}
+              stakeKeyHashes={stakeKeyHashes}
               onBurn={handleBurn}
               onLiquidate={handleLiquidate}
               loading={loading}
@@ -350,7 +540,7 @@ export default function Home() {
       </main>
 
       {/* Tx status modal */}
-      <TxStatusModal
+      <TransactionStatus
         status={txStatus}
         txHash={txHash}
         error={txError}

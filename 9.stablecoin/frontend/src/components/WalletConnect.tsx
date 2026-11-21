@@ -13,21 +13,36 @@ const NAV_LINKS = [
   { href: "/admin", label: "Oracle Admin" },
 ];
 
-export function WalletBar({ vndcBalance }: { vndcBalance: bigint }) {
-  const { connected, address, lovelace, connect, disconnect } = useWallet();
+export function WalletConnect({ vndcBalance }: { vndcBalance?: bigint }) {
+  const { connected, address, lovelace, connect, disconnect, wallet, networkError } = useWallet();
   const [showMenu, setShowMenu] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [wallets, setWallets] = useState<{ id: string; name: string; icon: string }[]>([]);
+  const [hasCollateral, setHasCollateral] = useState<boolean | null>(null);
   const pathname = usePathname();
 
   const adaBalance = Number(lovelace) / 1_000_000;
 
   // Tự động detect ví đã cài trong trình duyệt
   useEffect(() => {
-    import("@meshsdk/wallet").then(({ BrowserWallet }) => {
+    import("@meshsdk/core").then(({ BrowserWallet }) => {
       setWallets(BrowserWallet.getInstalledWallets());
     });
   }, []);
+
+  // Kiểm tra Collateral UTxO
+  useEffect(() => {
+    if (!wallet || !connected) {
+      setHasCollateral(null);
+      return;
+    }
+    wallet
+      .getCollateral()
+      .then((cols) => {
+        setHasCollateral(cols && cols.length > 0);
+      })
+      .catch(() => setHasCollateral(false));
+  }, [wallet, connected]);
 
   const handleConnect = async (walletId: string) => {
     setConnecting(true);
@@ -113,9 +128,11 @@ export function WalletBar({ vndcBalance }: { vndcBalance: bigint }) {
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
                   {adaBalance.toFixed(2)} ADA
-                  <span style={{ color: "var(--color-accent)", marginLeft: 10 }}>
-                    {Number(vndcBalance).toFixed(0)} VNDC
-                  </span>
+                  {vndcBalance !== undefined && (
+                    <span style={{ color: "var(--color-accent)", marginLeft: 10 }}>
+                      {Number(vndcBalance).toFixed(0)} VNDC
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{
@@ -132,6 +149,39 @@ export function WalletBar({ vndcBalance }: { vndcBalance: bigint }) {
                   />
                   {truncate(address)}
                 </div>
+                {networkError && (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "var(--color-danger)",
+                      marginTop: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                      gap: 4,
+                      fontWeight: 600,
+                    }}
+                    title={networkError}
+                  >
+                    <span>⚠️</span> Sai mạng kết nối!
+                  </div>
+                )}
+                {hasCollateral === false && (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: "#f59e0b",
+                      marginTop: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                      gap: 4,
+                    }}
+                    title="Vui lòng nạp collateral (5 tADA) trong ví để thực hiện tương tác Plutus Script"
+                  >
+                    <span>⚠️</span> Thiếu Collateral
+                  </div>
+                )}
               </div>
               <button
                 className="btn-ghost"
@@ -215,3 +265,5 @@ export function WalletBar({ vndcBalance }: { vndcBalance: bigint }) {
     </header>
   );
 }
+
+export default WalletConnect;

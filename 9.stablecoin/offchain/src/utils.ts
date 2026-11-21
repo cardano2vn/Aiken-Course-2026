@@ -1,66 +1,10 @@
-import type { UTxO } from "@meshsdk/core";
-import { DEV_FEE_DIVISOR, COLLATERAL_MIN_PERCENT, MIN_UTXO_LOVELACE } from "./config";
-
-// ─── On-chain Datum Types ─────────────────────────────────────────────────────
-
-/** OracleDatum — lưu tỷ giá ADA/VND trên blockchain */
-export interface OracleDatum {
-  /** Giá ADA tính bằng VND. Ví dụ: 1 ADA = 11,500 VND → rate=11500 */
-  rate: bigint;
-}
-
-/** CollateralDatum — lưu trạng thái vị thế thế chấp */
-export interface CollateralDatum {
-  /** Địa chỉ chủ vị thế (bech32) */
-  owner: string;
-  /** Số lượng VNDC đã mint */
-  stablecoin_amount: bigint;
-}
-
-// ─── Parsed / Enriched Types (dùng trong Frontend) ────────────────────────────
-
-/** Thông tin Oracle đã parse từ UTxO */
-export interface OracleInfo {
-  utxo: UTxO;
-  /** Tỷ giá ADA/VND */
-  rate: bigint;
-  /** Giá ADA dạng số thực (VND) */
-  rateVnd: number;
-}
-
-/** Vị thế thế chấp đã parse và tính toán CR */
-export interface CollateralPosition {
-  utxo: UTxO;
-  ownerAddress: string;
-  /** ADA đã khóa làm collateral (lovelace) */
-  collateralLovelace: bigint;
-  /** Số VNDC đã mint */
-  stablecoinAmount: bigint;
-  /**
-   * Tỷ lệ thế chấp hiện tại (%).
-   * CR = collateral_value_vnd / stablecoin_amount * 100
-   * Ngưỡng an toàn: CR >= 150%
-   */
-  collateralRatioPct: number;
-  /** Đã dưới ngưỡng 150% → có thể bị thanh lý */
-  isLiquidatable: boolean;
-  /** Giá trị VNDC tính bằng ADA (lovelace) tại tỷ giá hiện tại */
-  stablecoinValueLovelace: bigint;
-  /** Phần thưởng thanh lý dự kiến (lovelace, tối đa 2% collateral) */
-  liquidationRewardLovelace: bigint;
-  /** ADA refund về owner khi bị thanh lý (lovelace) */
-  ownerRefundLovelace: bigint;
-}
-
-// ─── Redeemer Types (MeshJS mConStr) ─────────────────────────────────────────
-
-export type MintAction = "MintStablecoin" | "BurnStablecoin" | "Liquidate";
-export type SpendAction = "Redeem" | "LiquidatePosition";
-
-export interface ParsedUtxoRef {
-  txHash: string;
-  outputIndex: number;
-}
+export * from "./types";
+import {
+  DEV_FEE_DIVISOR,
+  MCR_PERCENT,
+  MIN_UTXO_LOVELACE,
+  LIQUIDATION_REWARD_PERCENT,
+} from "./config";
 
 // ─── Simple helpers ───────────────────────────────────────────────────────────
 
@@ -70,36 +14,112 @@ export function calcDevFee(collateralLovelace: bigint): bigint {
   return fee < MIN_UTXO_LOVELACE ? MIN_UTXO_LOVELACE : fee;
 }
 
-/** Tính số VNDC tối đa có thể mint từ số ADA collateral và tỷ giá hiện tại. */
-export function calcMaxMint(collateralLovelace: bigint, oracleRate: bigint): bigint {
-  // CR = (collateral * rate) / stablecoin >= 150%
-  // stablecoin <= (collateral * rate) / 150%
-  return (collateralLovelace * oracleRate) / (COLLATERAL_MIN_PERCENT * 10000n);
+/** Tính số VNDC tối đa có thể mint từ số ADA collateral và tỷ giá hiện tại (theo MCR = 150%). */
+export function calcMaxMintable(collateralLovelace: bigint, oracleRate: bigint): bigint {
+  if (oracleRate <= 0n || collateralLovelace <= 0n) return 0n;
+  // CR = (collateral * rate) / stablecoin >= MCR (150%)
+  // stablecoin <= (collateral * rate) / MCR
+  return (collateralLovelace * oracleRate) / (MCR_PERCENT * 10000n);
 }
 
-export function parseScriptUtxoRef(input: string, fieldName = "utxoRef"): ParsedUtxoRef {
-  const raw = input.trim();
-  const [txHash, indexStr, extra] = raw.split("#");
+/**
+ * Tính Collateral Ratio (%) tại tỷ giá Oracle hiện tại.
+ * CR = (collateral_lovelace * rate / 1_000_000) / stablecoin_amount * 100
+ * @returns Tỷ lệ thế chấp tính theo % (ví dụ 150 = 150%)
+ */
+export function calcCollateralRatio(
+  collateralLovelace: bigint,
+  stablecoinAmount: bigint,
+  oracleRate: bigint
+): number {
+  if (stablecoinAmount <= 0n) return 0;
+  if (oracleRate <= 0n || collateralLovelace <= 0n) return 0;
+  return Number((collateralLovelace * oracleRate) / (10_000n * stablecoinAmount));
+}
 
-  if (!txHash || !indexStr || extra !== undefined) {
-    throw new Error(`${fieldName} must have format "<64-hex-txHash>#<index>"`);
+/**
+ * Tính phân phối ADA khi thanh lý.
+ * Khớp hoàn toàn với logic trong validator on-chain stablecoin.ak
+ */
+export function calcLiquidationDistribution(
+  collateralLovelace: bigint,
+  stablecoinAmount: bigint,
+  oracleRate: bigint
+): {
+  debtLovelace: bigint;
+  reward: bigint;
+  ownerRefund: bigint;
+  devFee: bigint;
+} {
+  const nominalDevFee = calcDevFee(collateralLovelace);
+
+  if (oracleRate <= 0n) {
+    return { debtLovelace: 0n, reward: 0n, ownerRefund: 0n, devFee: nominalDevFee };
   }
 
-  if (!/^[0-9a-fA-F]{64}$/.test(txHash)) {
-    throw new Error(`${fieldName}.txHash must be 64-char hex`);
+  // debt_lovelace (nợ gốc theo Lovelace) = amount * 1_000_000 / rate
+  const debtLovelace = (stablecoinAmount * 1_000_000n) / oracleRate;
+
+  // Nếu vị thế âm vốn hoặc không có thặng dư:
+  if (debtLovelace >= collateralLovelace) {
+    return { debtLovelace: collateralLovelace, reward: 0n, ownerRefund: 0n, devFee: 0n };
   }
 
-  if (!/^\d+$/.test(indexStr)) {
-    throw new Error(`${fieldName}.index must be a non-negative integer`);
+  const extraValue = collateralLovelace - debtLovelace;
+
+  // Nếu số dư sau nợ không đủ trả phí dev (< devFee), miễn phí dev (0) để dồn trọn vẹn cho Liquidator
+  if (extraValue < nominalDevFee) {
+    return {
+      debtLovelace,
+      reward: extraValue,
+      ownerRefund: 0n,
+      devFee: 0n,
+    };
   }
 
-  const outputIndex = Number(indexStr);
-  if (!Number.isSafeInteger(outputIndex)) {
-    throw new Error(`${fieldName}.index is too large`);
+  const remainingAfterDev = extraValue - nominalDevFee;
+  const maxReward = (collateralLovelace * LIQUIDATION_REWARD_PERCENT) / 100n;
+  const reward = remainingAfterDev < maxReward ? remainingAfterDev : maxReward;
+
+  let ownerRefund = remainingAfterDev - reward;
+  if (ownerRefund < MIN_UTXO_LOVELACE) {
+    ownerRefund = 0n;
   }
 
-  return {
-    txHash: txHash.toLowerCase(),
-    outputIndex,
-  };
+  return { debtLovelace, reward, ownerRefund, devFee: nominalDevFee };
+}
+
+/**
+ * Chuyển chuỗi ADA (ví dụ "12.345678") sang Lovelace (bigint).
+ * Chấp nhận tối đa 6 chữ số thập phân, bảo toàn độ chính xác tuyệt đối không qua float/number.
+ * Trả về null nếu định dạng không hợp lệ.
+ */
+export function parseAdaToLovelace(val: string): bigint | null {
+  const trimmed = val.trim();
+  if (!trimmed || trimmed === ".") return null;
+  if (!/^\d+(\.\d{1,6})?$/.test(trimmed)) return null;
+
+  const [intPart, decPart = ""] = trimmed.split(".");
+  try {
+    const intBig = BigInt(intPart);
+    const decPadded = decPart.padEnd(6, "0");
+    const decBig = BigInt(decPadded);
+    return intBig * 1_000_000n + decBig;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse chuỗi VNDC sang BigInt (chỉ chấp nhận số nguyên dương).
+ */
+export function parseVndcAmount(val: string): bigint | null {
+  const trimmed = val.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
+  try {
+    const amount = BigInt(trimmed);
+    return amount > 0n ? amount : null;
+  } catch {
+    return null;
+  }
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlockfrostProvider } from "@meshsdk/core";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  NETWORK_ID,
   buildOracleConfig,
   deleteOracleTx,
   getOracleInfo,
@@ -11,90 +12,160 @@ import {
   ORACLE_NFT_TOKEN_NAME,
   ORACLE_NFT_POLICY_ID,
   ORACLE_REF_UTXO,
-  ORACLE_NFT_RAW_CBOR,
+  parseVndcAmount,
 } from "@cardano-stablecoin/offchain";
-import { applyParamsToScript, mOutputReference, resolveScriptHash, stringToHex } from "@meshsdk/core";
+import { stringToHex, deserializeAddress } from "@meshsdk/core";
 import type { OracleInfo, } from "@cardano-stablecoin/offchain";
 import { useWallet } from "@/context/WalletContext";
-import { WalletBar } from "@/components/WalletBar";
-import { TxStatusModal } from "@/components/TxStatusModal";
+import { WalletConnect } from "@/components/WalletConnect";
+import { TransactionStatus } from "@/components/TransactionStatus";
 import { useTxSubmit } from "@/hooks/useTxSubmit";
 
 const API_KEY = process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY ?? "";
-const ORACLE_NFT_TN = process.env.NEXT_PUBLIC_ORACLE_NFT_TOKEN_NAME ?? ORACLE_NFT_TOKEN_NAME;
 const OPERATOR_ADDRESS = process.env.NEXT_PUBLIC_OPERATOR_ADDRESS ?? "";
+const DEPLOYMENT_STORAGE_KEY = "stablecoin_latest_deployment";
 
-// ─── CopyAlert ────────────────────────────────────────────────────────────────
-function CopyAlert({
-  title,
-  items,
+export interface DeployResultData {
+  policyId: string;
+  oracleRefUtxo: string;
+  stablecoinRefUtxo: string;
+  txHash: string;
+}
+
+// ─── DeploymentResultCard ─────────────────────────────────────────────────────
+function DeploymentResultCard({
+  result,
   onDismiss,
 }: {
-  title: string;
-  items: { label: string; value: string; hint: string }[];
+  result: DeployResultData;
   onDismiss: () => void;
 }) {
-  const [copied, setCopied] = useState<string | null>(null);
-  const copy = (val: string, key: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  const jsonContent = JSON.stringify(
+    {
+      oracleNftPolicyId: result.policyId,
+      oracleRefUtxo: result.oracleRefUtxo,
+      stablecoinRefUtxo: result.stablecoinRefUtxo,
+    },
+    null,
+    2
+  );
+
+  const handleCopyAll = () => {
+    navigator.clipboard.writeText(jsonContent);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2500);
   };
+
+  const isMainnet = (NETWORK_ID as number) === 1;
+  const explorerUrl = isMainnet
+    ? `https://cardanoscan.io/transaction/${result.txHash}`
+    : `https://preprod.cardanoscan.io/transaction/${result.txHash}`;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -12 }}
+      initial={{ opacity: 0, y: -16 }}
       animate={{ opacity: 1, y: 0 }}
       className="glass"
       style={{
-        border: "1px solid var(--color-accent)",
-        borderRadius: 12,
-        padding: "20px 24px",
-        marginBottom: 24,
+        border: "1.5px solid var(--color-accent)",
+        borderRadius: 14,
+        padding: "24px 28px",
+        marginBottom: 32,
+        background: "rgba(16, 185, 129, 0.05)",
+        boxShadow: "0 8px 32px rgba(16, 185, 129, 0.12)",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontWeight: 700, color: "var(--color-accent)", fontSize: 14 }}>
-          ✅ {title}
-        </span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22 }}>🎉</span>
+            <span style={{ fontWeight: 800, color: "var(--color-accent)", fontSize: 17 }}>
+              Triển khai Hợp đồng thành công!
+            </span>
+          </div>
+          <p style={{ color: "var(--color-text)", fontSize: 13, marginTop: 6, lineHeight: 1.5 }}>
+            <strong>Copy </strong> nội dung dưới đây và dán đè vào file <strong><code>offchain/src/deployment.json</code></strong> để hoàn tất cấu hình hệ thống!
+          </p>
+        </div>
         <button
           onClick={onDismiss}
-          style={{ background: "none", border: "none", color: "var(--color-muted)", cursor: "pointer", fontSize: 18 }}
+          style={{
+            background: "var(--color-surface-2)",
+            border: "1px solid var(--color-border)",
+            color: "var(--color-muted)",
+            cursor: "pointer",
+            fontSize: 16,
+            borderRadius: 6,
+            padding: "4px 10px",
+          }}
+          title="Đóng thông báo"
         >
-          ×
+          ✕
         </button>
       </div>
 
-      {items.map((item) => (
-        <div key={item.label} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 4 }}>{item.label}</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <code
-              style={{
-                flex: 1,
-                background: "var(--color-surface-2)",
-                padding: "8px 12px",
-                borderRadius: 8,
-                fontSize: 12,
-                wordBreak: "break-all",
-                color: "var(--color-text)",
-              }}
-            >
-              {item.value}
-            </code>
-            <button
-              className="btn-accent"
-              style={{ padding: "6px 14px", fontSize: 12, flexShrink: 0 }}
-              onClick={() => copy(item.value, item.label)}
-            >
-              {copied === item.label ? "✓" : "Copy"}
-            </button>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--color-warning)", marginTop: 4 }}>
-            ⚠ {item.hint}
-          </div>
+      {/* Code Block hoàn chỉnh kèm nút Copy toàn bộ */}
+      <div style={{ position: "relative", marginBottom: 16 }}>
+        <pre
+          style={{
+            background: "var(--color-surface-1)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 10,
+            padding: "20px",
+            fontSize: 13,
+            lineHeight: 1.6,
+            fontFamily: "var(--font-mono, monospace)",
+            color: "var(--color-text)",
+            overflowX: "auto",
+            margin: 0,
+          }}
+        >
+          {jsonContent}
+        </pre>
+
+        <button
+          className="btn-accent"
+          onClick={handleCopyAll}
+          style={{
+            position: "absolute",
+            top: 12,
+            right: 12,
+            padding: "8px 18px",
+            fontSize: 12,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+          }}
+        >
+          {copiedAll ? "✓ Đã copy toàn bộ JSON!" : "📋 Copy toàn bộ deployment.json"}
+        </button>
+      </div>
+
+      {/* Thông tin phụ trợ: Tx Hash & Nút đóng */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, fontSize: 12 }}>
+        <div style={{ color: "var(--color-muted)" }}>
+          Xem giao dịch trên Explorer:{" "}
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--color-accent)", textDecoration: "underline", fontFamily: "monospace" }}
+          >
+            {result.txHash.slice(0, 16)}...{result.txHash.slice(-10)} ↗
+          </a>
         </div>
-      ))}
+        <button
+          onClick={onDismiss}
+          className="btn-ghost"
+          style={{ fontSize: 12, padding: "6px 14px" }}
+        >
+          ✓ Cấu hình xong (Đóng)
+        </button>
+      </div>
     </motion.div>
   );
 }
@@ -103,7 +174,7 @@ function CopyAlert({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function AdminPage() {
-  const { wallet, connected, address, allAddresses } = useWallet();
+  const { wallet, connected, address, stakeKeyHashes, networkError } = useWallet();
 
   // useMemo để giữ object reference ổn định → tránh useEffect chạy lại vô tận
   const provider = useMemo(
@@ -114,19 +185,41 @@ export default function AdminPage() {
   // ── Deploy form state ────────────────────────────────────────────────────────
   const [initialRate, setInitialRate] = useState("25000");
   const [showDeploy, setShowDeploy] = useState(false);
-  const [deployResult, setDeployResult] = useState<{
-    policyId: string;
-    oracleRefUtxo: string;
-    stablecoinRefUtxo: string;
-    txHash: string;
-  } | null>(null);
+  const [deployResult, setDeployResult] = useState<DeployResultData | null>(null);
+
+  // Tải kết quả deploy gần nhất từ localStorage khi trang load (chống mất khi F5 / đổi tab)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DEPLOYMENT_STORAGE_KEY);
+      if (saved) {
+        setDeployResult(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Không thể tải deployment result từ localStorage:", e);
+    }
+  }, []);
+
+  const saveDeploymentResult = useCallback((data: DeployResultData) => {
+    setDeployResult(data);
+    try {
+      localStorage.setItem(DEPLOYMENT_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn("Không thể lưu deployment result vào localStorage:", e);
+    }
+  }, []);
+
+  const clearDeployResult = useCallback(() => {
+    setDeployResult(null);
+    try {
+      localStorage.removeItem(DEPLOYMENT_STORAGE_KEY);
+    } catch { }
+  }, []);
 
   // ── Update Oracle state ──────────────────────────────────────────────────────
   const [oracle, setOracle] = useState<OracleInfo | null>(null);
   const [newRateVnd, setNewRateVnd] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [paramUtxoRef, setParamUtxoRef] = useState("");
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   // Tx status từ Hook chung
@@ -136,9 +229,27 @@ export default function AdminPage() {
     txHash,
     txError,
     setTxError,
-    submitAndConfirm,
+    buildAndSubmit,
+    restorePendingTx,
     closeModal,
-  } = useTxSubmit();
+  } = useTxSubmit("pending_oracle_admin_tx");
+
+  // Khôi phục pending transaction nếu người dùng F5 reload trang
+  useEffect(() => {
+    if (provider) {
+      restorePendingTx(provider, (hash, extra) => {
+        setRefreshKey((k) => k + 1);
+        if (extra && extra.oracleNftPolicyId) {
+          saveDeploymentResult({
+            policyId: extra.oracleNftPolicyId,
+            oracleRefUtxo: `${hash}#${extra.oracleRefOutputIndex}`,
+            stablecoinRefUtxo: `${hash}#${extra.stablecoinRefOutputIndex}`,
+            txHash: hash,
+          });
+        }
+      });
+    }
+  }, [provider, restorePendingTx, saveDeploymentResult]);
 
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -146,14 +257,18 @@ export default function AdminPage() {
   // ── Config hiện tại từ code (for Update Oracle) ──────────────────────────────
   // useMemo để giữ object reference ổn định → tránh useEffect chạy lại vô tận
   const oracleConfig = useMemo(() => {
-    if (!ORACLE_NFT_POLICY_ID || !ORACLE_REF_UTXO) return null;
-    return buildOracleConfig(ORACLE_NFT_POLICY_ID, ORACLE_NFT_TN, OPERATOR_ADDRESS || address);
-  }, [address]); // address là dependency duy nhất có thể thay đổi
+    if (!ORACLE_NFT_POLICY_ID) return null;
+    try {
+      return buildOracleConfig(ORACLE_NFT_POLICY_ID);
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Load Oracle state
   useEffect(() => {
     if (!provider || !oracleConfig) return;
-    getOracleInfo(provider, oracleConfig.ORACLE_ADDRESS, ORACLE_NFT_POLICY_ID, ORACLE_NFT_TN)
+    getOracleInfo(provider, oracleConfig.ORACLE_ADDRESS, ORACLE_NFT_POLICY_ID)
       .then(setOracle)
       .catch(console.error)
       .finally(() => setIsInitialLoading(false));
@@ -166,130 +281,187 @@ export default function AdminPage() {
     setTimeout(() => setIsRefreshing(false), 800);
   };
 
+  // ─── Smart Polling: Tự động cập nhật dữ liệu định kỳ mỗi 30 giây ──────────
+  const isBusyRef = useRef(false);
+  isBusyRef.current = loading || txStatus !== "idle";
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        // Chỉ poll khi tab đang hiển thị và không có giao dịch nào đang xử lý
+        if (typeof document !== "undefined" && document.visibilityState === "visible" && !isBusyRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+      }, 30_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        // Khi người dùng quay lại tab, refresh ngay 1 lần và reset chu kỳ
+        if (!isBusyRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+        startPolling();
+      } else {
+        // Khi người dùng ẩn tab, tạm dừng timer để tiết kiệm quota API Blockfrost
+        if (timer) clearInterval(timer);
+      }
+    };
+
+    startPolling();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+    };
+  }, []);
+
 
 
   // ── Validate Deploy form ─────────────────────────────────────────────────────
-  const initialRateNum = parseInt(initialRate, 10);
-  const initialRateValid = !isNaN(initialRateNum) && initialRateNum > 0;
+  const initialRateBigInt = parseVndcAmount(initialRate);
+  const initialRateValid = initialRateBigInt !== null && initialRateBigInt > 0n;
   const operatorAddr = OPERATOR_ADDRESS || address;
 
-  // Kiểm tra ví kết nối có phải Oracle Admin không
-  // Nếu OPERATOR_ADDRESS chưa cấu hình thì bất kỳ ví nào cũng được coi là admin
-  const isAdmin = !OPERATOR_ADDRESS || allAddresses.some(addr => addr.toLowerCase() === OPERATOR_ADDRESS.toLowerCase());
+  // Kiểm tra account đang active có phải Oracle Admin không (so khớp stake key hash hoặc change address)
+  const isAdmin = useMemo(() => {
+    if (!OPERATOR_ADDRESS) return true;
+    if (address && address === OPERATOR_ADDRESS) return true;
+    try {
+      const opStake = deserializeAddress(OPERATOR_ADDRESS).stakeCredentialHash;
+      return !!opStake && stakeKeyHashes.includes(opStake);
+    } catch {
+      return false;
+    }
+  }, [stakeKeyHashes, address]);
 
-  const canDeploy = connected && isAdmin && initialRateValid && !!operatorAddr && !loading;
+  const canDeploy = connected && !networkError && isAdmin && initialRateValid && !!operatorAddr && !loading;
 
   // ── Deploy All ───────────────────────────────────────────────────────────────
   const handleDeploy = useCallback(async () => {
-    if (!wallet || !provider || !operatorAddr) return;
+    if (!wallet || !provider || !operatorAddr || !initialRateBigInt) return;
     setLoading(true);
     try {
-      setTxStatus("building");
-      const result = await deployTx(
+      await buildAndSubmit(
         wallet,
         provider,
-        ORACLE_NFT_TN,
-        BigInt(initialRateNum),
-        operatorAddr
+        (txBuilder) =>
+          deployTx(
+            txBuilder,
+            wallet,
+            ORACLE_NFT_TOKEN_NAME,
+            initialRateBigInt,
+            operatorAddr
+          ),
+        (hash, result) => {
+          setRefreshKey((k) => k + 1);
+          saveDeploymentResult({
+            policyId: result.oracleNftPolicyId,
+            oracleRefUtxo: `${hash}#${result.oracleRefOutputIndex}`,
+            stablecoinRefUtxo: `${hash}#${result.stablecoinRefOutputIndex}`,
+            txHash: hash,
+          });
+        }
       );
-      setTxStatus("signing");
-      const hash = await submitAndConfirm(wallet, provider, result.signedTx, () => {
-        setRefreshKey((k) => k + 1);
-      });
-      setDeployResult({
-        policyId: result.oracleNftPolicyId,
-        oracleRefUtxo: `${hash}#${result.oracleRefOutputIndex}`,
-        stablecoinRefUtxo: `${hash}#${result.stablecoinRefOutputIndex}`,
-        txHash: hash,
-      });
     } catch (e: any) {
       console.error("Deploy error:", e);
+      setTxError(e?.message || "Lỗi khi triển khai hợp đồng");
+      setTxStatus("failed");
     } finally {
       setLoading(false);
     }
-  }, [wallet, provider, initialRateNum, operatorAddr, submitAndConfirm, setTxStatus]);
+  }, [wallet, provider, initialRateBigInt, operatorAddr, buildAndSubmit, saveDeploymentResult, setTxError, setTxStatus]);
 
   // ── Update Oracle ─────────────────────────────────────────────────────────────
-  const priceChange = oracle && newRateVnd
-    ? ((Number(newRateVnd) - Number(oracle.rate)) / Number(oracle.rate)) * 100
+  const newRateBigInt = parseVndcAmount(newRateVnd);
+  const newRateValid = newRateBigInt !== null && newRateBigInt > 0n;
+
+  const priceChange = oracle && newRateBigInt && oracle.rate > 0n
+    ? ((Number(newRateBigInt) - Number(oracle.rate)) / Number(oracle.rate)) * 100
     : 0;
 
   const handleUpdateOracle = useCallback(async () => {
-    if (!wallet || !provider || !newRateVnd || !oracleConfig || !oracle) return;
+    if (!wallet || !provider || !newRateBigInt || !oracleConfig || !oracle || !!networkError) return;
     setLoading(true);
     try {
-      setTxStatus("building");
-      const signedTx = await updateOracleTx(
+      await buildAndSubmit(
         wallet,
         provider,
-        oracleConfig.ORACLE_ADDRESS,
-        oracle,
-        BigInt(newRateVnd),
-        operatorAddr,
+        (txBuilder) =>
+          updateOracleTx(
+            txBuilder,
+            wallet,
+            oracleConfig.ORACLE_ADDRESS,
+            oracle,
+            newRateBigInt,
+            operatorAddr,
+          ),
+        () => {
+          setNewRateVnd("");
+          setRefreshKey((k) => k + 1);
+        }
       );
-      setTxStatus("signing");
-      await submitAndConfirm(wallet, provider, signedTx, () => {
-        setNewRateVnd("");
-        setRefreshKey((k) => k + 1);
-      });
     } catch (e: any) {
       console.error("Update Oracle error:", e);
+      setTxError(e?.message || "Lỗi khi cập nhật Oracle");
+      setTxStatus("failed");
     } finally {
       setLoading(false);
     }
-  }, [wallet, provider, newRateVnd, oracleConfig, oracle, operatorAddr, submitAndConfirm, setTxStatus]);
+  }, [wallet, provider, newRateBigInt, oracleConfig, oracle, operatorAddr, buildAndSubmit, setTxError, setTxStatus]);
 
   // ── Delete Oracle ─────────────────────────────────────────────────────────────
   const handleDeleteOracle = useCallback(async () => {
-    if (!wallet || !provider || !oracle || !paramUtxoRef) return;
-
-    const [txHash, indexStr] = paramUtxoRef.trim().split("#");
-    if (!txHash || !indexStr) {
-      alert("Định dạng Param UTxO không hợp lệ. Ví dụ: txHash#index");
-      return;
-    }
+    if (!wallet || !provider || !oracle || !!networkError) return;
 
     setLoading(true);
     setShowDeleteConfirm(false); // Ẩn modal xác nhận ngay lập tức
     try {
-      setTxStatus("building");
+      const oracleNftTokenNameHex = stringToHex(ORACLE_NFT_TOKEN_NAME);
+      const policyId = ORACLE_NFT_POLICY_ID;
 
-      // 1. Reconstruct Oracle NFT CBOR từ paramUtxoRef
-      const oracleNftCbor = applyParamsToScript(ORACLE_NFT_RAW_CBOR, [
-        mOutputReference(txHash, parseInt(indexStr, 10)),
-      ]);
+      if (!policyId) {
+        throw new Error("Không tìm thấy ORACLE_NFT_POLICY_ID trong cấu hình deployment.json");
+      }
 
-      // 2. Tính Policy ID và Token Name Hex
-      const oracleNftPolicyId = resolveScriptHash(oracleNftCbor, "V3");
-      const oracleNftTokenNameHex = stringToHex(ORACLE_NFT_TN);
-
-      // 3. Gọi hàm deleteOracleTx
-      const signedTx = await deleteOracleTx(
+      // Gọi hàm deleteOracleTx qua buildAndSubmit (tận dụng CIP-33 Reference Script trên On-chain)
+      await buildAndSubmit(
         wallet,
         provider,
-        oracle,
-        operatorAddr,
-        oracleNftPolicyId,
-        oracleNftTokenNameHex,
-        oracleNftCbor
+        (txBuilder) =>
+          deleteOracleTx(
+            txBuilder,
+            wallet,
+            oracle,
+            operatorAddr,
+            policyId,
+            oracleNftTokenNameHex
+          ),
+        () => {
+          setRefreshKey((k) => k + 1);
+        }
       );
-
-      setTxStatus("signing");
-      await submitAndConfirm(wallet, provider, signedTx, () => {
-        setParamUtxoRef("");
-        setRefreshKey((k) => k + 1);
-      });
     } catch (e: any) {
       console.error("Delete Oracle error:", e);
+      setTxError(e?.message || "Lỗi khi xoá Oracle");
+      setTxStatus("failed");
     } finally {
       setLoading(false);
     }
-  }, [wallet, provider, oracle, paramUtxoRef, operatorAddr, submitAndConfirm, setTxStatus]);
+  }, [wallet, provider, oracle, operatorAddr, networkError, buildAndSubmit, setTxError, setTxStatus]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <>
-      <WalletBar vndcBalance={0n} />
+      <WalletConnect />
       <main style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px" }}>
 
         {/* Header */}
@@ -301,6 +473,14 @@ export default function AdminPage() {
             Triển khai và quản lý hệ thống VNDC Stablecoin
           </p>
         </div>
+
+        {/* Deploy result Card — luôn hiển thị ở đầu trang nếu có kết quả, không phụ thuộc vào accordion hay ví */}
+        {deployResult && (
+          <DeploymentResultCard
+            result={deployResult}
+            onDismiss={clearDeployResult}
+          />
+        )}
 
         {/* Wallet prompt */}
         {!connected ? (
@@ -423,36 +603,11 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Deploy result CopyAlert */}
-                  {deployResult && (
-                    <CopyAlert
-                      title="Deploy thành công! Copy các giá trị vào config.ts"
-                      items={[
-                        {
-                          label: "ORACLE_NFT_POLICY_ID",
-                          value: deployResult.policyId,
-                          hint: 'export const ORACLE_NFT_POLICY_ID = "..."',
-                        },
-                        {
-                          label: "ORACLE_REF_UTXO",
-                          value: deployResult.oracleRefUtxo,
-                          hint: 'export const ORACLE_REF_UTXO = "..."',
-                        },
-                        {
-                          label: "STABLECOIN_REF_UTXO",
-                          value: deployResult.stablecoinRefUtxo,
-                          hint: 'export const STABLECOIN_REF_UTXO = "..."',
-                        },
-                      ]}
-                      onDismiss={() => setDeployResult(null)}
-                    />
-                  )}
-
                   {/* Form */}
                   <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
                     <div style={{ flex: 1 }}>
                       <label style={{ display: "block", fontSize: 12, color: "var(--color-muted)", marginBottom: 6 }}>
-                        Tỷ giá ban đầu (ADA/VNDC)
+                        Tỷ giá ban đầu (ADA/VND)
                       </label>
                       <input
                         type="number"
@@ -469,7 +624,7 @@ export default function AdminPage() {
                       />
                       {initialRateValid && (
                         <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
-                          1 ADA = {Number(initialRate).toLocaleString()} VNDC
+                          1 ADA = {Number(initialRate).toLocaleString()} VND
                         </div>
                       )}
                     </div>
@@ -490,7 +645,9 @@ export default function AdminPage() {
                   >
                     {loading && (txStatus === "building" || txStatus === "signing")
                       ? "⏳ Đang xử lý..."
-                      : "🚀 Deploy Stablecoin"}
+                      : networkError
+                        ? "⚠ Sai mạng Cardano"
+                        : "🚀 Deploy Stablecoin"}
                   </button>
                 </motion.div>
               )}
@@ -509,7 +666,7 @@ export default function AdminPage() {
               🔮 Update Oracle
             </h2>
             <p style={{ color: "var(--color-muted)", fontSize: 13, marginBottom: 20 }}>
-              Cập nhật tỷ giá ADA/VNDC cho Oracle đang chạy
+              Cập nhật tỷ giá ADA/VND cho Oracle đang chạy
             </p>
 
             {!oracleConfig ? (
@@ -522,9 +679,8 @@ export default function AdminPage() {
                   color: "var(--color-muted)",
                 }}
               >
-                ℹ️ Chưa có Oracle được cấu hình. Hãy điền{" "}
-                <code>ORACLE_NFT_POLICY_ID</code> và <code>ORACLE_REF_UTXO</code> vào{" "}
-                <code>offchain/src/config.ts</code> sau khi Deploy.
+                ℹ️ Chưa có Oracle được cấu hình. Hãy lưu các thông số vào{" "}
+                <code>offchain/src/deployment.json</code> sau khi Deploy.
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
@@ -536,7 +692,7 @@ export default function AdminPage() {
                       <div style={{ background: "var(--color-surface-2)", padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-border)" }}>
                         <div style={{ fontSize: 11, color: "var(--color-muted)" }}>Tỷ giá hiện tại</div>
                         <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-accent)" }}>
-                          {Number(oracle.rate).toLocaleString()} VNDC/ADA
+                          {Number(oracle.rate).toLocaleString()} VND/ADA
                         </div>
                       </div>
                       <div style={{ background: "var(--color-surface-2)", padding: "10px 16px", borderRadius: 10, border: "1px solid var(--color-border)" }}>
@@ -612,7 +768,7 @@ export default function AdminPage() {
                 {/* Update form */}
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text)", marginBottom: 12 }}>
-                    Nhập tỷ giá mới (VNDC/ADA)
+                    Nhập tỷ giá mới (VND/ADA)
                   </div>
                   <input
                     type="number"
@@ -636,11 +792,15 @@ export default function AdminPage() {
                   )}
                   <button
                     className="btn-accent"
-                    style={{ width: "100%", opacity: connected && newRateVnd && !loading ? 1 : 0.5 }}
-                    disabled={!connected || !newRateVnd || loading || !oracle}
+                    style={{ width: "100%", opacity: connected && !networkError && newRateValid && !loading ? 1 : 0.5 }}
+                    disabled={!connected || !!networkError || !newRateValid || loading || !oracle}
                     onClick={handleUpdateOracle}
                   >
-                    {loading && txStatus === "building" ? "⏳ Đang xử lý..." : "Cập nhật tỷ giá"}
+                    {loading && txStatus === "building"
+                      ? "⏳ Đang xử lý..."
+                      : networkError
+                        ? "⚠ Sai mạng"
+                        : "Cập nhật tỷ giá"}
                   </button>
                 </div>
               </div>
@@ -650,7 +810,7 @@ export default function AdminPage() {
         </>)}
       </main>
 
-      <TxStatusModal
+      <TransactionStatus
         status={txStatus}
         txHash={txHash}
         error={txError}
@@ -682,25 +842,11 @@ export default function AdminPage() {
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12, color: "var(--color-danger)" }}>
                 🗑️ Xác nhận xóa Oracle?
               </h2>
-              <p style={{ fontSize: 14, color: "var(--color-muted)", marginBottom: 20, lineHeight: 1.6 }}>
-                Hành động này sẽ <strong>đóng Oracle UTxO</strong> và <strong>đốt Oracle NFT</strong>.
+              <p style={{ fontSize: 14, color: "var(--color-muted)", marginBottom: 24, lineHeight: 1.6 }}>
+                Hành động này sẽ <strong>đóng Oracle UTxO</strong> và <strong>đốt Oracle NFT</strong> vĩnh viễn trên Cardano. <strong>Hệ thống Stablecoin VNDC sẽ ngừng hoạt động</strong>.
                 <br /><br />
-                <strong style={{ color: "var(--color-warning)" }}>Lưu ý:</strong> Để đốt NFT, bạn phải nhập chính xác <strong>Param UTxO</strong> (txHash#index) đã dùng để tạo Oracle NFT này lúc ban đầu.
+                Bạn có chắc chắn muốn thực hiện không?
               </p>
-
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: "block", fontSize: 12, color: "var(--color-muted)", marginBottom: 8 }}>
-                  Param UTxO (txHash#index)
-                </label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="Ví dụ: a1b2c3...#0"
-                  value={paramUtxoRef}
-                  onChange={e => setParamUtxoRef(e.target.value)}
-                  style={{ border: "1px solid var(--color-surface-2)" }}
-                />
-              </div>
 
               <div style={{ display: "flex", gap: 12 }}>
                 <button
@@ -713,11 +859,11 @@ export default function AdminPage() {
                 </button>
                 <button
                   className="btn-danger"
-                  style={{ flex: 1, opacity: paramUtxoRef && !loading ? 1 : 0.5 }}
+                  style={{ flex: 1, opacity: !loading && !networkError ? 1 : 0.5 }}
                   onClick={handleDeleteOracle}
-                  disabled={!paramUtxoRef || loading}
+                  disabled={loading || !!networkError}
                 >
-                  {loading ? "Đang xử lý..." : "Xác nhận Xóa"}
+                  {loading ? "Đang xử lý..." : networkError ? "⚠ Sai mạng" : "Xác nhận Xóa"}
                 </button>
               </div>
             </motion.div>
