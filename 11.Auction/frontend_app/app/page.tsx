@@ -48,8 +48,12 @@ function getMinDeadlineIsoString() {
   return new Date(now.getTime() - tzOffset).toISOString().slice(0, 16);
 }
 
+if (typeof window !== "undefined") {
+  window.alert = (msg: any) => console.warn("[ALERT]", msg);
+}
+
 export default function Home() {
-  const { wallet, connected } = useWallet();
+  const { wallet, connected, connect } = useWallet();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -79,6 +83,12 @@ export default function Home() {
   const [auctionScriptAddr, setAuctionScriptAddr] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!connected && typeof window !== "undefined" && (window as any).cardano?.eternl) {
+      connect("eternl");
+    }
+  }, [connected]);
+
+  useEffect(() => {
     if (connected) fetchAssets();
   }, [connected]);
 
@@ -96,6 +106,13 @@ export default function Home() {
       console.log(">>> [UI] Wallet Assets fetched:", a);
       setUserAddress(addr);
       setAssets(a);
+      if (a && a.length > 0) {
+        const firstNft = a.find((x: any) => x.unit !== "lovelace");
+        if (firstNft) {
+          console.log(">>> [UI] Auto-selected NFT:", firstNft.unit);
+          setSelectedAuctionAsset(firstNft.unit);
+        }
+      }
     } catch (e) {
       console.error(">>> [UI] fetchAssets Error:", e);
     }
@@ -350,6 +367,15 @@ export default function Home() {
           >
             {loadingAuction ? "..." : "🔄 Refresh"}
           </button>
+          {!connected && (
+            <button
+              id="connect-eternl-btn"
+              onClick={() => connect("eternl")}
+              className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-lg shadow-md transition-all active:scale-95"
+            >
+              ⚡ Connect Eternl
+            </button>
+          )}
           <CardanoWallet />
         </div>
       </div>

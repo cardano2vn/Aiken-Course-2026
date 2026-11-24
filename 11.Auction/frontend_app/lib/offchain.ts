@@ -601,7 +601,7 @@ export class AuctionContract extends TxInitiator {
       )
       .txInScript(this.scriptCbor)
       .txInInlineDatumPresent()
-      .txInRedeemerValue(mkBidRedeemer(walletAddress, amountInLovelace), "JSON", { mem: 400000, steps: 120000000 })
+      .txInRedeemerValue(mkBidRedeemer(walletAddress, amountInLovelace), "JSON", { mem: 800000, steps: 250000000 })
       .txOut(this.scriptAddress, scriptAmount)
       .txOutInlineDatumValue(outputDatum, "JSON");
 
@@ -613,7 +613,8 @@ export class AuctionContract extends TxInitiator {
       ]);
     } else {
       // LƯỢT BID ĐẦU TIÊN: Hoàn trả lại tiền cọc min-ADA ban đầu cho Seller!
-      const initialLovelace = targetUtxo.output.amount.find((a) => a.unit === "lovelace")?.quantity || "2000000";
+      const lovelaceEntry = targetUtxo.output.amount.find((a) => a.unit === "lovelace" || a.unit === "");
+      const initialLovelace = lovelaceEntry ? lovelaceEntry.quantity.toString() : "2000000";
       console.log(`  [bid] First bid placed! Refunding initial seller deposit: ${sellerAddress} (${Number(initialLovelace) / 1e6} ADA)`);
       builder.txOut(sellerAddress, [
         { unit: "lovelace", quantity: initialLovelace },
