@@ -147,7 +147,7 @@ export class MarketplaceContract extends TxInitiator {
     <pre><code class="language-typescript">updatePrice = async (marketplaceUtxo: UTxO, newPrice: number) => {
   const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
   const { pubKeyHash: sellerPkh } = deserializeAddress(walletAddress);
-  const inlineDatum = deserializeDatum<MarketplaceDatum>(marketplaceUtxo.output.plutusData!);
+  const inlineDatum = deserializeDatum&lt;MarketplaceDatum&gt;(marketplaceUtxo.output.plutusData!);
 
   const updatedDatum = safePlutusJson(
     conStr0([
@@ -202,7 +202,7 @@ export class MarketplaceContract extends TxInitiator {
     <h4>📝 Code Snippet:</h4>
     <pre><code class="language-typescript">buyAsset = async (marketplaceUtxo: UTxO) => {
   const { utxos, walletAddress, collateral } = await this.getWalletInfoForTx();
-  const inlineDatum = deserializeDatum<MarketplaceDatum>(marketplaceUtxo.output.plutusData!);
+  const inlineDatum = deserializeDatum&lt;MarketplaceDatum&gt;(marketplaceUtxo.output.plutusData!);
 
   // Tính toán số tiền phân tách
   const sellerAmount = price - royaltyAmount - platformFeeAmount;
@@ -215,7 +215,7 @@ export class MarketplaceContract extends TxInitiator {
     .txInScript(this.scriptCbor)
     .txOut(sellerAddress, [{ unit: "lovelace", quantity: sellerAmount.toString() }])
     .txOut(this.ownerAddress, [{ unit: "lovelace", quantity: platformFeeAmount.toString() }])
-    // (Nếu có phí bản quyền > 0): .txOut(creatorAddress, [{ unit: "lovelace", quantity: royaltyAmount.toString() }])
+    // (Nếu có phí bản quyền &gt; 0): .txOut(creatorAddress, [{ unit: "lovelace", quantity: royaltyAmount.toString() }])
     .changeAddress(walletAddress)
     .txInCollateral(collateral.input.txHash, collateral.input.outputIndex, collateral.output.amount, collateral.output.address)
     .selectUtxosFrom(utxos)
