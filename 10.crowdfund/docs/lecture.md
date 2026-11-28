@@ -1,5 +1,11 @@
 # Module: Crowdfund
 
+## Bài giảng chi tiết
+
+- [Bài 1: Kiến trúc Crowdfund và các pattern cốt lõi](./bai_giang_1.md) — [Video 10.1](https://www.youtube.com/watch?v=EGWiRgjYDo0)
+- [Bài 2: On-chain code và cơ chế xử lý chiến dịch](./bai_giang_2.md) — [Video 10.2](https://www.youtube.com/watch?v=w5ZReX7uyY8)
+- [Bài 3: Off-chain, frontend và vòng đời dApp](./bai_giang_3.md) — [Video 10.3](https://www.youtube.com/watch?v=mwDCVm0FRd4)
+
 ## Bài 1: Campaign như một quỹ có điều kiện
 
 ```mermaid
